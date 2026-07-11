@@ -1,0 +1,31 @@
+{
+  "name": "@openim-platform/web",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "postinstall": "node scripts/patch-openim-worker.mjs && node scripts/copy-openim-assets.mjs",
+    "dev": "vite --host 127.0.0.1 --port 3000",
+    "build": "tsc -b && vite build",
+    "typecheck": "tsc -b --pretty false",
+    "test": "vitest run",
+    "test:e2e:node2": "playwright test --config playwright.node2.config.ts"
+  },
+  "dependencies": {
+    "@openim/wasm-client-sdk": "3.8.3-patch.13",
+    "lucide-react": "1.24.0",
+    "oidc-client-ts": "3.5.0",
+    "react": "19.2.7",
+    "react-dom": "19.2.7"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.61.1",
+    "@types/node": "26.1.1",
+    "@types/react": "19.2.14",
+    "@types/react-dom": "19.2.3",
+    "@vitejs/plugin-react": "6.0.1",
+    "typescript": "7.0.2",
+    "vite": "8.1.4",
+    "vitest": "4.1.10"
+  }
+}

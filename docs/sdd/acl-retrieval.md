@@ -86,3 +86,4 @@ Record Run ID, tenant, member, purpose, candidate count, authorized result count
 
 - Group/department grants and relation inheritance require a separate authorization slice.
 - Chinese production retrieval and vector/hybrid indexing require measured backend selection; lexical PostgreSQL is the single first implementation, not a fallback mode.
+- The admitted vector-retrieval slice should reuse the locally deployed embedding model only after its endpoint, model revision, vector dimension, normalization, batching, and latency are recorded as an explicit index contract. Model unavailability must fail indexing/query work explicitly rather than silently switching embedding models or lexical semantics.

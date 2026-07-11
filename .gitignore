@@ -40,7 +40,9 @@ coverage.*
 # Build outputs
 /bin/
 /dist/
+**/dist/
 **/build/
+*.tsbuildinfo
 *.exe
 *.exe~
 *.dll
@@ -56,6 +58,10 @@ coverage.*
 **/.mypy_cache/
 **/.ruff_cache/
 **/node_modules/
+**/test-results/
+platform/apps/web/public/openIM.wasm
+platform/apps/web/public/sql-wasm.wasm
+platform/apps/web/public/wasm_exec.js
 
 # OS files
 .DS_Store
