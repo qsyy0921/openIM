@@ -14,7 +14,7 @@ Provide a browser single-chat vertical slice from enterprise OIDC Authorization 
 
 ## Responsibilities and non-goals
 
-The unit owns interactive sign-in/out, use of an explicitly configured enrolled device identity, in-memory OpenIM session material, WASM SDK initialization, connection state, single-conversation presentation, bounded history loading, text composition, optimistic send state, real-time receive handling, active-conversation read state, and explicit client errors. It does not own enterprise credentials, OpenIM Admin Tokens, device enrollment, identity provisioning rules, server authorization, group features, or an alternate IM transport.
+The unit owns interactive sign-in/out, the extensible workspace shell, use of an explicitly configured enrolled device identity, in-memory OpenIM session material, WASM SDK initialization, connection state, single-conversation presentation, bounded history loading, text composition, optimistic send state, real-time receive handling, active-conversation read state, and explicit client errors. It does not own enterprise credentials, OpenIM Admin Tokens, device enrollment, identity provisioning rules, server authorization, group features, or an alternate IM transport.
 
 ## Contracts and dependencies
 
@@ -34,6 +34,8 @@ The unit owns interactive sign-in/out, use of an explicitly configured enrolled 
 - Conversation and message identity use OpenIM `conversationID` and `clientMsgID`; event replay cannot duplicate rendered messages.
 - Only `SessionType.Single` and text messages enter this UI. Unsupported content is not synthesized into text.
 - A send is shown as `sending` before the SDK call, `succeeded` only from the returned authoritative message, and `failed` on an explicit SDK error.
+- Global modules are registered through `WorkspaceModule` descriptors and rendered by `WorkspaceShell`; feature modules own their inner list/detail workflow and do not duplicate global navigation or account controls.
+- Desktop uses global-module, conversation-list, and work-panel columns. At mobile width, the current module keeps one work panel visible and provides an explicit list/detail transition.
 
 ## Runtime flow
 
@@ -79,6 +81,8 @@ The UI exposes coarse connection phase and endpoint readiness. Platform and Open
 - `platform/apps/web/src/platform-api.ts`
 - `platform/apps/web/src/openim.ts`
 - `platform/apps/web/src/App.tsx`
+- `platform/apps/web/src/WorkspaceShell.tsx`
+- `platform/apps/web/src/ChatWorkspace.tsx`
 - `platform/apps/web/vite.config.ts`
 - `platform/apps/web/scripts/patch-openim-worker.mjs`
 - `platform/apps/web/src/config.test.ts`
@@ -91,7 +95,7 @@ The UI exposes coarse connection phase and endpoint readiness. Platform and Open
 - `npm run test:e2e:node2` passed against the real `.2` runtime: system Chrome completed Keycloak Authorization Code with PKCE, exchanged the ID Token at `/v1/im/session`, initialized and synchronized the official WASM SDK, and connected to node2 OpenIM.
 - The E2E injected real `imAdmin -> Web` messages through node2, observed unread increment and read clearing, sent `Web -> imAdmin` text to the server, received an active-conversation message in real time, recovered from browser offline/online, and found all three messages after reload.
 - The same test observed zero HTTP failures and zero console errors, found no localStorage entries or token-shaped visible text, and confirmed the callback authorization code was removed from the URL.
-- Desktop `1280x720` and mobile `390x844` screenshots passed horizontal-overflow checks and visual inspection without overlapping controls or text.
+- Desktop `1280x720` and mobile `390x844` chat/list screenshots passed horizontal-overflow checks and visual inspection without overlapping controls or text; the mobile E2E exercised explicit conversation-list and chat-detail navigation.
 
 ## Open questions
 

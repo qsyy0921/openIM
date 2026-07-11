@@ -1,4 +1,4 @@
-import { ChevronUp, CircleAlert, LoaderCircle, MessageSquarePlus, Send, Wifi, WifiOff } from "lucide-react";
+import { ArrowLeft, ChevronUp, CircleAlert, LoaderCircle, MessageSquarePlus, Send, Wifi, WifiOff } from "lucide-react";
 import { MessageStatus, type ConversationItem, type MessageItem } from "@openim/wasm-client-sdk";
 import { useEffect, useRef, useState } from "react";
 
@@ -37,6 +37,7 @@ export function ChatWorkspace({ controller, state, selfUserID, connection }: Cha
   const [targetUserID, setTargetUserID] = useState("");
   const [draft, setDraft] = useState("");
   const [working, setWorking] = useState(false);
+  const [mobileDetail, setMobileDetail] = useState(false);
   const messageEnd = useRef<HTMLDivElement | null>(null);
   const active = state.conversations.find((item) => item.conversationID === state.activeConversationID) ?? null;
 
@@ -50,10 +51,20 @@ export function ChatWorkspace({ controller, state, selfUserID, connection }: Cha
     try {
       await controller.openDirect(targetUserID);
       setTargetUserID("");
+      setMobileDetail(true);
     } catch {
       // The controller publishes the explicit error in ChatState.
     } finally {
       setWorking(false);
+    }
+  };
+
+  const selectConversation = async (conversationID: string) => {
+    try {
+      await controller.select(conversationID);
+      setMobileDetail(true);
+    } catch {
+      // The controller publishes the explicit error in ChatState.
     }
   };
 
@@ -72,12 +83,12 @@ export function ChatWorkspace({ controller, state, selfUserID, connection }: Cha
   };
 
   return (
-    <div className="chat-layout">
+    <div className={`chat-layout ${mobileDetail && active ? "mobile-detail" : ""}`}>
       <aside className="conversation-pane" aria-label="单聊会话">
         <header className="conversation-header">
           <div>
-            <p className="eyebrow">MESSAGES</p>
-            <h2>单聊</h2>
+            <h1>消息</h1>
+            <p>最近会话</p>
           </div>
           <span className="unread-total" data-testid="total-unread" aria-label={`总未读 ${state.totalUnread}`}>{state.totalUnread}</span>
         </header>
@@ -101,7 +112,7 @@ export function ChatWorkspace({ controller, state, selfUserID, connection }: Cha
               key={conversation.conversationID}
               data-testid={`conversation-${conversation.userID}`}
               className={`conversation-row ${conversation.conversationID === state.activeConversationID ? "selected" : ""}`}
-              onClick={() => void controller.select(conversation.conversationID).catch(() => undefined)}
+              onClick={() => void selectConversation(conversation.conversationID)}
             >
               <span className="avatar">{(conversation.showName || conversation.userID).slice(0, 1).toUpperCase()}</span>
               <span className="conversation-copy">
@@ -117,7 +128,11 @@ export function ChatWorkspace({ controller, state, selfUserID, connection }: Cha
 
       <section className="message-pane" aria-label="单聊消息">
         <header className="message-header">
-          <div>
+          <button className="mobile-back" aria-label="返回会话列表" title="返回" onClick={() => setMobileDetail(false)}>
+            <ArrowLeft size={20} />
+          </button>
+          <span className="avatar active-avatar">{active ? (active.showName || active.userID).slice(0, 1).toUpperCase() : "?"}</span>
+          <div className="active-conversation">
             <h2>{active?.showName || active?.userID || "选择会话"}</h2>
             <span data-testid={active ? "active-peer-id" : "self-user-id"}>{active ? active.userID : selfUserID}</span>
           </div>

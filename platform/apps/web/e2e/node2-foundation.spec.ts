@@ -116,6 +116,12 @@ test("real node2 single chat survives unread, send, receive, and reconnect", asy
   }));
   expect(mobileWidth.document).toBeLessThanOrEqual(mobileWidth.viewport);
   await page.screenshot({ path: "test-results/node2/mobile-single-chat.png", fullPage: true });
+  await page.getByRole("button", { name: "返回会话列表" }).click();
+  await expect(page.getByRole("heading", { name: "消息" })).toBeVisible();
+  await expect(page.getByTestId("conversation-imAdmin")).toBeVisible();
+  await page.screenshot({ path: "test-results/node2/mobile-conversation-list.png", fullPage: true });
+  await page.getByTestId("conversation-imAdmin").click();
+  await expect(messageList.getByText(realtimeText, { exact: true })).toBeVisible();
 
   await page.getByRole("button", { name: "退出" }).click();
   await expect(page.getByRole("heading", { name: "企业协作台" })).toBeVisible({ timeout: 30_000 });
