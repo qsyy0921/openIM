@@ -1,4 +1,4 @@
-import { AlertTriangle, LogIn, LogOut, MessageSquare, RefreshCw, Wifi } from "lucide-react";
+import { AlertTriangle, LogIn, LogOut, MessageCircle, MessageSquare, RefreshCw, Wifi } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { User, UserManager } from "oidc-client-ts";
 
@@ -7,6 +7,7 @@ import { ChatWorkspace } from "./ChatWorkspace";
 import { createOpenIMChatPort, initialChatState, SingleChatController, type ChatState } from "./chat";
 import { connectOpenIM, disconnectOpenIM, type ConnectionUpdate } from "./openim";
 import { createIMSession, type IMSession } from "./platform-api";
+import { WorkspaceShell, type WorkspaceModule } from "./WorkspaceShell";
 
 type Phase = "booting" | "signed-out" | "exchanging" | "connecting" | "connected" | "error";
 
@@ -14,6 +15,10 @@ type AppProps = {
   config: WebConfig;
   userManager: UserManager;
 };
+
+const workspaceModules: WorkspaceModule[] = [
+  { id: "messages", label: "消息", icon: MessageCircle }
+];
 
 function messageOf(error: unknown): string {
   return error instanceof Error ? error.message : "unexpected client failure";
@@ -190,23 +195,9 @@ export function App({ config, userManager }: AppProps) {
 
   if (phase === "connected" && session && chatControllerRef.current) {
     return (
-      <div className="workspace-shell chat-shell">
-        <aside className="rail">
-          <div className="brand-mark small"><MessageSquare size={19} /></div>
-          <button className="rail-button active" title="消息" aria-label="消息"><MessageSquare size={19} /></button>
-        </aside>
-        <main className="workspace-main chat-main">
-          <header className="workspace-header compact">
-            <div>
-              <p className="eyebrow">OPENIM WORKSPACE</p>
-              <h1>消息</h1>
-              <span className="workspace-identity">{displayName}</span>
-            </div>
-            <button className="icon-text-button" onClick={() => void logout()}><LogOut size={17} />退出</button>
-          </header>
+      <WorkspaceShell activeModule="messages" modules={workspaceModules} displayName={displayName} onLogout={() => void logout()}>
           <ChatWorkspace controller={chatControllerRef.current} state={chatState} selfUserID={session.userID} connection={connection} />
-        </main>
-      </div>
+      </WorkspaceShell>
     );
   }
 
