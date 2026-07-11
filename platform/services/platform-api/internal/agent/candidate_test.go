@@ -1,0 +1,45 @@
+package agent
+
+import (
+	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"testing"
+	"time"
+)
+
+func TestCandidateClientUsesStructuredContract(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/candidates" {
+			t.Fatalf("path = %q", r.URL.Path)
+		}
+		var body struct {
+			RunID    string     `json:"run_id"`
+			Content  string     `json:"content"`
+			Evidence []Evidence `json:"evidence"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		if body.RunID != "run-1" || body.Content != "question" || len(body.Evidence) != 1 {
+			t.Fatalf("body = %#v", body)
+		}
+		_ = json.NewEncoder(w).Encode(Candidate{Text: "answer [C1]", Model: "model", ProviderResponseID: "resp-1", CitationIDs: []string{"C1"}})
+	}))
+	defer server.Close()
+	client := NewCandidateClient(server.URL, time.Second)
+	candidate, err := client.Generate(context.Background(), Run{ID: "run-1", TenantID: "tenant", ConversationID: "si_a_b", SenderID: "a", Prompt: "question"}, []Evidence{{CitationID: "C1"}})
+	if err != nil || candidate.Text != "answer [C1]" {
+		t.Fatalf("Generate() = %#v, %v", candidate, err)
+	}
+}
+
+func TestCandidateClientDoesNotFallbackOnFailure(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusServiceUnavailable) }))
+	defer server.Close()
+	client := NewCandidateClient(server.URL, time.Second)
+	if _, err := client.Generate(context.Background(), Run{ID: "run-1"}, []Evidence{{CitationID: "C1"}}); err == nil {
+		t.Fatal("provider failure returned a candidate")
+	}
+}

@@ -1,0 +1,41 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
+import os
+from urllib.parse import urlparse
+
+
+@dataclass(frozen=True)
+class Settings:
+    deepseek_base_url: str
+    deepseek_api_key: str
+    deepseek_model: str
+    deepseek_timeout_seconds: float
+    deepseek_max_tokens: int
+
+    @classmethod
+    def from_env(cls) -> "Settings":
+        base_url = _required("INTELLIGENCE_DEEPSEEK_BASE_URL").rstrip("/")
+        parsed = urlparse(base_url)
+        if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+            raise ValueError("INTELLIGENCE_DEEPSEEK_BASE_URL must be an HTTP(S) URL")
+        timeout = float(_required("INTELLIGENCE_DEEPSEEK_TIMEOUT_SECONDS"))
+        if timeout <= 0:
+            raise ValueError("INTELLIGENCE_DEEPSEEK_TIMEOUT_SECONDS must be positive")
+        max_tokens = int(_required("INTELLIGENCE_DEEPSEEK_MAX_TOKENS"))
+        if max_tokens < 64 or max_tokens > 8192:
+            raise ValueError("INTELLIGENCE_DEEPSEEK_MAX_TOKENS must be between 64 and 8192")
+        return cls(
+            deepseek_base_url=base_url,
+            deepseek_api_key=_required("INTELLIGENCE_DEEPSEEK_API_KEY"),
+            deepseek_model=_required("INTELLIGENCE_DEEPSEEK_MODEL"),
+            deepseek_timeout_seconds=timeout,
+            deepseek_max_tokens=max_tokens,
+        )
+
+
+def _required(key: str) -> str:
+    value = os.getenv(key, "").strip()
+    if not value:
+        raise ValueError(f"required environment variable {key} is missing")
+    return value

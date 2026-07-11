@@ -1,0 +1,176 @@
+openapi: 3.1.0
+info:
+  title: OpenIM Intelligent Collaboration Platform API
+  version: 0.1.0
+paths:
+  /healthz:
+    get:
+      operationId: getHealth
+      responses:
+        "200":
+          description: Process is ready to accept requests.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthResponse"
+  /v1/im/session:
+    post:
+      operationId: createIMSession
+      security:
+        - oidcBearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateIMSessionRequest"
+      responses:
+        "200":
+          description: OpenIM session material for the authenticated member.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CreateIMSessionResponse"
+        "400":
+          $ref: "#/components/responses/ErrorResponse"
+        "401":
+          $ref: "#/components/responses/ErrorResponse"
+        "403":
+          $ref: "#/components/responses/ErrorResponse"
+        "409":
+          $ref: "#/components/responses/ErrorResponse"
+        "502":
+          $ref: "#/components/responses/ErrorResponse"
+        "500":
+          $ref: "#/components/responses/ErrorResponse"
+  /v1/agent/intents/{intent_id}/approve:
+    post:
+      operationId: approveAgentIntent
+      security:
+        - oidcBearer: []
+      parameters:
+        - in: path
+          name: intent_id
+          required: true
+          schema:
+            type: string
+            minLength: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ApproveIntentRequest"
+      responses:
+        "202":
+          description: Approval was recorded and execution was queued.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApproveIntentResponse"
+        "400": { "$ref": "#/components/responses/ErrorResponse" }
+        "401": { "$ref": "#/components/responses/ErrorResponse" }
+        "403": { "$ref": "#/components/responses/ErrorResponse" }
+        "409": { "$ref": "#/components/responses/ErrorResponse" }
+        "500": { "$ref": "#/components/responses/ErrorResponse" }
+components:
+  securitySchemes:
+    oidcBearer:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  responses:
+    ErrorResponse:
+      description: Typed request failure.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+  schemas:
+    HealthResponse:
+      type: object
+      additionalProperties: false
+      required: [status, service, version]
+      properties:
+        status:
+          type: string
+          const: ready
+        service:
+          type: string
+          const: platform-api
+        version:
+          type: string
+          minLength: 1
+    CreateIMSessionRequest:
+      type: object
+      additionalProperties: false
+      required: [platform_id, device_id]
+      properties:
+        platform_id:
+          type: integer
+          minimum: 1
+          maximum: 11
+          not:
+            const: 10
+        device_id:
+          type: string
+          minLength: 1
+          maxLength: 128
+    CreateIMSessionResponse:
+      type: object
+      additionalProperties: false
+      required: [user_id, ws_url, user_token, expires_at]
+      properties:
+        user_id:
+          type: string
+          minLength: 1
+        ws_url:
+          type: string
+          format: uri
+        user_token:
+          type: string
+          minLength: 1
+        expires_at:
+          type: string
+          format: date-time
+    ApproveIntentRequest:
+      type: object
+      additionalProperties: false
+      required: [platform_id, device_id, payload_digest]
+      properties:
+        platform_id:
+          type: integer
+          minimum: 1
+          maximum: 11
+          not: { const: 10 }
+        device_id:
+          type: string
+          minLength: 1
+          maxLength: 128
+        payload_digest:
+          type: string
+          pattern: "^sha256:[0-9a-f]{64}$"
+    ApproveIntentResponse:
+      type: object
+      additionalProperties: false
+      required: [intent_id, execution_id, state]
+      properties:
+        intent_id: { type: string, minLength: 1 }
+        execution_id: { type: string, minLength: 1 }
+        state: { type: string, enum: [queued, running, unknown, succeeded, failed] }
+    Error:
+      type: object
+      additionalProperties: false
+      required: [code, message, retryable, correlation_id]
+      properties:
+        code:
+          type: string
+          minLength: 1
+        message:
+          type: string
+          minLength: 1
+        retryable:
+          type: boolean
+        correlation_id:
+          type: string
+          minLength: 1

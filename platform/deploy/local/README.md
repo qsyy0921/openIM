@@ -1,0 +1,86 @@
+# Local development runtime
+
+This runtime keeps application development on the Windows host while PostgreSQL, Keycloak, and the pinned OpenIM Compose stack run in the dedicated `swe-docker` WSL distribution stored under `H:\wsl\swe-docker`.
+
+## Boundaries
+
+- `platform-api` runs natively from `platform/services/platform-api`.
+- PostgreSQL and Keycloak are defined by `compose.yaml` and use named volumes inside the WSL Docker data root.
+- OpenIM continues to use the pinned upstream Compose file under `deploy/node1-openim-docker-v3.8`.
+- `openim-wsl.override.yaml` replaces only runtime data mounts with clean WSL named volumes. Existing benchmark/runtime data under the root `deploy/` directory is not modified.
+- The override exposes a dedicated Kafka `HOST` listener on `127.0.0.1:19094`; OpenIM containers retain their own `kafka:9094` listener.
+- The override replaces compile-heavy `mage check` health probes with the image's expected process-count checks so HDD-backed startup does not spawn concurrent Go builds.
+- The local Keycloak password grant exists only for automated smoke verification. Interactive clients use Authorization Code with PKCE.
+- No in-memory database, fake Token issuer, or alternate OpenIM implementation is available in production code.
+
+## Prerequisites
+
+1. `wsl -d swe-docker -- systemctl start docker`
+2. Docker context data root verified as `/var/lib/docker` inside the `swe-docker` distribution.
+3. Pinned PostgreSQL and Keycloak images from `compose.yaml` are present.
+4. The OpenIM amd64 images from `deploy/openim-images-amd64.tar` are present.
+5. Create ignored `platform/deploy/local/.env` from `.env.example`.
+
+The Docker daemon pull proxy is maintained in `ops/swe-docker-proxy.conf`. Runtime containers receive no proxy environment because `/root/.docker/config.json` is synchronized from `ops/swe-docker-client-config.json`.
+
+## Start dependencies
+
+From WSL:
+
+```bash
+cd /mnt/e/development/OPENIM/platform/deploy/local
+docker compose --env-file .env -f compose.yaml up -d
+```
+
+Start the clean local OpenIM data plane:
+
+```bash
+cd /mnt/e/development/OPENIM/deploy/node1-openim-docker-v3.8
+docker compose \
+  --env-file .env \
+  -f docker-compose.yaml \
+  -f /mnt/e/development/OPENIM/platform/deploy/local/openim-wsl.override.yaml \
+  up -d --pull never etcd kafka minio mongo redis openim-server openim-chat
+```
+
+Do not treat mapped ports as readiness. Wait for the OpenIM API to return a successful `/auth/get_admin_token` envelope.
+
+## Initialize identity state
+
+From `platform/services/platform-api` in PowerShell:
+
+```powershell
+$env:PLATFORM_DATABASE_URL = 'postgres://platform:<local-password>@127.0.0.1:15432/platform?sslmode=disable'
+$env:PLATFORM_DEPENDENCY_TIMEOUT = '15s'
+go run ./cmd/platform-migrate
+```
+
+Apply `seed-local-identity.sql` only to the local database. It must not enter the production migration chain.
+After migration `0005`, apply `seed-local-knowledge.sql` only when running the ACL-RAG smoke test; it creates one versioned internal document and one direct-member read grant.
+
+## Verified flow
+
+```text
+Keycloak ID Token
+  -> platform-api OIDC verification
+  -> active tenant/member/device lookup in PostgreSQL
+  -> fenced IdentityLink provisioning
+  -> OpenIM Admin Token held server-side
+  -> OpenIM user registration / ownership check
+  -> OpenIM User Token
+  -> WebSocket handshake on port 12001
+```
+
+The real smoke run returned `ready`, issued a non-empty User Token, and opened a WebSocket. Tokens were not printed or persisted.
+
+The durable ingress smoke sent a real OpenIM text message, consumed its `toRedis` protobuf with an independent group, committed one ingress plus one Outbox row, recovered from a transient Kafka leader error, and published the same `event_id` on attempt 2. The payload passed `contracts/events/im.message.accepted.v1.schema.json`.
+
+The read-only Agent smoke now uses the real DeepSeek `deepseek-v4-pro` path. A real `@Agent` OpenIM message produced one fenced PostgreSQL Run, persisted authorized `C1` evidence and provider response ID, and received a real OpenIM reply `serverMsgID`; the tenant Bot reply re-entered ingress with the correct tenant and did not create another Run.
+
+The ACL-RAG smoke used the local versioned knowledge fixture and direct-member grant. The Runtime persisted exact `C1` document/version/chunk provenance before sending the cited reply. Integration tests proved cross-tenant, ungranted, `restricted`, and freshly revoked content returned zero chunks. A separate no-match message produced the explicit no-evidence response with zero citations and no model call.
+
+For the approved-action smoke, create a dedicated login role outside migrations and grant only `USAGE` on `action`, `collaboration`, `audit`, `agent`, and `identity`; `SELECT/UPDATE` on intents/executions and Runs; `SELECT/INSERT` on tickets; and `INSERT` plus sequence usage on action audit events. Pass its URL only as `ACTION_DATABASE_URL` to `action-executor`. Do not give that process OpenIM or model credentials.
+
+The real smoke proposed one `create_ticket` Intent from an OpenIM message and confirmed zero tickets before approval. The requesting member approved the exact digest through the OIDC-protected API. The dedicated Executor created one ticket by stable idempotency key, read it back, and converged Execution, Intent, and Run to `succeeded`. Repeating approval returned the same Execution and left one approval and one ticket.
+
+The production model path has no alternate provider. Store `INTELLIGENCE_DEEPSEEK_API_KEY` only in ignored local configuration or a host secret mechanism; never place it in Compose YAML, source, logs, release bundles, or model context.

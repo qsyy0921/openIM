@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://qsyy0921.github.io/openIM/contracts/events/im.message.accepted.v1.schema.json",
+  "title": "Accepted OpenIM message",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "event_id",
+    "event_type",
+    "occurred_at",
+    "tenant_id",
+    "conversation_id",
+    "source_key",
+    "server_msg_id",
+    "sender_id",
+    "session_type",
+    "content_type",
+    "content",
+    "data_classification"
+  ],
+  "properties": {
+    "event_id": { "type": "string", "minLength": 1 },
+    "event_type": { "const": "im.message.accepted.v1" },
+    "occurred_at": { "type": "string", "format": "date-time" },
+    "tenant_id": { "type": "string", "minLength": 1 },
+    "conversation_id": { "type": "string", "minLength": 1 },
+    "source_key": { "type": "string", "minLength": 1 },
+    "server_msg_id": { "type": "string" },
+    "client_msg_id": { "type": "string" },
+    "sender_id": { "type": "string", "minLength": 1 },
+    "session_type": { "type": "integer" },
+    "content_type": { "type": "integer" },
+    "content": { "type": "string" },
+    "traceparent": { "type": "string" },
+    "data_classification": {
+      "type": "string",
+      "enum": ["public", "internal", "confidential", "restricted"]
+    }
+  }
+}

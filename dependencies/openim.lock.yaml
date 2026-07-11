@@ -1,0 +1,34 @@
+schema_version: 1
+updated_at: 2026-07-11
+policy: upstream-checkouts-are-untracked
+
+repositories:
+  - name: open-im-server
+    path: open-im-server
+    remote: https://github.com/openimsdk/open-im-server.git
+    tag: v3.8.3-patch.12
+    commit: 4f865f83c13967ef19c46cf601c78f32316a83b5
+  - name: chat
+    path: chat
+    remote: https://github.com/openimsdk/chat.git
+    tag: v1.8.4-patch.2
+    commit: 0684daae98f9ee59d9c1d06ec6028dbf4c40b781
+  - name: openim-sdk-core
+    path: openim-sdk-core
+    remote: https://github.com/openimsdk/openim-sdk-core.git
+    tag: v3.8.3
+    commit: 8e55d323792ba189154efe42144262c3ced7ea31
+    local_state: dirty-existing-benchmark-work
+  - name: openim-docker
+    path: openim-docker-v3.8
+    remote: https://github.com/openimsdk/openim-docker.git
+    tag: v3.8
+    commit: fb966382e41fc3ab01c55b8b0dd86bfbb4dc4ee2
+
+protocol_contracts:
+  - module: github.com/openimsdk/protocol
+    version: v0.0.73-alpha.12
+    purpose: decode OpenIM toRedis sdkws.MsgData records
+  - module: github.com/IBM/sarama
+    version: v1.43.0
+    purpose: OpenIM source consumer group and platform Outbox publisher

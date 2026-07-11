@@ -1,0 +1,76 @@
+# Local Codex and editor state
+/.agents/
+/.codex/
+/.codex-tmp/
+/.idea/
+/.vscode/
+
+# Upstream OpenIM checkouts are pinned in dependencies/openim.lock.yaml.
+/open-im-server/
+/chat/
+/openim-sdk-core/
+/openim-docker-v3.8/
+/sources/
+
+# Existing lab deployments, container data, and image archives
+/deploy/node*-openim-docker-v3.8/
+/deploy/*.tar
+/runs/
+/openim-bench/
+/.runtime/
+**/data/
+
+# Secrets and machine-local configuration
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+
+# Logs, profiles, coverage, and generated reports
+*.log
+sdk.log.*
+*.out
+*.err
+*.prof
+coverage.*
+*.coverprofile
+
+# Build outputs
+/bin/
+/dist/
+**/build/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Language caches
+**/__pycache__/
+*.py[cod]
+/.venv/
+**/.pytest_cache/
+**/*.egg-info/
+**/.mypy_cache/
+**/.ruff_cache/
+**/node_modules/
+
+# OS files
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Rebuildable source-discovery inventories
+/openim-github-repos.json
+/openim-source-clone-results.json
+/openim-source-manifest.csv
+/openim-source-clone.log
+
+# Retained local-only tooling for the retired node3/node5 lab topology
+/ops/deploy_openim_lab.py
+/ops/openim_remote.py
+/ops/openim_windows_message.ps1
+/ops/openim_windows_online_hold.ps1
+/ops/set_hw1_nopasswd.py
