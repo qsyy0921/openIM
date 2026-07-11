@@ -1,8 +1,10 @@
-import { AlertTriangle, Check, CircleDot, LogIn, LogOut, MessageSquare, RefreshCw, ShieldCheck, Wifi } from "lucide-react";
+import { AlertTriangle, LogIn, LogOut, MessageSquare, RefreshCw, Wifi } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { User, UserManager } from "oidc-client-ts";
 
 import type { WebConfig } from "./config";
+import { ChatWorkspace } from "./ChatWorkspace";
+import { createOpenIMChatPort, initialChatState, SingleChatController, type ChatState } from "./chat";
 import { connectOpenIM, disconnectOpenIM, type ConnectionUpdate } from "./openim";
 import { createIMSession, type IMSession } from "./platform-api";
 
@@ -22,7 +24,11 @@ export function App({ config, userManager }: AppProps) {
   const [user, setUser] = useState<User | null>(null);
   const [session, setSession] = useState<IMSession | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [connection, setConnection] = useState<ConnectionUpdate>({ state: "connecting" });
+  const [chatState, setChatState] = useState<ChatState>(initialChatState);
   const detachRef = useRef<(() => void) | null>(null);
+  const chatControllerRef = useRef<SingleChatController | null>(null);
+  const unsubscribeChatRef = useRef<(() => void) | null>(null);
 
   const connect = useCallback(
     async (identity: User) => {
@@ -39,17 +45,34 @@ export function App({ config, userManager }: AppProps) {
         setPhase("connecting");
         detachRef.current?.();
         detachRef.current = await connectOpenIM(config, nextSession, (update: ConnectionUpdate) => {
+          setConnection(update);
           if (update.state === "connected") {
-            setPhase("connected");
+            const controller = chatControllerRef.current;
+            if (controller) {
+              void controller.restore().then(() => setPhase("connected")).catch((cause) => {
+                setError(messageOf(cause));
+                setConnection({ state: "failed", message: messageOf(cause) });
+              });
+            }
             return;
           }
           if (update.state === "connecting") {
-            setPhase("connecting");
+            if (!chatControllerRef.current) setPhase("connecting");
             return;
           }
-          setError(update.message ?? update.state);
-          setPhase("error");
+          if (!chatControllerRef.current) {
+            setError(update.message ?? update.state);
+            setPhase("error");
+          }
         });
+        chatControllerRef.current?.stop();
+        unsubscribeChatRef.current?.();
+        const controller = new SingleChatController(createOpenIMChatPort());
+        chatControllerRef.current = controller;
+        unsubscribeChatRef.current = controller.subscribe(setChatState);
+        await controller.start(nextSession.userID);
+        setConnection({ state: "connected" });
+        setPhase("connected");
       } catch (cause) {
         setError(messageOf(cause));
         setPhase("error");
@@ -84,6 +107,8 @@ export function App({ config, userManager }: AppProps) {
     return () => {
       active = false;
       detachRef.current?.();
+      chatControllerRef.current?.stop();
+      unsubscribeChatRef.current?.();
     };
   }, [config.oidcRedirectURI, connect, userManager]);
 
@@ -113,6 +138,11 @@ export function App({ config, userManager }: AppProps) {
       if (session) await disconnectOpenIM();
       detachRef.current?.();
       detachRef.current = null;
+      chatControllerRef.current?.stop();
+      chatControllerRef.current = null;
+      unsubscribeChatRef.current?.();
+      unsubscribeChatRef.current = null;
+      setChatState(initialChatState);
       await userManager.signoutRedirect();
     } catch (cause) {
       setError(messageOf(cause));
@@ -158,6 +188,28 @@ export function App({ config, userManager }: AppProps) {
     );
   }
 
+  if (phase === "connected" && session && chatControllerRef.current) {
+    return (
+      <div className="workspace-shell chat-shell">
+        <aside className="rail">
+          <div className="brand-mark small"><MessageSquare size={19} /></div>
+          <button className="rail-button active" title="消息" aria-label="消息"><MessageSquare size={19} /></button>
+        </aside>
+        <main className="workspace-main chat-main">
+          <header className="workspace-header compact">
+            <div>
+              <p className="eyebrow">OPENIM WORKSPACE</p>
+              <h1>消息</h1>
+              <span className="workspace-identity">{displayName}</span>
+            </div>
+            <button className="icon-text-button" onClick={() => void logout()}><LogOut size={17} />退出</button>
+          </header>
+          <ChatWorkspace controller={chatControllerRef.current} state={chatState} selfUserID={session.userID} connection={connection} />
+        </main>
+      </div>
+    );
+  }
+
   return (
     <div className="workspace-shell">
       <aside className="rail">
@@ -168,41 +220,21 @@ export function App({ config, userManager }: AppProps) {
         <header className="workspace-header">
           <div>
             <p className="eyebrow">OPENIM WORKSPACE</p>
-            <h1>连接控制台</h1>
+            <h1>连接失败</h1>
           </div>
           <button className="icon-text-button" onClick={() => void logout()}><LogOut size={17} />退出</button>
         </header>
 
         <section className="status-band" aria-live="polite">
-          <div className={`status-icon ${phase === "connected" ? "success" : "danger"}`}>
-            {phase === "connected" ? <Check size={24} /> : <AlertTriangle size={24} />}
-          </div>
+          <div className="status-icon danger"><AlertTriangle size={24} /></div>
           <div>
             <p className="status-label">实时通信</p>
-            <h2>{phase === "connected" ? "OpenIM 已连接" : "连接失败"}</h2>
+            <h2>OpenIM 不可用</h2>
             {error && <p className="error-text">{error}</p>}
           </div>
           {phase === "error" && <button className="secondary-button" onClick={() => void retry()}><RefreshCw size={17} />重试</button>}
         </section>
 
-        <section className="detail-grid">
-          <article className="detail-block">
-            <div className="detail-heading"><ShieldCheck size={18} /><span>企业身份</span></div>
-            <strong>{displayName}</strong>
-            <span className="muted">{String(user?.profile.email ?? user?.profile.sub ?? "")}</span>
-          </article>
-          <article className="detail-block">
-            <div className="detail-heading"><CircleDot size={18} /><span>IM 用户</span></div>
-            <strong>{session?.userID ?? "未签发"}</strong>
-            <span className="muted">Token 到期 {session ? new Date(session.expiresAt).toLocaleString() : "-"}</span>
-          </article>
-        </section>
-
-        <section className="endpoint-table" aria-label="运行端点">
-          <div><span>Platform API</span><code>{config.platformAPIBaseURL}</code><b>READY</b></div>
-          <div><span>OpenIM API</span><code>{config.openIMAPIURL}</code><b>READY</b></div>
-          <div><span>WebSocket</span><code>{config.openIMWSURL}</code><b>{phase === "connected" ? "OPEN" : "CLOSED"}</b></div>
-        </section>
       </main>
     </div>
   );
