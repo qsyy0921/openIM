@@ -84,6 +84,7 @@ Record intent/execution/Run IDs, digest, approval actor, state transitions, leas
 - A dedicated PostgreSQL role with only required schema/table grants created ticket `b54c3421-36aa-4edf-aa6b-0c53ea64093a`; read-back moved Execution, Intent, and Run to succeeded.
 - Repeating the same approval returned the same Execution and database counts remained one approval and one ticket.
 - The final real DeepSeek protocol run `99216135-a79a-406f-b0c2-ca51b8baa55b` accepted only the `创建工单：<标题>` prefix, held zero tickets before OIDC approval, and completed ticket `e87c89b9-200b-4e0e-9c68-e6c9e3518e77` with one approval and one effect.
+- Node2 Run `1e635b15-76b9-4654-bb53-e6945ae4a9a9` produced Intent `25514bf8-b6f1-4839-be07-c15127834963` with zero tickets before approval. A wrong digest was rejected, duplicate exact-digest OIDC approval returned Execution `0a9101aa-c78d-4943-ae60-73212f472f40`, and the restricted Executor produced one verified ticket. Forced `UNKNOWN` states then proved both existing-ticket read-back and authoritative-absence safe retry; the latter retained the same idempotency key and converged to ticket `c8091ade-8dc5-45f1-a7c0-42df10f716cd`.
 - The first live attempt exposed that `ON CONFLICT DO UPDATE` required excess UPDATE permission; implementation was narrowed to `INSERT DO NOTHING` plus authoritative SELECT instead of widening role grants.
 
 ## Open questions

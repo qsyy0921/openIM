@@ -1,6 +1,6 @@
 # Migrate the local milestone
 
-Status: implementation complete; node2 WSL/Docker, identity/session, WebSocket, and durable ingress migration checks accepted after the approved Windows reboot; Agent/model and approved-action migration checks remain pending.
+Status: Milestone 0 and the complete node2 migration acceptance are complete: WSL/Docker, identity/session, WebSocket, durable ingress, real DeepSeek, ACL-RAG, restricted Action Executor, approval, idempotency, and UNKNOWN reconciliation all passed.
 
 ## Transfer boundary
 
@@ -50,28 +50,31 @@ The startup script now republishes only ports `12001`, `12002`, `12005`, `12008`
 
 The checksum-matched `goal-final` development bundle and pinned OpenIM amd64 image archive were transferred to `E:\MFL\staging`, then extracted under `/home/ubuntu/MFL` inside the `E:`-backed WSL virtual disk. Host secrets were generated on `.2`; neither the local `.env` files nor API tokens were transferred. Because a tar file created on Windows did not preserve Linux execute bits, the five verified ELF commands must receive mode `0755` after extraction. This bundle records `working_tree_clean=false` and is valid for migration testing only, not publication.
 
+Milestone 0 subsequently produced the clean immutable release `d663256` from source commit `d663256d7e2ab43f3da6f0208c724db40b2a2fc5`. Its archive SHA-256 is `7BA18AA25F80D9B44FB98D0D79FD0A1C380BBEB6E3381B53977987A129D6286A`; the local and node2 hashes matched before extraction to `/home/ubuntu/MFL/releases/d663256`. The platform health endpoint now reports the release directory name rather than a hard-coded development label.
+
 PostgreSQL 17.10 and Keycloak 26.7.0 were pulled by digest through the configured official endpoints. OpenIM Server, Chat, MongoDB, Redis, Kafka, etcd, and MinIO were loaded from the pinned archive and started with clean named volumes. PostgreSQL, Keycloak, OpenIM Server, and Chat passed health checks; a real `/auth/get_admin_token` call returned a non-empty token and valid expiry without logging the token.
 
 Migrations `0001` through `0007` and the local identity/knowledge fixtures were applied. `openim-platform-api` and `openim-platform-ingress` run as hardened systemd services using `/etc/openim-platform/platform.env`; the host-local file is `0640` and is not part of the release. From `.1`, an unregistered device was rejected with `MEMBER_OR_DEVICE_FORBIDDEN`, the registered `local-browser` device received an OpenIM User Token, and a real WebSocket handshake opened on `172.31.50.2:12001`. A separate OpenIM message was accepted, consumed from `toRedis`, persisted once in `integration.ingress_messages`, and its matching `integration.outbox_events` row reached `published`.
 
+The clean release wheel is installed in `/home/ubuntu/MFL/venvs/intelligence-worker`. `openim-action-executor.service` runs as the dedicated PostgreSQL login `platform_action_executor`; the role is non-superuser, has no role/database creation, replication, or RLS bypass capability, and receives only the exact table and sequence grants listed above. Direct checks confirmed that ticket update/delete, member reads, and approval reads are denied. The worker and Agent services remain disabled until a credential is installed, so missing model configuration cannot degrade into a false-success path.
+
+DeepSeek uses a systemd credential file at `/etc/openim-platform/credentials/deepseek-api-key`, owned by `root:root` with mode `0400`. The service reads it through `LoadCredential`; it is absent from the unit command line and environment files. Put a newly created key on the `.1` clipboard and run `ops/provision-node2-deepseek-credential.ps1`; the script sends it over strict host-key SSH and standard input, clears the clipboard after success, and starts the worker and Agent only after the worker health check passes. Revoke the prior key only after the real model and end-to-end acceptance checks succeed.
+
 Remaining migration work:
 
-1. Install the intelligence-worker wheel and its pinned dependencies in a node-local Python environment.
-2. Provision a rotated, scoped DeepSeek credential through a host secret mechanism; do not place the credential in a command line, release bundle, tracked file, or model context.
-3. Start Agent Runtime and repeat the real cited ACL-RAG response, including denied/revoked/no-match cases.
-4. Create the restricted Action Executor database role, start the Executor, and repeat approval, idempotency, read-back, and UNKNOWN-reconciliation checks.
+None for the bounded node2 migration slice. By explicit owner decision, the existing DeepSeek credential was reused instead of rotated; it was provisioned through the clipboard-to-standard-input mechanism and completed a real model call. Rotation remains an operational security recommendation, not a blocker for this accepted development environment.
 
 ## Acceptance order
 
 1. Required configuration missing: every process exits non-zero. Accepted locally; node2 service units use explicit required environment files.
 2. OIDC member/device produces an OpenIM session and real WebSocket handshake. Accepted on node2 from `.1`.
 3. OpenIM `toRedis` event becomes one ingress row and one versioned event. Accepted on node2.
-4. Cross-tenant, ungranted, restricted, and revoked documents produce zero RAG context.
-5. Valid evidence produces persisted document/version/chunk citations.
-6. No ticket exists before exact-digest approval.
-7. Duplicate approval/execution produces one ticket and one business effect.
-8. Read-back mismatch never succeeds; UNKNOWN reconciles by the same idempotency key.
-9. A scoped DeepSeek credential completes a real `deepseek-v4-pro` JSON call and the full OpenIM/ACL-RAG path.
+4. Cross-tenant, ungranted, restricted, and revoked documents produce zero RAG context. Accepted through integration checks plus a live node2 immediate-revocation Run.
+5. Valid evidence produces persisted document/version/chunk citations. Accepted on node2 with one real citation.
+6. No ticket exists before exact-digest approval. Accepted on node2.
+7. Duplicate approval/execution produces one ticket and one business effect. Accepted on node2.
+8. Read-back mismatch never succeeds; UNKNOWN reconciles by the same idempotency key. Existing and absent outcomes both accepted on node2.
+9. A scoped DeepSeek credential completes a real `deepseek-v4-pro` JSON call and the full OpenIM/ACL-RAG path. Accepted on node2.
 
 The current deployment scope is `.1` and `.2` only. Linux artifacts are still built and checksum-verified for portability, but no `.5` host deployment is required by this milestone.
 
