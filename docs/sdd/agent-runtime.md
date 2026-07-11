@@ -91,6 +91,7 @@ Lifecycle logs use event ID, Run ID, model name, and OpenIM server message ID. R
 - The input and Bot reply both entered durable ingress under the tenant; the reply contained no trigger and created no second Run.
 - ACL-RAG smoke evidence is recorded in `acl-retrieval.md`; unknown citations fail validation and a zero-result query bypasses the model with an explicit abstention.
 - The approved-action smoke is recorded in `action-executor.md`; no business row existed while the Run waited for approval.
+- On node2 release `d663256`, authorized Run `00c88cd5-ec6f-4a9e-aacf-6fc4a0faf79b`, revoked-grant Run `24e91528-c5d1-4298-ba7b-cdf1d9953eff`, and no-match Run `a54ee93a-d1c3-4db3-aec5-ddd9cf144053` all reached a real OpenIM reply. Only the authorized Run invoked DeepSeek and persisted a citation.
 
 ## Open questions
 

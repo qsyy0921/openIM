@@ -9,5 +9,6 @@
 | Intelligence worker | [intelligence-worker.md](intelligence-worker.md) | verified | preserve DeepSeek JSON/action protocol during future model changes |
 | ACL retrieval | [acl-retrieval.md](acl-retrieval.md) | verified | group grants and vector search require separate measured slices |
 | Action Executor | [action-executor.md](action-executor.md) | verified | preserve single-action boundary; external adapters require a new slice |
+| Web client | [web-client.md](web-client.md) | verified | add conversations/messages only in a dedicated IM UI slice |
 
 Future units are added only when they enter an admitted root-Goal slice. A unit is not marked implemented or verified until code and stated checks exist.

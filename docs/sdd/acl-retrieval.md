@@ -80,8 +80,10 @@ Record Run ID, tenant, member, purpose, candidate count, authorized result count
 - Deleting the read grant made the next query return zero results.
 - Real Run `fb7644b0-4746-45c9-a0d2-f6000bfac470` persisted citation `C1` with document/version/chunk/source provenance and OpenIM accepted reply `122174aef2c448a2a895c585a89be606`.
 - Real zero-result Run `b380efd5-9734-4589-9ff3-a5ba745dc41a` called no model, persisted no citations, and returned an explicit no-evidence reply through OpenIM.
+- Node2 Run `00c88cd5-ec6f-4a9e-aacf-6fc4a0faf79b` traversed real OpenIM ingress, authoritative ACL retrieval, DeepSeek, citation persistence, and OpenIM reply with one citation. After deleting the member grant, the immediately following Run `24e91528-c5d1-4298-ba7b-cdf1d9953eff` persisted zero citations and used the explicit no-evidence policy; the grant was then restored. Independent no-match Run `a54ee93a-d1c3-4db3-aec5-ddd9cf144053` also persisted zero citations without model egress.
 
 ## Open questions
 
 - Group/department grants and relation inheritance require a separate authorization slice.
 - Chinese production retrieval and vector/hybrid indexing require measured backend selection; lexical PostgreSQL is the single first implementation, not a fallback mode.
+- The admitted vector-retrieval slice should reuse the locally deployed embedding model only after its endpoint, model revision, vector dimension, normalization, batching, and latency are recorded as an explicit index contract. Model unavailability must fail indexing/query work explicitly rather than silently switching embedding models or lexical semantics.

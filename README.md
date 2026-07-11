@@ -8,6 +8,8 @@ OpenIM remains the communication plane responsible for messages, conversation se
 
 The local-first milestone is implemented and source/runtime verified. It includes enterprise OIDC-to-OpenIM identity exchange, durable OpenIM Kafka ingress and Outbox, fenced Agent Runs, ACL-constrained versioned knowledge retrieval, structured citations, digest-bound human approval, and one idempotent verified `create_ticket` action in a separate Executor process.
 
+The first Web vertical slice is also verified: a TypeScript client completes enterprise Authorization Code with PKCE, exchanges an ID Token for a scoped OpenIM User Token, and establishes the official WASM SDK WebSocket connection without exposing tokens in the UI or localStorage.
+
 Development proceeds under one root Codex Goal as bounded vertical slices. A slice stops when its acceptance checks pass; optional adjacent features are not added. Production code uses one intended implementation path and does not add silent fallback behavior.
 
 The single production model path uses DeepSeek Chat Completions with `deepseek-v4-pro`. Real local verification covers cited ACL-RAG answers and an approved `create_ticket` action; the test contract service remains isolated from production code.

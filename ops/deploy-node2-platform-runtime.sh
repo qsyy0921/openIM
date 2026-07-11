@@ -5,6 +5,7 @@ deploy_root="${1:-/home/ubuntu/MFL/deploy/node2-20260711}"
 release_root="${2:-/home/ubuntu/MFL/releases/goal-final}"
 bin_dir="$release_root/linux-amd64"
 runtime_env=/etc/openim-platform/platform.env
+release_version="$(basename "$release_root")"
 
 [[ "$(id -u)" -eq 0 ]] || {
   echo "run as root" >&2
@@ -38,7 +39,7 @@ install -d -m 0750 -o root -g ubuntu /etc/openim-platform
 umask 027
 {
   printf 'PLATFORM_HTTP_ADDR=0.0.0.0:18080\n'
-  printf 'PLATFORM_VERSION=goal-final\n'
+  printf 'PLATFORM_VERSION=%s\n' "$release_version"
   printf 'PLATFORM_SHUTDOWN_TIMEOUT=15s\n'
   printf 'PLATFORM_DEPENDENCY_TIMEOUT=20s\n'
   printf 'PLATFORM_DATABASE_URL=postgres://platform:%s@127.0.0.1:15432/platform?sslmode=disable\n' "$postgres_password"
@@ -56,6 +57,11 @@ umask 027
   printf 'PLATFORM_OUTBOX_LEASE=15s\n'
   printf 'PLATFORM_OUTBOX_BATCH=100\n'
   printf 'PLATFORM_KAFKA_TLS_ENABLED=false\n'
+  printf 'PLATFORM_AGENT_CONSUMER_GROUP=agent-runtime-node2-v1\n'
+  printf 'PLATFORM_AGENT_POLL_INTERVAL=500ms\n'
+  printf 'PLATFORM_AGENT_LEASE=30s\n'
+  printf 'PLATFORM_AGENT_MAX_ATTEMPTS=3\n'
+  printf 'PLATFORM_INTELLIGENCE_URL=http://127.0.0.1:18082\n'
 } >"$runtime_env"
 chown root:ubuntu "$runtime_env"
 chmod 0640 "$runtime_env"
@@ -120,14 +126,14 @@ for _ in $(seq 1 30); do
   fi
   sleep 2
 done
-python3 - "$health_file" <<'PY'
+python3 - "$health_file" "$release_version" <<'PY'
 import json
 import sys
 
 with open(sys.argv[1], encoding="utf-8") as stream:
     payload = json.load(stream)
 assert payload.get("status") == "ready", payload
-assert payload.get("version") == "goal-final", payload
+assert payload.get("version") == sys.argv[2], payload
 print("platform_api=ready")
 PY
 systemctl is-active openim-platform-api.service openim-platform-ingress.service
