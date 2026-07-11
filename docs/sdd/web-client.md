@@ -10,11 +10,11 @@ depends_on:
 
 ## Scope
 
-Provide one browser vertical slice from enterprise OIDC Authorization Code with PKCE through Platform API session exchange to a real OpenIM WASM SDK WebSocket connection. This slice does not implement conversations, message rendering, contacts, approval UI, documents, search, or administration.
+Provide a browser single-chat vertical slice from enterprise OIDC Authorization Code with PKCE through Platform API session exchange to the official OpenIM WASM SDK: list single conversations and unread counts, load text history, send and receive text messages, mark the active conversation read, expose send failures, and restore state after reconnection. This slice does not implement group chat, files, images, audio, video, search, contacts, approval UI, documents, or administration.
 
 ## Responsibilities and non-goals
 
-The unit owns interactive sign-in/out, use of an explicitly configured enrolled device identity, in-memory OpenIM session material, WASM SDK initialization, connection-state presentation, and explicit client errors. It does not own enterprise credentials, OpenIM Admin Tokens, device enrollment, identity provisioning rules, server authorization, or an alternate IM transport.
+The unit owns interactive sign-in/out, use of an explicitly configured enrolled device identity, in-memory OpenIM session material, WASM SDK initialization, connection state, single-conversation presentation, bounded history loading, text composition, optimistic send state, real-time receive handling, active-conversation read state, and explicit client errors. It does not own enterprise credentials, OpenIM Admin Tokens, device enrollment, identity provisioning rules, server authorization, group features, or an alternate IM transport.
 
 ## Contracts and dependencies
 
@@ -31,6 +31,9 @@ The unit owns interactive sign-in/out, use of an explicitly configured enrolled 
 - Tokens are not rendered, logged, placed in URLs, or stored in localStorage. OIDC transaction/user state uses sessionStorage.
 - The device ID is required configuration and must already be active for the member; the client cannot self-enroll or bypass this check.
 - Missing or invalid configuration, malformed session responses, endpoint mismatch, and SDK failure are explicit errors; no alternate provider or transport exists.
+- Conversation and message identity use OpenIM `conversationID` and `clientMsgID`; event replay cannot duplicate rendered messages.
+- Only `SessionType.Single` and text messages enter this UI. Unsupported content is not synthesized into text.
+- A send is shown as `sending` before the SDK call, `succeeded` only from the returned authoritative message, and `failed` on an explicit SDK error.
 
 ## Runtime flow
 
@@ -39,8 +42,11 @@ The unit owns interactive sign-in/out, use of an explicitly configured enrolled 
 3. Read the required pre-enrolled device ID from explicit deployment configuration.
 4. Send the ID Token and device tuple to `/v1/im/session`.
 5. Validate the exact response and require the returned WebSocket endpoint to match configured OpenIM topology.
-6. Login through the official WASM SDK and observe connecting, connected, failed, kicked, and token-invalid events.
-7. Render the connected identity and endpoint status without exposing tokens.
+6. Login through the official WASM SDK, wait for initial `OnSyncServerFinish`, and observe connecting, connected, sync, failed, kicked, and token-invalid events.
+7. Load single conversations and total unread state, then load bounded history for the selected conversation.
+8. Create and optimistically render a text message; replace it with the SDK result or mark it failed.
+9. Merge real-time message and conversation events by stable IDs and mark the visible conversation read.
+10. On successful reconnection, reload conversations, unread state, and active history before declaring the chat state restored.
 
 ## Data ownership and state
 
@@ -48,7 +54,7 @@ Keycloak owns the enterprise session, Platform API owns identity exchange policy
 
 ## Failure handling
 
-OIDC callback failure, expired identity, typed Platform API failure, malformed success response, unexpected endpoint, and OpenIM SDK failure enter an explicit error state. Retry repeats the authoritative session exchange and SDK login; it does not reuse a failed response or switch transports.
+OIDC callback failure, expired identity, typed Platform API failure, malformed success response, unexpected endpoint, OpenIM SDK failure, history failure, send failure, and read-state failure are explicit. Retry repeats the authoritative operation; it does not generate a local success, switch transports, or silently discard failed sends.
 
 ## Security
 
@@ -64,6 +70,7 @@ The UI exposes coarse connection phase and endpoint readiness. Platform and Open
 - Unit tests verify configuration, ID Token exchange, typed errors, and malformed success rejection.
 - TypeScript typecheck and production build pass with pinned dependencies.
 - A real browser completes PKCE login, `/v1/im/session`, WASM SDK login, and node2 WebSocket connection.
+- Two real node2 members exchange text in both directions; the receiver updates without reload, unread state clears when selected, history survives reload/reconnect, and the sent message converges from sending to succeeded.
 - Browser inspection confirms no token in visible UI, URL, localStorage, or console output.
 
 ## Source evidence
@@ -80,14 +87,14 @@ The UI exposes coarse connection phase and endpoint readiness. Platform and Open
 
 ## Verification evidence
 
-- TypeScript project references passed strict typecheck; Vitest passed 6 configuration and Platform API tests; Vite produced the pinned production bundle.
-- A Playwright test in isolated system Chrome completed real node2 Keycloak Authorization Code with PKCE, exchanged the ID Token at `/v1/im/session`, initialized the official WASM SDK, reached `OpenIM 已连接`, and returned to the signed-out screen through OIDC logout.
-- The same test observed zero HTTP failures and zero console errors after the deterministic nullable-batch compatibility patch, found no token-shaped value in localStorage or visible text, and confirmed that the callback URL no longer contained the authorization code.
+- `npm run typecheck` passed and Vitest passed 13 configuration, Platform API, connection-foundation, and single-chat controller tests.
+- `npm run test:e2e:node2` passed against the real `.2` runtime: system Chrome completed Keycloak Authorization Code with PKCE, exchanged the ID Token at `/v1/im/session`, initialized and synchronized the official WASM SDK, and connected to node2 OpenIM.
+- The E2E injected real `imAdmin -> Web` messages through node2, observed unread increment and read clearing, sent `Web -> imAdmin` text to the server, received an active-conversation message in real time, recovered from browser offline/online, and found all three messages after reload.
+- The same test observed zero HTTP failures and zero console errors, found no localStorage entries or token-shaped visible text, and confirmed the callback authorization code was removed from the URL.
 - Desktop `1280x720` and mobile `390x844` screenshots passed horizontal-overflow checks and visual inspection without overlapping controls or text.
 
 ## Open questions
 
-- Conversation and message state enter only in a later IM UI slice.
 - Production reverse-proxy and CSP headers enter the deployment slice before public exposure.
 - Group/department authorization and vector retrieval remain independent backend slices.
 - Secure browser device enrollment requires a separate identity slice; this local slice uses the pre-enrolled `local-browser` fixture.

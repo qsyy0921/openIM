@@ -44,7 +44,15 @@ export async function createIMSession(
     },
     body: JSON.stringify({ platform_id: 5, device_id: deviceID })
   });
-  const payload: unknown = await response.json();
+  const responseText = await response.text();
+  let payload: unknown = null;
+  if (responseText) {
+    try {
+      payload = JSON.parse(responseText) as unknown;
+    } catch {
+      if (response.ok) throw new Error("platform session response is not valid JSON");
+    }
+  }
   const body = record(payload);
   if (!response.ok) {
     const error = (body ?? {}) as ErrorPayload;

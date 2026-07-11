@@ -39,6 +39,13 @@ describe("createIMSession", () => {
     );
   });
 
+  it("reports an empty HTTP failure without attempting to parse JSON", async () => {
+    const request = vi.fn<typeof fetch>().mockResolvedValue(new Response(null, { status: 404 }));
+    await expect(createIMSession("/platform-api", "token", "device", request)).rejects.toEqual(
+      new PlatformAPIError("platform session request failed", "UNKNOWN_ERROR", "unavailable", 404)
+    );
+  });
+
   it("rejects success-shaped malformed responses", async () => {
     const request = vi.fn<typeof fetch>().mockResolvedValue(
       new Response(JSON.stringify({ user_id: "ent_user" }), { status: 200, headers: { "Content-Type": "application/json" } })
