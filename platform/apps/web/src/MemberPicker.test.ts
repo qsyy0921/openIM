@@ -26,4 +26,18 @@ describe("MemberPicker utilities", () => {
     expect(toggleMemberSelection(["friend-1", "friend-1"], "friend-2")).toEqual(["friend-1", "friend-2"]);
     expect(toggleMemberSelection(["friend-1", "friend-2"], "friend-1")).toEqual(["friend-2"]);
   });
+
+  it("excludes existing group members from both friend and lookup candidates", () => {
+    const state = {
+      friends: [
+        { userID: "existing", nickname: "Existing", remark: "", faceURL: "" },
+        { userID: "available", nickname: "Available", remark: "", faceURL: "" }
+      ],
+      lookedUpUsers: [{ userID: "existing-lookup", nickname: "Existing Lookup", faceURL: "", ex: "" }]
+    } as ContactState;
+
+    expect(memberCandidates(state, "self", ["existing", "existing-lookup"])).toEqual([
+      { userID: "available", nickname: "Available", faceURL: "", source: "friend" }
+    ]);
+  });
 });

@@ -14,5 +14,6 @@
 | IM client contacts | [im-client-contacts.md](im-client-contacts.md) | verified | preserve OpenIM ownership; enterprise directory requires a separate architecture slice |
 | IM client media | [im-client-media.md](im-client-media.md) | verified | retain OpenIM SDK/MinIO ownership; governance and resumable upload are later slices |
 | IM client conversations | [im-client-conversations.md](im-client-conversations.md) | verified | retain OpenIM ownership; archive, drafts, and scheduled mute are later slices |
+| IM client group lifecycle | [im-client-group-lifecycle.md](im-client-group-lifecycle.md) | verified | preserve locked-SDK role rules; transfer ownership and role editing require a separate slice |
 
 Future units are added only when they enter an admitted root-Goal slice. A unit is not marked implemented or verified until code and stated checks exist.

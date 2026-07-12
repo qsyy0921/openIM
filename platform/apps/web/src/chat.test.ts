@@ -1,7 +1,7 @@
 import { GroupMemberRole, MessageReceiveOptType, MessageStatus, MessageType, SessionType, type ConversationItem, type GroupMemberItem, type MessageItem } from "@openim/wasm-client-sdk";
 import { describe, expect, it } from "vitest";
 
-import { MAX_FILE_BYTES, MAX_IMAGE_BYTES, ConversationController, type ChatEvents, type ChatPort } from "./chat";
+import { MAX_FILE_BYTES, MAX_IMAGE_BYTES, ConversationController, canInviteGroupMembers, canRemoveGroupMember, type ChatEvents, type ChatPort } from "./chat";
 
 function conversation(id: string, userID: string, unreadCount = 0, type = SessionType.Single): ConversationItem {
   return {
@@ -73,6 +73,10 @@ function mediaMessage(
   } as MessageItem;
 }
 
+function groupMember(userID: string, roleLevel = GroupMemberRole.Normal, groupID = "group-1"): GroupMemberItem {
+  return { groupID, userID, nickname: userID, roleLevel } as GroupMemberItem;
+}
+
 class FakePort implements ChatPort {
   conversations: ConversationItem[] = [];
   unread = 0;
@@ -91,6 +95,11 @@ class FakePort implements ChatPort {
   fileCreates = 0;
   settingCalls: Array<{ conversationID: string; patch: { isPinned?: boolean; recvMsgOpt?: MessageReceiveOptType } }> = [];
   settingError: Error | null = null;
+  groupInvites: Array<{ groupID: string; userIDs: string[] }> = [];
+  groupRemovals: Array<{ groupID: string; userID: string }> = [];
+  leftGroups: string[] = [];
+  dismissedGroups: string[] = [];
+  groupActionError: Error | null = null;
 
   listConversations = async () => this.conversations;
   setConversation = async (conversationID: string, patch: { isPinned?: boolean; recvMsgOpt?: MessageReceiveOptType }) => {
@@ -127,6 +136,24 @@ class FakePort implements ChatPort {
     return this.createdGroup;
   };
   groupMembers = async () => this.members;
+  inviteGroupMembers = async (groupID: string, userIDs: string[]) => {
+    this.groupInvites.push({ groupID, userIDs });
+    if (this.groupActionError) throw this.groupActionError;
+    this.members = [...this.members, ...userIDs.map((userID) => groupMember(userID, GroupMemberRole.Normal, groupID))];
+  };
+  removeGroupMember = async (groupID: string, userID: string) => {
+    this.groupRemovals.push({ groupID, userID });
+    if (this.groupActionError) throw this.groupActionError;
+    this.members = this.members.filter((member) => member.userID !== userID);
+  };
+  leaveGroup = async (groupID: string) => {
+    this.leftGroups.push(groupID);
+    if (this.groupActionError) throw this.groupActionError;
+  };
+  dismissGroup = async (groupID: string) => {
+    this.dismissedGroups.push(groupID);
+    if (this.groupActionError) throw this.groupActionError;
+  };
   markRead = async (conversationID: string) => { this.markedRead.push(conversationID); };
   subscribe = (events: ChatEvents) => {
     this.handlers = events;
@@ -411,6 +438,118 @@ describe("ConversationController", () => {
     await groupSelection;
 
     expect(controller.getState()).toMatchObject({ activeConversationID: "single", groupMembers: [], loadingGroupMembers: false });
+  });
+
+  it("projects owner, admin, and normal member removal permissions", () => {
+    const ownerMembers = [groupMember("owner", GroupMemberRole.Owner), groupMember("admin", GroupMemberRole.Admin), groupMember("normal")];
+    expect(canInviteGroupMembers(ownerMembers, "owner")).toBe(true);
+    expect(canInviteGroupMembers(ownerMembers, "admin")).toBe(true);
+    expect(canInviteGroupMembers(ownerMembers, "normal")).toBe(false);
+    expect(canRemoveGroupMember(ownerMembers, "owner", "admin")).toBe(true);
+    expect(canRemoveGroupMember(ownerMembers, "admin", "normal")).toBe(true);
+    expect(canRemoveGroupMember(ownerMembers, "admin", "owner")).toBe(false);
+    expect(canRemoveGroupMember(ownerMembers, "admin", "admin")).toBe(false);
+    expect(canRemoveGroupMember(ownerMembers, "normal", "admin")).toBe(false);
+  });
+
+  it("invites only unique non-members and refreshes the active group", async () => {
+    const port = new FakePort();
+    port.conversations = [conversation("group", "group-1", 0, SessionType.Group)];
+    port.members = [groupMember("self", GroupMemberRole.Owner), groupMember("existing")];
+    const controller = new ConversationController(port);
+    await controller.start("self");
+    await controller.select("group");
+
+    await controller.inviteGroupMembers(["existing", "new-member", "new-member", "self"]);
+
+    expect(port.groupInvites).toEqual([{ groupID: "group-1", userIDs: ["new-member"] }]);
+    expect(controller.getState().groupMembers.map((member) => member.userID)).toEqual(["self", "existing", "new-member"]);
+    expect(controller.getState().groupAction).toBeNull();
+  });
+
+  it("removes one permitted member and rejects a stale or forbidden target", async () => {
+    const port = new FakePort();
+    port.conversations = [conversation("group", "group-1", 0, SessionType.Group)];
+    port.members = [groupMember("self", GroupMemberRole.Admin), groupMember("normal"), groupMember("other-admin", GroupMemberRole.Admin)];
+    const controller = new ConversationController(port);
+    await controller.start("self");
+    await controller.select("group");
+
+    await controller.removeGroupMember("normal");
+    await expect(controller.removeGroupMember("other-admin")).rejects.toThrow("不能移除");
+
+    expect(port.groupRemovals).toEqual([{ groupID: "group-1", userID: "normal" }]);
+    expect(controller.getState().groupMembers.map((member) => member.userID)).toEqual(["self", "other-admin"]);
+    expect(controller.getState().error).toContain("不能移除");
+  });
+
+  it("keeps group state on lifecycle failure and rejects a concurrent action", async () => {
+    const port = new FakePort();
+    port.conversations = [conversation("group", "group-1", 0, SessionType.Group)];
+    port.members = [groupMember("self", GroupMemberRole.Owner), groupMember("normal")];
+    let release!: () => void;
+    port.removeGroupMember = async (groupID, userID) => {
+      port.groupRemovals.push({ groupID, userID });
+      await new Promise<void>((resolve) => { release = resolve; });
+      throw new Error("remove rejected");
+    };
+    const controller = new ConversationController(port);
+    await controller.start("self");
+    await controller.select("group");
+
+    const removing = controller.removeGroupMember("normal");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await expect(controller.dismissActiveGroup()).rejects.toThrow("正在执行");
+    release();
+    await expect(removing).rejects.toThrow("remove rejected");
+
+    expect(controller.getState().activeConversationID).toBe("group");
+    expect(controller.getState().groupMembers.map((member) => member.userID)).toContain("normal");
+    expect(controller.getState().groupAction).toBeNull();
+  });
+
+  it("clears the active projection after non-owner leave and owner dismiss", async () => {
+    const leavePort = new FakePort();
+    leavePort.conversations = [conversation("group", "group-1", 0, SessionType.Group)];
+    leavePort.members = [groupMember("owner", GroupMemberRole.Owner), groupMember("self")];
+    const leaving = new ConversationController(leavePort);
+    await leaving.start("self");
+    await leaving.select("group");
+    await leaving.leaveActiveGroup();
+    expect(leavePort.leftGroups).toEqual(["group-1"]);
+    expect(leaving.getState()).toMatchObject({ activeConversationID: null, conversations: [], groupMembers: [] });
+
+    const dismissPort = new FakePort();
+    dismissPort.conversations = [conversation("group", "group-1", 0, SessionType.Group)];
+    dismissPort.members = [groupMember("self", GroupMemberRole.Owner), groupMember("normal")];
+    const dismissing = new ConversationController(dismissPort);
+    await dismissing.start("self");
+    await dismissing.select("group");
+    await dismissing.dismissActiveGroup();
+    expect(dismissPort.dismissedGroups).toEqual(["group-1"]);
+    expect(dismissing.getState()).toMatchObject({ activeConversationID: null, conversations: [], groupMembers: [] });
+  });
+
+  it("scopes member callbacks and clears a group-unavailable callback idempotently", async () => {
+    const port = new FakePort();
+    port.conversations = [conversation("group", "group-1", 0, SessionType.Group)];
+    port.members = [groupMember("self", GroupMemberRole.Owner)];
+    const controller = new ConversationController(port);
+    await controller.start("self");
+    await controller.select("group");
+    port.members = [...port.members, groupMember("new-member")];
+
+    port.handlers?.groupMembersChanged("other-group");
+    expect(controller.getState().groupMembers).toHaveLength(1);
+    port.handlers?.groupMembersChanged("group-1");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(controller.getState().groupMembers).toHaveLength(2);
+
+    port.handlers?.groupUnavailable("group-1");
+    port.handlers?.groupUnavailable("group-1");
+    expect(controller.getState()).toMatchObject({ activeConversationID: null, conversations: [], groupMembers: [] });
+    port.handlers?.conversationsChanged([conversation("group", "group-1", 0, SessionType.Group)]);
+    expect(controller.getState().conversations).toEqual([]);
   });
 
   it("creates and opens a group from unique explicit member IDs", async () => {
