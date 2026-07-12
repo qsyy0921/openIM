@@ -36,7 +36,7 @@ test("real node2 Agent workspace completes cited answer and approved idempotent 
   await expect(citedRun.getByRole("region", { name: "引用来源" })).toBeVisible();
   await expect(citedRun.getByText("[C1]", { exact: true })).toBeVisible();
 
-  const ticketTitle = `Web Agent E2E ${nonce}`;
+  const ticketTitle = `OpenIM 平台 本机优先开发 Web Agent E2E ${nonce}`;
   const actionPrompt = `创建工单：${ticketTitle}`;
   await page.getByRole("textbox", { name: "向 Agent 提问" }).fill(actionPrompt);
   await page.getByRole("button", { name: "发送给 Agent" }).click();

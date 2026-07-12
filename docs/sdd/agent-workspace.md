@@ -1,6 +1,6 @@
 ---
 unit: agent-workspace
-status: implemented
+status: verified
 depends_on:
   - agent-runtime
   - acl-retrieval
@@ -87,9 +87,13 @@ The projection exposes durable Run, Intent, Execution, and ticket identifiers fo
 
 ## Verification evidence
 
-- Go unit tests cover identity/device resolution, deterministic Bot setup, member-scoped projection routing, and invalid request rejection.
-- Web unit tests cover workspace restore, official OpenIM trigger placement, exact-digest approval, and typed API errors.
-- Real node2 and visual evidence are pending deployment acceptance; this document remains `implemented` until that evidence passes.
+- Go unit tests cover identity/device resolution, deterministic Bot setup, member-scoped projection routing, and invalid request rejection; the complete Go suite passed after the projection was wired into Platform API.
+- Web typecheck/build and 19 unit tests passed, covering workspace restore, official OpenIM trigger placement, exact-digest approval, and typed API errors.
+- Release `b89a618` was built from a clean commit, archive SHA-256 `80B0C053ECDE76C614459E1AAFB54805294A1288F59EDA05A07949B112C07067` matched on `.1` and `.2`, every release file passed `SHA256SUMS`, and node2 health reported version `b89a618`.
+- Real node2 cited Run `f0e2bc13-b33c-44d1-a761-70ccf03e3a26` completed through OpenIM, Kafka, ACL retrieval, `deepseek-v4-pro`, persisted one citation, and produced OpenIM reply `e1a5f1107169ae7a11dc86ca33c10aee`.
+- Real node2 action Run `1940b88c-2d75-42ee-9acc-0d67dd7a03cd`, Intent `c0dcba7c-5720-4779-89db-e31a0c87fdfd`, and Execution `bac0faa0-014b-4ce0-a0a6-8dc5d75ad789` converged to succeeded with exactly one ticket `dccc657d-62db-479e-bafc-4600abf26e74`.
+- The serial real Playwright suite passed both Agent and single-chat scenarios in 23.3 seconds. It verified cited answer, pre-approval UI, browser approval, ticket receipt, refresh restoration, no localStorage state, no failed HTTP responses/console errors, and desktop/mobile horizontal-overflow checks.
+- Desktop `1280x720` and mobile `390x844` Agent screenshots passed visual inspection with readable citations, stable composer dimensions, and no incoherent overlap.
 
 ## Open questions
 
