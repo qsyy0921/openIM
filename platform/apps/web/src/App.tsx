@@ -11,6 +11,7 @@ import { ChatWorkspace } from "./ChatWorkspace";
 import { ConversationController, createOpenIMChatPort, initialChatState, type ChatState } from "./chat";
 import { ContactController, createOpenIMContactPort, initialContactState, type ContactState } from "./contact";
 import { ContactsWorkspace } from "./ContactsWorkspace";
+import { createOpenIMMessageSearchPort, initialMessageSearchState, MessageSearchController, type MessageSearchState } from "./message-search";
 import { connectOpenIM, disconnectOpenIM, type ConnectionUpdate } from "./openim";
 import { createIMSession, type IMSession } from "./platform-api";
 import { WorkspaceShell, type WorkspaceModule } from "./WorkspaceShell";
@@ -34,6 +35,7 @@ export function App({ config, userManager }: AppProps) {
   const [connection, setConnection] = useState<ConnectionUpdate>({ state: "connecting" });
   const [chatState, setChatState] = useState<ChatState>(initialChatState);
   const [contactState, setContactState] = useState<ContactState>(initialContactState);
+  const [messageSearchState, setMessageSearchState] = useState<MessageSearchState>(initialMessageSearchState);
   const [agentState, setAgentState] = useState<AgentState>(initialAgentState);
   const [activeModule, setActiveModule] = useState("messages");
   const detachRef = useRef<(() => void) | null>(null);
@@ -41,6 +43,8 @@ export function App({ config, userManager }: AppProps) {
   const unsubscribeChatRef = useRef<(() => void) | null>(null);
   const contactControllerRef = useRef<ContactController | null>(null);
   const unsubscribeContactRef = useRef<(() => void) | null>(null);
+  const messageSearchControllerRef = useRef<MessageSearchController | null>(null);
+  const unsubscribeMessageSearchRef = useRef<(() => void) | null>(null);
   const agentControllerRef = useRef<AgentController | null>(null);
   const unsubscribeAgentRef = useRef<(() => void) | null>(null);
   const agentStartedRef = useRef(false);
@@ -89,6 +93,11 @@ export function App({ config, userManager }: AppProps) {
         chatControllerRef.current = controller;
         unsubscribeChatRef.current = controller.subscribe(setChatState);
         await controller.start(nextSession.userID);
+        messageSearchControllerRef.current?.close();
+        unsubscribeMessageSearchRef.current?.();
+        const messageSearchController = new MessageSearchController(createOpenIMMessageSearchPort());
+        messageSearchControllerRef.current = messageSearchController;
+        unsubscribeMessageSearchRef.current = messageSearchController.subscribe(setMessageSearchState);
         contactControllerRef.current?.stop();
         unsubscribeContactRef.current?.();
         const contactController = new ContactController(createOpenIMContactPort());
@@ -144,6 +153,8 @@ export function App({ config, userManager }: AppProps) {
       unsubscribeChatRef.current?.();
       contactControllerRef.current?.stop();
       unsubscribeContactRef.current?.();
+      messageSearchControllerRef.current?.close();
+      unsubscribeMessageSearchRef.current?.();
       agentControllerRef.current?.stop();
       unsubscribeAgentRef.current?.();
     };
@@ -183,6 +194,10 @@ export function App({ config, userManager }: AppProps) {
       contactControllerRef.current = null;
       unsubscribeContactRef.current?.();
       unsubscribeContactRef.current = null;
+      messageSearchControllerRef.current?.close();
+      messageSearchControllerRef.current = null;
+      unsubscribeMessageSearchRef.current?.();
+      unsubscribeMessageSearchRef.current = null;
       agentControllerRef.current?.stop();
       agentControllerRef.current = null;
       unsubscribeAgentRef.current?.();
@@ -190,6 +205,7 @@ export function App({ config, userManager }: AppProps) {
       agentStartedRef.current = false;
       setChatState(initialChatState);
       setContactState(initialContactState);
+      setMessageSearchState(initialMessageSearchState);
       setAgentState(initialAgentState);
       setActiveModule("messages");
       await userManager.signoutRedirect();
@@ -259,7 +275,7 @@ export function App({ config, userManager }: AppProps) {
     );
   }
 
-  if (phase === "connected" && session && chatControllerRef.current && contactControllerRef.current) {
+  if (phase === "connected" && session && chatControllerRef.current && contactControllerRef.current && messageSearchControllerRef.current) {
     const openContactChat = async (userID: string) => {
       await chatControllerRef.current!.openDirect(userID);
       setActiveModule("messages");
@@ -267,7 +283,7 @@ export function App({ config, userManager }: AppProps) {
     return (
       <WorkspaceShell activeModule={activeModule} modules={workspaceModules} displayName={displayName} onModuleSelect={(moduleID) => void selectModule(moduleID)} onLogout={() => void logout()}>
         {activeModule === "messages" ? (
-          <ChatWorkspace controller={chatControllerRef.current} state={chatState} selfUserID={session.userID} connection={connection} contactController={contactControllerRef.current} contactState={contactState} />
+          <ChatWorkspace controller={chatControllerRef.current} state={chatState} selfUserID={session.userID} connection={connection} contactController={contactControllerRef.current} contactState={contactState} searchController={messageSearchControllerRef.current} searchState={messageSearchState} />
         ) : activeModule === "contacts" ? (
           <ContactsWorkspace controller={contactControllerRef.current} state={contactState} onOpenChat={openContactChat} />
         ) : agentControllerRef.current ? (
