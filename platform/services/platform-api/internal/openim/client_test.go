@@ -133,6 +133,75 @@ func TestClientSendsAgentTextWithAdminToken(t *testing.T) {
 	}
 }
 
+func TestClientProjectsOnlinePlatformsWithoutReturningConnectionSecrets(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/auth/get_admin_token":
+			writeEnvelope(t, w, map[string]any{"token": "admin-token", "expireTimeSeconds": 3600})
+		case "/user/get_users_online_status":
+			if r.Header.Get("token") != "admin-token" {
+				t.Fatalf("token = %q", r.Header.Get("token"))
+			}
+			var request struct {
+				UserIDs []string `json:"userIDs"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+				t.Fatal(err)
+			}
+			if len(request.UserIDs) != 1 || request.UserIDs[0] != "ent_user" {
+				t.Fatalf("request = %#v", request)
+			}
+			writeEnvelope(t, w, []map[string]any{{
+				"userID": "ent_user", "status": 1,
+				"detailPlatformStatus": []map[string]any{{"platformID": 5, "token": "must-not-escape", "connID": "private"}, {"platformID": 3, "token": "other"}, {"platformID": 5}},
+			}})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	client := NewClient(Config{BaseURL: server.URL, Secret: "secret", AdminUser: "imAdmin", Timeout: time.Second})
+
+	platforms, err := client.GetOnlinePlatforms(context.Background(), "ent_user")
+	if err != nil {
+		t.Fatalf("GetOnlinePlatforms() error = %v", err)
+	}
+	if len(platforms) != 2 || platforms[0] != 3 || platforms[1] != 5 {
+		t.Fatalf("platforms = %#v", platforms)
+	}
+}
+
+func TestClientForceLogoutUsesResolvedUserAndPlatform(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/auth/get_admin_token":
+			writeEnvelope(t, w, map[string]any{"token": "admin-token", "expireTimeSeconds": 3600})
+		case "/auth/force_logout":
+			if r.Header.Get("token") != "admin-token" {
+				t.Fatalf("token = %q", r.Header.Get("token"))
+			}
+			var request struct {
+				UserID     string `json:"userID"`
+				PlatformID int32  `json:"platformID"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+				t.Fatal(err)
+			}
+			if request.UserID != "ent_user" || request.PlatformID != 3 {
+				t.Fatalf("request = %#v", request)
+			}
+			writeEnvelope(t, w, nil)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	client := NewClient(Config{BaseURL: server.URL, Secret: "secret", AdminUser: "imAdmin", Timeout: time.Second})
+	if err := client.ForceLogout(context.Background(), "ent_user", 3); err != nil {
+		t.Fatalf("ForceLogout() error = %v", err)
+	}
+}
+
 func TestEnsureAgentBotAcceptsEmptySuccessData(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {

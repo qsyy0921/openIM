@@ -99,7 +99,7 @@ The UI exposes connection, restore, loading, optimistic send, and explicit error
 1. Image and file messages with MinIO-backed upload progress and failure recovery.
 2. Conversation pin, mute, drafts, local/global message search, and message actions.
 3. Group administration, mentions, receipts, and notification rendering.
-4. Account, device, privacy, appearance, and notification settings.
+4. Account, privacy, appearance, and notification settings; device management is now owned by `im-client-device-management.md`.
 5. One-to-one call evaluation; multi-party meetings remain a separate architecture decision.
 6. Only after the client foundation is stable: Agent Catalog, Tool/Skill Registry, MCP, Memory, and business Agents.
 

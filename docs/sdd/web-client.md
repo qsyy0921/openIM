@@ -10,7 +10,7 @@ depends_on:
 
 ## Scope
 
-Provide an extensible browser collaboration shell with verified OpenIM single/group text conversation foundations and an independently owned Agent workspace module. The group foundation is specified in `im-client-foundation.md`, contacts/member-picker in `im-client-contacts.md`, image/file in `im-client-media.md`, search/pin/mute in `im-client-conversations.md`, group lifecycle in `im-client-group-lifecycle.md`, message actions in `im-client-message-actions.md`, the admitted local message search in `im-client-message-search.md`, and the Agent module in `agent-workspace.md`. This unit continues to own shell, identity/session bootstrap, and IM presentation rather than Agent business state. It does not yet implement audio, video, enterprise-directory search, documents, or administration.
+Provide an extensible browser collaboration shell with verified OpenIM single/group text conversation foundations and an independently owned Agent workspace module. The group foundation is specified in `im-client-foundation.md`, contacts/member-picker in `im-client-contacts.md`, image/file in `im-client-media.md`, search/pin/mute in `im-client-conversations.md`, group lifecycle in `im-client-group-lifecycle.md`, message actions in `im-client-message-actions.md`, local message search in `im-client-message-search.md`, the admitted device slice in `im-client-device-management.md`, and the Agent module in `agent-workspace.md`. This unit continues to own shell, identity/session bootstrap, and IM presentation rather than Agent business state. It does not yet implement audio, video, enterprise-directory search, documents, or administration.
 
 ## Responsibilities and non-goals
 
@@ -78,6 +78,7 @@ The UI exposes coarse connection phase and endpoint readiness. Platform and Open
 - Real node2 single and group conversations upload, send, receive, preview, download/open, and restore image/file messages through the pinned SDK and OpenIM MinIO path described by `im-client-media.md`.
 - Real node2 conversation search filters only the synchronized projection; pin and per-conversation `NotNotify` persist across reload while muted messages continue to synchronize.
 - Real node2 message search uses the official synchronized local index, bounded pages, official bidirectional history context, and exact `clientMsgID` highlighting after reload.
+- A member can inspect the safe device-enrollment/platform-online projection, distinguish the current device, and log out another enrolled OpenIM platform without receiving an Admin Token; kicked and expired SDK states leave the active workspace.
 - Browser inspection confirms no token in visible UI, URL, localStorage, or console output.
 
 ## Source evidence
@@ -92,6 +93,9 @@ The UI exposes coarse connection phase and endpoint readiness. Platform and Open
 - `platform/apps/web/src/ContactsWorkspace.tsx`
 - `platform/apps/web/src/MemberPicker.tsx`
 - `platform/apps/web/src/AgentWorkspace.tsx`
+- `platform/apps/web/src/device.ts`
+- `platform/apps/web/src/device-api.ts`
+- `platform/apps/web/src/DeviceWorkspace.tsx`
 - `platform/apps/web/vite.config.ts`
 - `platform/apps/web/scripts/patch-openim-worker.mjs`
 - `platform/apps/web/src/config.test.ts`
@@ -99,6 +103,7 @@ The UI exposes coarse connection phase and endpoint readiness. Platform and Open
 - `platform/apps/web/src/contact.test.ts`
 - `platform/apps/web/src/MemberPicker.test.ts`
 - `platform/apps/web/e2e/node2-foundation.spec.ts`
+- `platform/apps/web/e2e/node2-device-management.spec.ts`
 
 ## Verification evidence
 
@@ -112,10 +117,11 @@ The UI exposes coarse connection phase and endpoint readiness. Platform and Open
 - The verified media extension adds official-SDK image/file creation and upload, exact `clientMsgID` progress state, explicit validation/failure, safe HTTP(S) rendering, preview/download, real Node2 inbound media, and single/group history restoration. The final full Agent plus IM/contact/media suite passed serially in 42.1 seconds.
 - The verified conversation-management extension adds projection-only search, real OpenIM pinning, and real `NotNotify` do-not-disturb with per-conversation concurrency protection. The final Agent plus conversation-management plus IM/contact/media suite passed serially in 48.4 seconds.
 - The verified message-search extension repairs the pinned SDK Worker/WASM keyword-search ABI at install time, queries only the official synchronized local database, and navigates through official forward/reverse history APIs because the locked runtime does not register its declared `fetchSurroundingMessages` global. The complete six-scenario Node2 suite passed serially in 91.7 seconds.
+- The verified device extension adds a member-scoped Platform API projection, exact current-device authorization, server-side OpenIM Admin calls, other-platform confirmation, request-order and duplicate-action protection, and distinct kicked/expired terminal states. A real Web plus Windows-platform run observed `OnKickedOffline`, then the full seven-scenario Node2 suite passed serially in 107.3 seconds.
 
 ## Open questions
 
 - Production reverse-proxy and CSP headers enter the deployment slice before public exposure.
 - Organization/department authorization and vector retrieval remain independent backend slices; OpenIM currently owns IM group authorization.
-- Secure browser device enrollment requires a separate identity slice; this local slice uses the pre-enrolled `local-browser` fixture.
+- Secure browser device enrollment remains a separate identity slice; device management reads existing enrollment and never self-enrolls a browser.
 - Remove the Worker compatibility patch when an accepted upstream SDK release handles nullable batch payloads and dynamic history-table initialization itself; the patch refuses unknown upstream signatures.
