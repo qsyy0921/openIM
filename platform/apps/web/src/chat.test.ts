@@ -176,6 +176,18 @@ describe("ConversationController", () => {
     expect(port.historyCalls).toBe(0);
   });
 
+  it("keeps group creation failure explicit without creating a local conversation", async () => {
+    const port = new FakePort();
+    port.createGroup = async () => { throw new Error("group rejected"); };
+    const controller = new ConversationController(port);
+    await controller.start("self");
+
+    await expect(controller.createGroup("Project", ["member-1"])).rejects.toThrow("group rejected");
+
+    expect(controller.getState().conversations).toEqual([]);
+    expect(controller.getState().error).toContain("group rejected");
+  });
+
   it("keeps a failed optimistic message and exposes the error", async () => {
     const port = new FakePort();
     port.conversations = [conversation("single", "peer")];

@@ -6,6 +6,7 @@ export type WorkspaceModule = {
   id: string;
   label: string;
   icon: LucideIcon;
+  badge?: number;
 };
 
 type WorkspaceShellProps = {
@@ -28,7 +29,7 @@ export function WorkspaceShell({ activeModule, modules, displayName, onModuleSel
       <aside className="workspace-nav" aria-label="工作区导航">
         <div className="workspace-brand" aria-label="OpenIM 协作平台">O</div>
         <nav className="module-nav">
-          {modules.map(({ id, label, icon: Icon }) => (
+          {modules.map(({ id, label, icon: Icon, badge }) => (
             <button
               key={id}
               className={`module-button ${activeModule === id ? "active" : ""}`}
@@ -39,6 +40,7 @@ export function WorkspaceShell({ activeModule, modules, displayName, onModuleSel
             >
               <Icon size={21} strokeWidth={1.8} />
               <span>{label}</span>
+              {Boolean(badge) && <b className="module-badge" aria-label={`${label}未处理 ${badge}`}>{badge}</b>}
             </button>
           ))}
         </nav>
