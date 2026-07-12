@@ -17,5 +17,6 @@
 | IM client group lifecycle | [im-client-group-lifecycle.md](im-client-group-lifecycle.md) | verified | preserve locked-SDK role rules; transfer ownership and role editing require a separate slice |
 | IM client message actions | [im-client-message-actions.md](im-client-message-actions.md) | verified | preserve official message ownership; merged forwarding and group reader lists require separate slices |
 | IM client message search | [im-client-message-search.md](im-client-message-search.md) | verified | preserve the pinned Worker ABI fix; global/server search requires a separate measured slice |
+| IM client device management | [im-client-device-management.md](im-client-device-management.md) | verified | same-platform device selection requires an upstream device-aware Token model |
 
 Future units are added only when they enter an admitted root-Goal slice. A unit is not marked implemented or verified until code and stated checks exist.

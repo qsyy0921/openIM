@@ -1,11 +1,26 @@
 # OpenIM Web 基础客户端连续交付 Goal
 
-状态：active
+状态：complete
 
 工作区：`E:\development\OPENIM`
 
 交付模式：每个里程碑独立提交、推送和 Draft PR，不自动合并
 最终边界：完成基础 IM 客户端，不进入企业协同业务或新 Agent 功能
+
+## Final delivery record
+
+| Milestone | Branch | Commit | Draft PR | CI |
+| --- | --- | --- | --- | --- |
+| 图片与文件消息 | `codex/client-foundation-media` | `4590771` | [#6](https://github.com/qsyy0921/openIM/pull/6) | passed |
+| 会话搜索、置顶与免打扰 | `codex/client-conversation-management` | `7461740` | [#7](https://github.com/qsyy0921/openIM/pull/7) | passed |
+| 群成员与群生命周期 | `codex/client-group-lifecycle` | `4cb99bc` | [#8](https://github.com/qsyy0921/openIM/pull/8) | passed |
+| 引用、转发、撤回与已读 | `codex/client-message-actions` | `6be6af8` | [#9](https://github.com/qsyy0921/openIM/pull/9) | passed |
+| 本地消息搜索 | `codex/client-message-search` | `dba1724` | [#10](https://github.com/qsyy0921/openIM/pull/10) | passed |
+| 多端设备与登录管理 | `codex/client-device-management` | `4307c2f` | [#11](https://github.com/qsyy0921/openIM/pull/11) | tracked by PR checks |
+
+最终根级回归在 Node2 真实环境串行通过 7/7 场景，用时 107.3 秒，覆盖 Agent、会话管理、Web/Windows 多平台注销、单群聊与媒体、群生命周期、消息操作和本地消息搜索。Web Vitest 通过 10 个文件 71 项测试，Go 全量测试、TypeScript 类型检查、生产构建、仓库校验、严格 SDD 校验和桌面/移动视觉检查均通过。
+
+已确认的上游边界：锁定 OpenIM 只按 `userID + platformID` 管理踢端，不能选择同平台内某个企业 `device_id`；本实现因此只允许注销另一平台，并明确展示平台级在线状态。消息搜索继续使用 SDK 已同步的本地索引；企业全局搜索、同平台精确踢端、云文档、会议、任务和新 Agent 均未进入本 Goal。
 
 ## Root outcome
 

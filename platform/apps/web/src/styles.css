@@ -416,6 +416,55 @@ h2 { margin: 0; font-size: 17px; }
 .agent-composer textarea { width: 100%; min-height: 48px; max-height: 120px; resize: vertical; padding: 12px; border: 1px solid #d5dae1; border-radius: 6px; color: #242830; }
 .agent-composer textarea:focus { outline: 2px solid rgba(49, 94, 251, 0.18); border-color: #315efb; }
 
+.device-layout { width: 100%; height: 100%; min-height: 0; display: flex; flex-direction: column; background: #fff; }
+.device-header { min-height: 74px; display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 14px 22px; border-bottom: 1px solid #e1e4e8; }
+.device-header h1 { margin: 0; font-size: 21px; }
+.device-header p { margin: 4px 0 0; color: #858c97; font-size: 12px; }
+.device-error { min-height: 42px; display: grid; grid-template-columns: 20px minmax(0, 1fr) 30px; gap: 8px; align-items: center; padding: 7px 18px; color: #8f2d27; background: #fcebea; border-bottom: 1px solid #f2cfcb; font-size: 12px; }
+.device-error button { width: 30px; height: 30px; display: grid; place-items: center; border: 0; color: inherit; background: transparent; cursor: pointer; }
+.device-scroll { min-height: 0; flex: 1; overflow-y: auto; padding: 20px clamp(14px, 4vw, 48px); background: #f2f4f7; }
+.device-summary { max-width: 1060px; min-height: 52px; display: grid; grid-template-columns: 24px minmax(0, 1fr); gap: 10px; align-items: start; margin: 0 auto 14px; padding: 11px 14px; border-left: 3px solid #315efb; color: #3d4652; background: #eef2ff; }
+.device-summary svg { color: #315efb; }
+.device-summary div { display: flex; flex-direction: column; gap: 3px; }
+.device-summary strong { font-size: 12px; }
+.device-summary span { color: #6d7581; font-size: 11px; line-height: 1.5; }
+.device-table { max-width: 1060px; margin: 0 auto; overflow: hidden; border: 1px solid #dfe3e8; border-radius: 7px; background: #fff; }
+.device-table-head, .device-row { display: grid; grid-template-columns: minmax(230px, 1.5fr) minmax(96px, .7fr) minmax(105px, .75fr) minmax(160px, 1fr) 90px; gap: 12px; align-items: center; padding: 0 15px; }
+.device-table-head { min-height: 38px; color: #737b87; background: #f8f9fb; border-bottom: 1px solid #e1e4e8; font-size: 11px; font-weight: 600; }
+.device-row { min-height: 72px; border-bottom: 1px solid #e7e9ed; }
+.device-row:last-child { border-bottom: 0; }
+.device-name { min-width: 0; display: grid; grid-template-columns: 36px minmax(0, 1fr) auto; gap: 10px; align-items: center; }
+.device-icon { width: 36px; height: 36px; display: grid; place-items: center; border-radius: 6px; color: #315efb; background: #e8edff; }
+.device-name > span:nth-child(2) { min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.device-name strong, .device-name small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.device-name strong { font-size: 13px; }
+.device-name small { color: #858c97; font-size: 10px; }
+.device-name b { min-height: 22px; display: inline-flex; align-items: center; padding: 0 7px; border-radius: 5px; color: #315efb; background: #e8edff; font-size: 10px; }
+.device-state { display: inline-flex; align-items: center; gap: 5px; color: #737b87; font-size: 11px; }
+.device-state.active, .device-state.online { color: #16794f; }
+.device-state.disabled { color: #9c4e49; }
+.device-state i { width: 7px; height: 7px; border-radius: 50%; background: #a4abb5; }
+.device-state.online i { background: #28a66a; }
+.device-time { color: #68717d; font-size: 11px; }
+.device-logout { min-height: 32px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 0 10px; border: 1px solid #d5dae1; border-radius: 6px; color: #4f5864; background: #fff; cursor: pointer; }
+.device-logout:hover:not(:disabled) { color: #a33830; border-color: #e0aaa6; background: #fff5f4; }
+.device-logout:disabled { color: #a0a6ae; background: #f5f6f7; cursor: not-allowed; }
+.device-empty { min-height: 140px; display: flex; align-items: center; justify-content: center; gap: 9px; color: #858c97; font-size: 12px; }
+.device-correlation { max-width: 1060px; margin: 12px auto 0; color: #737b87; font-size: 11px; overflow-wrap: anywhere; }
+.device-correlation code { color: #3d4652; }
+.device-confirm { width: min(460px, 100%); padding: 18px; border-radius: 7px; background: #fff; box-shadow: 0 20px 60px rgba(25, 31, 40, .2); }
+.device-confirm header { display: flex; justify-content: space-between; gap: 14px; }
+.device-confirm h2 { margin: 0; font-size: 17px; }
+.device-confirm header p { margin: 6px 0 0; color: #737b87; font-size: 12px; line-height: 1.5; }
+.device-confirm dl { margin: 18px 0; border-top: 1px solid #e1e4e8; border-bottom: 1px solid #e1e4e8; }
+.device-confirm dl > div { min-height: 42px; display: grid; grid-template-columns: 110px minmax(0, 1fr); align-items: center; border-bottom: 1px solid #eceef1; }
+.device-confirm dl > div:last-child { border-bottom: 0; }
+.device-confirm dt { color: #858c97; font-size: 11px; }
+.device-confirm dd { min-width: 0; margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
+.device-confirm footer { display: flex; justify-content: flex-end; gap: 8px; }
+.danger-button { min-height: 38px; display: inline-flex; align-items: center; justify-content: center; gap: 7px; padding: 0 13px; border: 0; border-radius: 6px; color: #fff; background: #b13a34; cursor: pointer; }
+.danger-button:disabled { background: #c99591; cursor: wait; }
+
 /* Connection-error view retained outside the authenticated collaboration shell. */
 .rail { background: #252b35; padding: 16px 14px; display: flex; flex-direction: column; align-items: center; gap: 24px; }
 .rail-button { width: 36px; height: 36px; display: grid; place-items: center; border: 0; border-radius: 6px; color: #c3c8d0; background: transparent; }
@@ -505,4 +554,16 @@ h2 { margin: 0; font-size: 17px; }
   .approval-panel { grid-template-columns: 36px minmax(0, 1fr); }
   .approve-button { grid-column: 1 / -1; justify-content: center; }
   .agent-composer { min-height: 68px; padding: 9px 10px; gap: 8px; }
+  .device-header { min-height: 60px; padding: 9px 12px; }
+  .device-header h1 { font-size: 19px; }
+  .device-scroll { padding: 10px; }
+  .device-table { overflow: visible; border: 0; border-radius: 0; background: transparent; }
+  .device-table-head { display: none; }
+  .device-row { min-height: 0; grid-template-columns: minmax(0, 1fr) auto; gap: 9px 12px; margin-bottom: 9px; padding: 12px; border: 1px solid #dfe3e8; border-radius: 7px; background: #fff; }
+  .device-row:last-child { border-bottom: 1px solid #dfe3e8; }
+  .device-name { grid-column: 1 / -1; }
+  .device-time { grid-column: 1; }
+  .device-row > span:last-child { grid-column: 2; grid-row: 3 / span 2; align-self: end; }
+  .device-summary { margin-bottom: 10px; }
+  .device-confirm { padding: 16px; }
 }

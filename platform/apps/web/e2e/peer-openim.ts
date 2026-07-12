@@ -3,6 +3,13 @@
 import { CbEvents, getSDK, LogLevel, ViewType, type MessageItem, type WSEvent } from "@openim/wasm-client-sdk";
 
 const sdk = getSDK();
+let kicked = false;
+let kickedWaiters = new Set<() => void>();
+const kickedOffline = () => {
+  kicked = true;
+  for (const resolve of kickedWaiters) resolve();
+  kickedWaiters.clear();
+};
 
 function conversationID(left: string, right: string): string {
   return `si_${[left, right].sort().join("_")}`;
@@ -12,7 +19,10 @@ function textOf(message: MessageItem): string {
   return message.textElem?.content || message.quoteElem?.text || "";
 }
 
-export async function loginPeer(userID: string, token: string): Promise<void> {
+export async function loginPeer(userID: string, token: string, platformID = 5): Promise<void> {
+  kicked = false;
+  sdk.off(CbEvents.OnKickedOffline, kickedOffline);
+  sdk.on(CbEvents.OnKickedOffline, kickedOffline);
   let resolveSync!: () => void;
   let rejectSync!: (error: Error) => void;
   const synchronized = new Promise<void>((resolve, reject) => {
@@ -27,7 +37,7 @@ export async function loginPeer(userID: string, token: string): Promise<void> {
     await sdk.login({
       userID,
       token,
-      platformID: 5,
+      platformID,
       apiAddr: import.meta.env.VITE_OPENIM_API_URL,
       wsAddr: import.meta.env.VITE_OPENIM_WS_URL,
       logLevel: LogLevel.Error,
@@ -41,6 +51,21 @@ export async function loginPeer(userID: string, token: string): Promise<void> {
     sdk.off(CbEvents.OnSyncServerFinish, synced);
     sdk.off(CbEvents.OnSyncServerFailed, syncFailed);
   }
+}
+
+export async function waitForPeerKicked(timeoutMilliseconds = 30_000): Promise<void> {
+  if (kicked) return;
+  await new Promise<void>((resolve, reject) => {
+    const timeout = window.setTimeout(() => {
+      kickedWaiters.delete(done);
+      reject(new Error("peer did not receive OnKickedOffline"));
+    }, timeoutMilliseconds);
+    const done = () => {
+      window.clearTimeout(timeout);
+      resolve();
+    };
+    kickedWaiters.add(done);
+  });
 }
 
 export async function sendPeerText(targetUserID: string, text: string): Promise<void> {
@@ -76,5 +101,7 @@ export async function quotePeerMessage(userID: string, targetUserID: string, sou
 }
 
 export async function logoutPeer(): Promise<void> {
+  sdk.off(CbEvents.OnKickedOffline, kickedOffline);
+  kickedWaiters.clear();
   await sdk.logout();
 }
