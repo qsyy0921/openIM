@@ -10,11 +10,11 @@ depends_on:
 
 ## Scope
 
-Provide an extensible browser collaboration shell with the verified OpenIM single-chat vertical slice and an independently owned Agent workspace module. The Agent module is specified in `agent-workspace.md`; this unit continues to own shell, identity/session bootstrap, and IM behavior rather than Agent business state. This slice does not implement group chat, files, images, audio, video, search, contacts, documents, or administration.
+Provide an extensible browser collaboration shell with verified OpenIM single/group text conversation foundations and an independently owned Agent workspace module. The group extension is specified in `im-client-foundation.md`; the Agent module is specified in `agent-workspace.md`. This unit continues to own shell, identity/session bootstrap, and IM presentation rather than Agent business state. It does not yet implement files, images, audio, video, search, contacts, documents, or administration.
 
 ## Responsibilities and non-goals
 
-The unit owns interactive sign-in/out, the extensible workspace shell, use of an explicitly configured enrolled device identity, in-memory OpenIM session material, WASM SDK initialization, connection state, single-conversation presentation, bounded history loading, text composition, optimistic send state, real-time receive handling, active-conversation read state, and explicit client errors. It does not own enterprise credentials, OpenIM Admin Tokens, device enrollment, identity provisioning rules, server authorization, group features, or an alternate IM transport.
+The unit owns interactive sign-in/out, the extensible workspace shell, use of an explicitly configured enrolled device identity, in-memory OpenIM session material, WASM SDK initialization, connection state, single/group conversation presentation, bounded history and group-member loading, text composition, optimistic send state, real-time receive handling, active-conversation read state, and explicit client errors. It does not own enterprise credentials, OpenIM Admin Tokens, device enrollment, identity provisioning rules, server authorization, authoritative group state, or an alternate IM transport.
 
 ## Contracts and dependencies
 
@@ -32,7 +32,7 @@ The unit owns interactive sign-in/out, the extensible workspace shell, use of an
 - The device ID is required configuration and must already be active for the member; the client cannot self-enroll or bypass this check.
 - Missing or invalid configuration, malformed session responses, endpoint mismatch, and SDK failure are explicit errors; no alternate provider or transport exists.
 - Conversation and message identity use OpenIM `conversationID` and `clientMsgID`; event replay cannot duplicate rendered messages.
-- Only `SessionType.Single` and text messages enter this UI. Unsupported content is not synthesized into text.
+- Only `SessionType.Single`, `SessionType.Group`, and text messages enter this UI. Unsupported content is not synthesized into text.
 - A send is shown as `sending` before the SDK call, `succeeded` only from the returned authoritative message, and `failed` on an explicit SDK error.
 - Global modules are registered through `WorkspaceModule` descriptors and rendered by `WorkspaceShell`; feature modules own their inner list/detail workflow and do not duplicate global navigation or account controls.
 - Desktop uses global-module, conversation-list, and work-panel columns. At mobile width, the current module keeps one work panel visible and provides an explicit list/detail transition.
@@ -45,7 +45,7 @@ The unit owns interactive sign-in/out, the extensible workspace shell, use of an
 4. Send the ID Token and device tuple to `/v1/im/session`.
 5. Validate the exact response and require the returned WebSocket endpoint to match configured OpenIM topology.
 6. Login through the official WASM SDK, wait for initial `OnSyncServerFinish`, and observe connecting, connected, sync, failed, kicked, and token-invalid events.
-7. Load single conversations and total unread state, then load bounded history for the selected conversation.
+7. Load supported single/group conversations and total unread state, then load bounded history and group members for the selected conversation.
 8. Create and optimistically render a text message; replace it with the SDK result or mark it failed.
 9. Merge real-time message and conversation events by stable IDs and mark the visible conversation read.
 10. On successful reconnection, reload conversations, unread state, and active history before declaring the chat state restored.
@@ -72,7 +72,7 @@ The UI exposes coarse connection phase and endpoint readiness. Platform and Open
 - Unit tests verify configuration, ID Token exchange, typed errors, and malformed success rejection.
 - TypeScript typecheck and production build pass with pinned dependencies.
 - A real browser completes PKCE login, `/v1/im/session`, WASM SDK login, and node2 WebSocket connection.
-- Two real node2 members exchange text in both directions; the receiver updates without reload, unread state clears when selected, history survives reload/reconnect, and the sent message converges from sending to succeeded.
+- Real node2 members exchange single and group text; unread state clears when selected, history survives reload/reconnect, group members resolve, and sent messages converge from sending to succeeded.
 - Browser inspection confirms no token in visible UI, URL, localStorage, or console output.
 
 ## Source evidence
@@ -92,16 +92,16 @@ The UI exposes coarse connection phase and endpoint readiness. Platform and Open
 
 ## Verification evidence
 
-- `npm run typecheck` passed and Vitest passed 19 configuration, Platform API, connection, single-chat, Agent API, and Agent controller tests.
+- `npm run typecheck` passed and Vitest passed 23 configuration, Platform API, connection, single/group-chat, Agent API, and Agent controller tests.
 - `npm run test:e2e:node2` passed against the real `.2` runtime: system Chrome completed Keycloak Authorization Code with PKCE, exchanged the ID Token at `/v1/im/session`, initialized and synchronized the official WASM SDK, and connected to node2 OpenIM.
-- The E2E injected real `imAdmin -> Web` messages through node2, observed unread increment and read clearing, sent `Web -> imAdmin` text to the server, received an active-conversation message in real time, recovered from browser offline/online, and found all three messages after reload.
-- The same test observed zero HTTP failures and zero console errors, found no localStorage entries or token-shaped visible text, and confirmed the callback authorization code was removed from the URL.
-- Desktop `1280x720` and mobile `390x844` chat/list screenshots passed horizontal-overflow checks and visual inspection without overlapping controls or text; the mobile E2E exercised explicit conversation-list and chat-detail navigation.
+- The E2E injected real `imAdmin -> Web` messages through node2, observed unread increment and read clearing, sent `Web -> imAdmin` text, recovered from browser offline/online, and found the messages after reload. It also created a real group, sent group text, loaded members, restored group history, and dismissed the test group.
+- The same test observed zero HTTP failures and no unexpected console errors, found no localStorage entries or token-shaped visible text, and confirmed the callback authorization code was removed from the URL. One exact bounded OpenIM new-group update diagnostic is documented in `im-client-foundation.md`.
+- Desktop `1280x720` group chat and mobile `390x844` single-chat/list screenshots passed horizontal-overflow checks and visual inspection without overlapping controls or text; the mobile E2E exercised explicit conversation-list and chat-detail navigation.
 - The node2 Playwright configuration uses one worker because the real single-chat and Agent scenarios intentionally share one authenticated account and global OpenIM unread state.
 
 ## Open questions
 
 - Production reverse-proxy and CSP headers enter the deployment slice before public exposure.
-- Group/department authorization and vector retrieval remain independent backend slices.
+- Organization/department authorization and vector retrieval remain independent backend slices; OpenIM currently owns IM group authorization.
 - Secure browser device enrollment requires a separate identity slice; this local slice uses the pre-enrolled `local-browser` fixture.
-- Remove the Worker compatibility patch when an accepted upstream SDK release handles nullable batch payloads itself; `3.8.5-hotfix.0` still contains the same unsafe batch operations.
+- Remove the Worker compatibility patch when an accepted upstream SDK release handles nullable batch payloads and dynamic history-table initialization itself; the patch refuses unknown upstream signatures.

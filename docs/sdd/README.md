@@ -10,5 +10,6 @@
 | ACL retrieval | [acl-retrieval.md](acl-retrieval.md) | verified | group grants and vector search require separate measured slices |
 | Action Executor | [action-executor.md](action-executor.md) | verified | preserve single-action boundary; external adapters require a new slice |
 | Web client | [web-client.md](web-client.md) | verified | add conversations/messages only in a dedicated IM UI slice |
+| IM client foundation | [im-client-foundation.md](im-client-foundation.md) | verified | add contacts and a reusable member picker in the next bounded client slice |
 
 Future units are added only when they enter an admitted root-Goal slice. A unit is not marked implemented or verified until code and stated checks exist.

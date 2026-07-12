@@ -1,11 +1,14 @@
 import {
   CbEvents,
   getSDK,
+  GroupMemberFilter,
+  GroupType,
   MessageStatus,
   MessageType,
   SessionType,
   ViewType,
   type ConversationItem,
+  type GroupMemberItem,
   type MessageItem,
   type WSEvent
 } from "@openim/wasm-client-sdk";
@@ -17,6 +20,8 @@ export type ChatState = {
   messages: MessageItem[];
   historyEnded: boolean;
   loadingHistory: boolean;
+  groupMembers: GroupMemberItem[];
+  loadingGroupMembers: boolean;
   restoring: boolean;
   error: string | null;
 };
@@ -30,10 +35,12 @@ export type ChatEvents = {
 export type ChatPort = {
   listConversations: () => Promise<ConversationItem[]>;
   totalUnread: () => Promise<number>;
-  oneConversation: (userID: string) => Promise<ConversationItem>;
+  oneConversation: (sourceID: string, sessionType: SessionType) => Promise<ConversationItem>;
   history: (conversationID: string, startClientMsgID: string) => Promise<{ isEnd: boolean; messageList: MessageItem[] }>;
   createText: (text: string) => Promise<MessageItem>;
-  send: (receiverID: string, message: MessageItem) => Promise<MessageItem>;
+  send: (conversation: ConversationItem, message: MessageItem) => Promise<MessageItem>;
+  createGroup: (name: string, memberUserIDs: string[]) => Promise<ConversationItem>;
+  groupMembers: (groupID: string) => Promise<GroupMemberItem[]>;
   markRead: (conversationID: string) => Promise<void>;
   subscribe: (events: ChatEvents) => () => void;
 };
@@ -45,6 +52,8 @@ export const initialChatState: ChatState = {
   messages: [],
   historyEnded: true,
   loadingHistory: false,
+  groupMembers: [],
+  loadingGroupMembers: false,
   restoring: false,
   error: null
 };
@@ -58,14 +67,17 @@ function errorMessage(error: unknown): string {
   return "OpenIM operation failed";
 }
 
-function singleConversations(items: ConversationItem[]): ConversationItem[] {
+function supportedConversations(items: ConversationItem[]): ConversationItem[] {
   return items
-    .filter((item) => item.conversationType === SessionType.Single)
+    .filter((item) => item.conversationType === SessionType.Single ||
+      (item.conversationType === SessionType.Group && !item.isNotInGroup))
     .sort((left, right) => Number(right.isPinned) - Number(left.isPinned) || right.latestMsgSendTime - left.latestMsgSendTime);
 }
 
 function textMessages(items: MessageItem[]): MessageItem[] {
-  return items.filter((item) => item.sessionType === SessionType.Single && item.contentType === MessageType.TextMessage);
+  return items.filter((item) =>
+    (item.sessionType === SessionType.Single || item.sessionType === SessionType.Group) && item.contentType === MessageType.TextMessage
+  );
 }
 
 function mergeMessages(current: MessageItem[], incoming: MessageItem[]): MessageItem[] {
@@ -79,15 +91,16 @@ function mergeMessages(current: MessageItem[], incoming: MessageItem[]): Message
 
 function upsertConversations(current: ConversationItem[], incoming: ConversationItem[]): ConversationItem[] {
   const merged = new Map(current.map((item) => [item.conversationID, item]));
-  for (const item of singleConversations(incoming)) merged.set(item.conversationID, item);
-  return singleConversations([...merged.values()]);
+  for (const item of supportedConversations(incoming)) merged.set(item.conversationID, item);
+  return supportedConversations([...merged.values()]);
 }
 
-export class SingleChatController {
+export class ConversationController {
   private state: ChatState = initialChatState;
   private listeners = new Set<(state: ChatState) => void>();
   private unsubscribePort: (() => void) | null = null;
   private selfUserID = "";
+  private groupMemberRequest = 0;
 
   constructor(private readonly port: ChatPort) {}
 
@@ -122,7 +135,7 @@ export class SingleChatController {
       const [conversations, totalUnread] = await Promise.all([this.port.listConversations(), this.port.totalUnread()]);
       const active = this.state.activeConversationID;
       const priorActive = this.state.conversations.find((item) => item.conversationID === active);
-      this.update({ conversations: priorActive ? upsertConversations([priorActive], conversations) : singleConversations(conversations), totalUnread });
+      this.update({ conversations: priorActive ? upsertConversations([priorActive], conversations) : supportedConversations(conversations), totalUnread });
       if (active) {
         await this.loadHistory(active, false);
         await this.markRead(active);
@@ -138,7 +151,7 @@ export class SingleChatController {
     const target = userID.trim();
     if (!target || target === this.selfUserID) throw new Error("a different OpenIM user ID is required");
     try {
-      const conversation = await this.port.oneConversation(target);
+      const conversation = await this.port.oneConversation(target, SessionType.Single);
       this.update({ conversations: upsertConversations(this.state.conversations, [conversation]) });
       await this.select(conversation.conversationID);
     } catch (error) {
@@ -147,12 +160,38 @@ export class SingleChatController {
     }
   }
 
-  async select(conversationID: string): Promise<void> {
+  async select(conversationID: string, loadExistingHistory = true): Promise<void> {
     const conversation = this.state.conversations.find((item) => item.conversationID === conversationID);
-    if (!conversation || conversation.conversationType !== SessionType.Single) throw new Error("single conversation is unavailable");
-    this.update({ activeConversationID: conversationID, messages: [], historyEnded: false, error: null });
-    await this.loadHistory(conversationID, false);
+    if (!conversation || (conversation.conversationType !== SessionType.Single && conversation.conversationType !== SessionType.Group)) {
+      throw new Error("conversation is unavailable");
+    }
+    this.groupMemberRequest += 1;
+    this.update({ activeConversationID: conversationID, messages: [], historyEnded: !loadExistingHistory, groupMembers: [], loadingGroupMembers: false, error: null });
+    if (loadExistingHistory) await this.loadHistory(conversationID, false);
     await this.markRead(conversationID);
+    if (conversation.conversationType === SessionType.Group) await this.loadGroupMembers(conversation.groupID);
+  }
+
+  async createGroup(name: string, memberUserIDs: string[]): Promise<void> {
+    const groupName = name.trim();
+    const members = [...new Set(memberUserIDs.map((value) => value.trim()).filter((value) => value && value !== this.selfUserID))];
+    if (!groupName) throw new Error("group name is required");
+    if (groupName.length > 60) throw new Error("group name exceeds 60 characters");
+    if (members.length < 1) throw new Error("at least one other OpenIM user is required");
+    try {
+      const conversation = await this.port.createGroup(groupName, members);
+      this.update({ conversations: upsertConversations(this.state.conversations, [conversation]), error: null });
+      await this.select(conversation.conversationID, false);
+    } catch (error) {
+      this.fail(error);
+      throw error;
+    }
+  }
+
+  async refreshGroupMembers(): Promise<void> {
+    const conversation = this.activeConversation();
+    if (!conversation || conversation.conversationType !== SessionType.Group) return;
+    await this.loadGroupMembers(conversation.groupID);
   }
 
   async loadOlder(): Promise<void> {
@@ -164,7 +203,7 @@ export class SingleChatController {
   async sendText(text: string): Promise<void> {
     const content = text.trim();
     const conversation = this.activeConversation();
-    if (!conversation) throw new Error("select a single conversation before sending");
+    if (!conversation) throw new Error("select a conversation before sending");
     if (!content) throw new Error("message text is required");
     if (content.length > 6000) throw new Error("message text exceeds 6000 characters");
 
@@ -178,7 +217,7 @@ export class SingleChatController {
     draft = { ...draft, status: MessageStatus.Sending };
     this.update({ messages: mergeMessages(this.state.messages, [draft]), error: null });
     try {
-      const sent = await this.port.send(conversation.userID, draft);
+      const sent = await this.port.send(conversation, draft);
       this.update({ messages: mergeMessages(this.state.messages, [{ ...sent, status: MessageStatus.Succeed }]) });
     } catch (error) {
       this.update({
@@ -215,12 +254,29 @@ export class SingleChatController {
     const active = this.activeConversation();
     const incoming = textMessages(items).filter((message) => {
       if (!active) return false;
+      if (active.conversationType === SessionType.Group) return message.groupID === active.groupID;
       return (message.sendID === active.userID && message.recvID === this.selfUserID) ||
         (message.sendID === this.selfUserID && message.recvID === active.userID);
     });
     if (incoming.length === 0 || !active) return;
     this.update({ messages: mergeMessages(this.state.messages, incoming) });
-    if (incoming.some((message) => message.sendID === active.userID)) await this.markRead(active.conversationID);
+    if (incoming.some((message) => message.sendID !== this.selfUserID)) await this.markRead(active.conversationID);
+  }
+
+  private async loadGroupMembers(groupID: string): Promise<void> {
+    const request = ++this.groupMemberRequest;
+    this.update({ loadingGroupMembers: true, error: null });
+    try {
+      const members = await this.port.groupMembers(groupID);
+      if (request !== this.groupMemberRequest) return;
+      const active = this.activeConversation();
+      if (!active || active.groupID !== groupID) return;
+      this.update({ groupMembers: members, loadingGroupMembers: false });
+    } catch (error) {
+      if (request !== this.groupMemberRequest) return;
+      this.fail(new Error(`加载群成员失败：${errorMessage(error)}`), { loadingGroupMembers: false });
+      throw error;
+    }
   }
 
   private async markRead(conversationID: string): Promise<void> {
@@ -256,7 +312,7 @@ export function createOpenIMChatPort(): ChatPort {
   return {
     listConversations: async () => (await sdk.getConversationListSplit({ offset: 0, count: 200 })).data,
     totalUnread: async () => (await sdk.getTotalUnreadMsgCount()).data,
-    oneConversation: async (userID) => (await sdk.getOneConversation({ sourceID: userID, sessionType: SessionType.Single })).data,
+    oneConversation: async (sourceID, sessionType) => (await sdk.getOneConversation({ sourceID, sessionType })).data,
     history: async (conversationID, startClientMsgID) => {
       const { data } = await sdk.getAdvancedHistoryMessageList({
         conversationID,
@@ -267,7 +323,53 @@ export function createOpenIMChatPort(): ChatPort {
       return data;
     },
     createText: async (text) => (await sdk.createTextMessage(text)).data,
-    send: async (receiverID, message) => (await sdk.sendMessage({ recvID: receiverID, groupID: "", message })).data,
+    send: async (conversation, message) => (await sdk.sendMessage({
+      recvID: conversation.conversationType === SessionType.Single ? conversation.userID : "",
+      groupID: conversation.conversationType === SessionType.Group ? conversation.groupID : "",
+      message
+    })).data,
+    createGroup: async (name, memberUserIDs) => {
+      let expectedGroupID = "";
+      const observed = new Map<string, ConversationItem>();
+      let resolveReady: ((conversation: ConversationItem) => void) | null = null;
+      const ready = new Promise<ConversationItem>((resolve) => { resolveReady = resolve; });
+      const observe = ({ data }: WSEvent<ConversationItem[]>) => {
+        for (const conversation of data) {
+          if (conversation.conversationType !== SessionType.Group) continue;
+          observed.set(conversation.groupID, conversation);
+          if (conversation.groupID === expectedGroupID) resolveReady?.(conversation);
+        }
+      };
+      sdk.on(CbEvents.OnNewConversation, observe);
+      sdk.on(CbEvents.OnConversationChanged, observe);
+      let timeoutID = 0;
+      try {
+        const group = (await sdk.createGroup({
+          groupInfo: { groupName: name, groupType: GroupType.WorkingGroup },
+          memberUserIDs,
+          adminUserIDs: []
+        })).data;
+        expectedGroupID = group.groupID;
+        const alreadyObserved = observed.get(expectedGroupID);
+        if (alreadyObserved) return alreadyObserved;
+        return await Promise.race([
+          ready,
+          new Promise<never>((_, reject) => {
+            timeoutID = window.setTimeout(() => reject(new Error("OpenIM group conversation synchronization timed out")), 15_000);
+          })
+        ]);
+      } finally {
+        window.clearTimeout(timeoutID);
+        sdk.off(CbEvents.OnNewConversation, observe);
+        sdk.off(CbEvents.OnConversationChanged, observe);
+      }
+    },
+    groupMembers: async (groupID) => (await sdk.getGroupMemberList({
+      groupID,
+      filter: GroupMemberFilter.All,
+      offset: 0,
+      count: 200
+    })).data,
     markRead: async (conversationID) => { await sdk.markConversationMessageAsRead(conversationID); },
     subscribe: (events) => {
       const conversationsChanged = ({ data }: WSEvent<ConversationItem[]>) => events.conversationsChanged(data);

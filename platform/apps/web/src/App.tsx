@@ -7,7 +7,7 @@ import { AgentWorkspace } from "./AgentWorkspace";
 import { AgentController, createOpenIMAgentTransport, initialAgentState, type AgentState } from "./agent";
 import { approveAgentIntent, getAgentWorkspace } from "./agent-api";
 import { ChatWorkspace } from "./ChatWorkspace";
-import { createOpenIMChatPort, initialChatState, SingleChatController, type ChatState } from "./chat";
+import { ConversationController, createOpenIMChatPort, initialChatState, type ChatState } from "./chat";
 import { connectOpenIM, disconnectOpenIM, type ConnectionUpdate } from "./openim";
 import { createIMSession, type IMSession } from "./platform-api";
 import { WorkspaceShell, type WorkspaceModule } from "./WorkspaceShell";
@@ -38,7 +38,7 @@ export function App({ config, userManager }: AppProps) {
   const [agentState, setAgentState] = useState<AgentState>(initialAgentState);
   const [activeModule, setActiveModule] = useState("messages");
   const detachRef = useRef<(() => void) | null>(null);
-  const chatControllerRef = useRef<SingleChatController | null>(null);
+  const chatControllerRef = useRef<ConversationController | null>(null);
   const unsubscribeChatRef = useRef<(() => void) | null>(null);
   const agentControllerRef = useRef<AgentController | null>(null);
   const unsubscribeAgentRef = useRef<(() => void) | null>(null);
@@ -84,7 +84,7 @@ export function App({ config, userManager }: AppProps) {
         });
         chatControllerRef.current?.stop();
         unsubscribeChatRef.current?.();
-        const controller = new SingleChatController(createOpenIMChatPort());
+        const controller = new ConversationController(createOpenIMChatPort());
         chatControllerRef.current = controller;
         unsubscribeChatRef.current = controller.subscribe(setChatState);
         await controller.start(nextSession.userID);

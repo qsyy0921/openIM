@@ -1,7 +1,7 @@
-import { MessageStatus, MessageType, SessionType, type ConversationItem, type MessageItem } from "@openim/wasm-client-sdk";
+import { GroupMemberRole, MessageStatus, MessageType, SessionType, type ConversationItem, type GroupMemberItem, type MessageItem } from "@openim/wasm-client-sdk";
 import { describe, expect, it } from "vitest";
 
-import { SingleChatController, type ChatEvents, type ChatPort } from "./chat";
+import { ConversationController, type ChatEvents, type ChatPort } from "./chat";
 
 function conversation(id: string, userID: string, unreadCount = 0, type = SessionType.Single): ConversationItem {
   return {
@@ -17,15 +17,25 @@ function conversation(id: string, userID: string, unreadCount = 0, type = Sessio
   } as ConversationItem;
 }
 
-function message(id: string, sendID: string, recvID: string, text = id, status = MessageStatus.Succeed): MessageItem {
+function message(
+  id: string,
+  sendID: string,
+  recvID: string,
+  text = id,
+  status = MessageStatus.Succeed,
+  type = SessionType.Single,
+  groupID = ""
+): MessageItem {
   return {
     clientMsgID: id,
     serverMsgID: `server-${id}`,
     createTime: Number(id.replace(/\D/g, "")) || 1,
     sendTime: Number(id.replace(/\D/g, "")) || 1,
-    sessionType: SessionType.Single,
+    sessionType: type,
     sendID,
     recvID,
+    groupID,
+    senderNickname: sendID,
     contentType: MessageType.TextMessage,
     status,
     textElem: { content: text }
@@ -37,20 +47,39 @@ class FakePort implements ChatPort {
   unread = 0;
   historyMessages: MessageItem[] = [];
   historyEnd = true;
+  historyCalls = 0;
   sentResult: MessageItem | null = null;
   sendError: Error | null = null;
   handlers: ChatEvents | null = null;
   markedRead: string[] = [];
+  sentConversations: ConversationItem[] = [];
+  members: GroupMemberItem[] = [];
+  createdGroup = conversation("group-new", "group-new", 0, SessionType.Group);
+  createdGroupArgs: { name: string; memberUserIDs: string[] } | null = null;
 
   listConversations = async () => this.conversations;
   totalUnread = async () => this.unread;
-  oneConversation = async (userID: string) => conversation(`si_self_${userID}`, userID);
-  history = async () => ({ isEnd: this.historyEnd, messageList: this.historyMessages });
+  oneConversation = async (sourceID: string, sessionType: SessionType) => conversation(
+    sessionType === SessionType.Group ? `group_${sourceID}` : `si_self_${sourceID}`,
+    sourceID,
+    0,
+    sessionType
+  );
+  history = async () => {
+    this.historyCalls += 1;
+    return { isEnd: this.historyEnd, messageList: this.historyMessages };
+  };
   createText = async (text: string) => message("m100", "self", "peer", text, MessageStatus.Sending);
-  send = async (_receiverID: string, draft: MessageItem) => {
+  send = async (target: ConversationItem, draft: MessageItem) => {
+    this.sentConversations.push(target);
     if (this.sendError) throw this.sendError;
     return this.sentResult ?? { ...draft, serverMsgID: "server-sent", status: MessageStatus.Succeed };
   };
+  createGroup = async (name: string, memberUserIDs: string[]) => {
+    this.createdGroupArgs = { name, memberUserIDs };
+    return this.createdGroup;
+  };
+  groupMembers = async () => this.members;
   markRead = async (conversationID: string) => { this.markedRead.push(conversationID); };
   subscribe = (events: ChatEvents) => {
     this.handlers = events;
@@ -58,23 +87,24 @@ class FakePort implements ChatPort {
   };
 }
 
-describe("SingleChatController", () => {
-  it("loads only single conversations and total unread", async () => {
+describe("ConversationController", () => {
+  it("loads single and group conversations with total unread", async () => {
     const port = new FakePort();
-    port.conversations = [conversation("single", "peer", 3), conversation("group", "group-1", 9, SessionType.Group)];
+    const dismissed = { ...conversation("dismissed", "group-old", 0, SessionType.Group), isNotInGroup: true };
+    port.conversations = [conversation("single", "peer", 3), conversation("group", "group-1", 9, SessionType.Group), dismissed];
     port.unread = 12;
-    const controller = new SingleChatController(port);
+    const controller = new ConversationController(port);
 
     await controller.start("self");
 
-    expect(controller.getState().conversations.map((item) => item.conversationID)).toEqual(["single"]);
+    expect(controller.getState().conversations.map((item) => item.conversationID)).toEqual(["single", "group"]);
     expect(controller.getState().totalUnread).toBe(12);
   });
 
   it("opens a direct conversation, loads history, and marks it read", async () => {
     const port = new FakePort();
     port.historyMessages = [message("m1", "peer", "self")];
-    const controller = new SingleChatController(port);
+    const controller = new ConversationController(port);
     await controller.start("self");
 
     await controller.openDirect("peer");
@@ -87,7 +117,7 @@ describe("SingleChatController", () => {
   it("moves an optimistic text message from sending to succeeded", async () => {
     const port = new FakePort();
     port.conversations = [conversation("single", "peer")];
-    const controller = new SingleChatController(port);
+    const controller = new ConversationController(port);
     await controller.start("self");
     await controller.select("single");
 
@@ -95,13 +125,62 @@ describe("SingleChatController", () => {
 
     expect(controller.getState().messages).toHaveLength(1);
     expect(controller.getState().messages[0]).toMatchObject({ clientMsgID: "m100", serverMsgID: "server-sent", status: MessageStatus.Succeed });
+    expect(port.sentConversations[0].conversationID).toBe("single");
+  });
+
+  it("loads group history and members, then sends to the selected group", async () => {
+    const port = new FakePort();
+    port.conversations = [conversation("group", "group-1", 2, SessionType.Group)];
+    port.historyMessages = [message("m1", "member-1", "", "group history", MessageStatus.Succeed, SessionType.Group, "group-1")];
+    port.members = [{ groupID: "group-1", userID: "member-1", nickname: "Member", roleLevel: GroupMemberRole.Normal }] as GroupMemberItem[];
+    const controller = new ConversationController(port);
+    await controller.start("self");
+
+    await controller.select("group");
+    await controller.sendText("group message");
+
+    expect(controller.getState().messages.map((item) => item.textElem?.content)).toEqual(["group history", "group message"]);
+    expect(controller.getState().groupMembers[0].userID).toBe("member-1");
+    expect(port.sentConversations[0].groupID).toBe("group-1");
+  });
+
+  it("discards stale group-member results after switching conversations", async () => {
+    const port = new FakePort();
+    port.conversations = [conversation("group", "group-1", 0, SessionType.Group), conversation("single", "peer")];
+    let resolveMembers!: (members: GroupMemberItem[]) => void;
+    const membersPromise = new Promise<GroupMemberItem[]>((resolve) => { resolveMembers = resolve; });
+    port.groupMembers = () => membersPromise;
+    const controller = new ConversationController(port);
+    await controller.start("self");
+
+    const groupSelection = controller.select("group");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await controller.select("single");
+    resolveMembers([{ groupID: "group-1", userID: "late", nickname: "Late", roleLevel: GroupMemberRole.Normal } as GroupMemberItem]);
+    await groupSelection;
+
+    expect(controller.getState()).toMatchObject({ activeConversationID: "single", groupMembers: [], loadingGroupMembers: false });
+  });
+
+  it("creates and opens a group from unique explicit member IDs", async () => {
+    const port = new FakePort();
+    port.createdGroup = conversation("group-new", "group-new", 0, SessionType.Group);
+    const controller = new ConversationController(port);
+    await controller.start("self");
+
+    await controller.createGroup("Project", ["member-1", "member-2", "member-1", "self"]);
+
+    expect(controller.getState().activeConversationID).toBe("group-new");
+    expect(controller.getState().conversations[0].groupID).toBe("group-new");
+    expect(port.createdGroupArgs).toEqual({ name: "Project", memberUserIDs: ["member-1", "member-2"] });
+    expect(port.historyCalls).toBe(0);
   });
 
   it("keeps a failed optimistic message and exposes the error", async () => {
     const port = new FakePort();
     port.conversations = [conversation("single", "peer")];
     port.sendError = new Error("transport rejected");
-    const controller = new SingleChatController(port);
+    const controller = new ConversationController(port);
     await controller.start("self");
     await controller.select("single");
 
@@ -114,7 +193,7 @@ describe("SingleChatController", () => {
   it("deduplicates real-time text and marks the active conversation read", async () => {
     const port = new FakePort();
     port.conversations = [conversation("single", "peer", 2)];
-    const controller = new SingleChatController(port);
+    const controller = new ConversationController(port);
     await controller.start("self");
     await controller.select("single");
     port.markedRead = [];
@@ -128,11 +207,29 @@ describe("SingleChatController", () => {
     expect(controller.getState().conversations[0].unreadCount).toBe(0);
   });
 
+  it("scopes real-time group text by exact group ID", async () => {
+    const port = new FakePort();
+    port.conversations = [conversation("group", "group-1", 2, SessionType.Group)];
+    const controller = new ConversationController(port);
+    await controller.start("self");
+    await controller.select("group");
+    port.markedRead = [];
+
+    port.handlers?.messagesReceived([
+      message("m2", "member-1", "", "included", MessageStatus.Succeed, SessionType.Group, "group-1"),
+      message("m3", "member-2", "", "excluded", MessageStatus.Succeed, SessionType.Group, "group-2")
+    ]);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(controller.getState().messages.map((item) => item.textElem?.content)).toEqual(["included"]);
+    expect(port.markedRead).toEqual(["group"]);
+  });
+
   it("reloads conversations, unread, active history, and read state after reconnect", async () => {
     const port = new FakePort();
     port.conversations = [conversation("single", "peer", 1)];
     port.historyMessages = [message("m1", "peer", "self", "before")];
-    const controller = new SingleChatController(port);
+    const controller = new ConversationController(port);
     await controller.start("self");
     await controller.select("single");
     port.unread = 4;
