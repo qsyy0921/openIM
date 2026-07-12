@@ -1,8 +1,11 @@
-import { AlertTriangle, LogIn, LogOut, MessageCircle, MessageSquare, RefreshCw, Wifi } from "lucide-react";
+import { AlertTriangle, Bot, LogIn, LogOut, MessageCircle, MessageSquare, RefreshCw, Wifi } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { User, UserManager } from "oidc-client-ts";
 
 import type { WebConfig } from "./config";
+import { AgentWorkspace } from "./AgentWorkspace";
+import { AgentController, createOpenIMAgentTransport, initialAgentState, type AgentState } from "./agent";
+import { approveAgentIntent, getAgentWorkspace } from "./agent-api";
 import { ChatWorkspace } from "./ChatWorkspace";
 import { createOpenIMChatPort, initialChatState, SingleChatController, type ChatState } from "./chat";
 import { connectOpenIM, disconnectOpenIM, type ConnectionUpdate } from "./openim";
@@ -17,7 +20,8 @@ type AppProps = {
 };
 
 const workspaceModules: WorkspaceModule[] = [
-  { id: "messages", label: "消息", icon: MessageCircle }
+  { id: "messages", label: "消息", icon: MessageCircle },
+  { id: "agent", label: "智能助手", icon: Bot }
 ];
 
 function messageOf(error: unknown): string {
@@ -31,9 +35,14 @@ export function App({ config, userManager }: AppProps) {
   const [error, setError] = useState<string | null>(null);
   const [connection, setConnection] = useState<ConnectionUpdate>({ state: "connecting" });
   const [chatState, setChatState] = useState<ChatState>(initialChatState);
+  const [agentState, setAgentState] = useState<AgentState>(initialAgentState);
+  const [activeModule, setActiveModule] = useState("messages");
   const detachRef = useRef<(() => void) | null>(null);
   const chatControllerRef = useRef<SingleChatController | null>(null);
   const unsubscribeChatRef = useRef<(() => void) | null>(null);
+  const agentControllerRef = useRef<AgentController | null>(null);
+  const unsubscribeAgentRef = useRef<(() => void) | null>(null);
+  const agentStartedRef = useRef(false);
 
   const connect = useCallback(
     async (identity: User) => {
@@ -59,6 +68,9 @@ export function App({ config, userManager }: AppProps) {
                 setConnection({ state: "failed", message: messageOf(cause) });
               });
             }
+            if (agentStartedRef.current) {
+              void agentControllerRef.current?.start().catch((cause) => setError(messageOf(cause)));
+            }
             return;
           }
           if (update.state === "connecting") {
@@ -76,6 +88,15 @@ export function App({ config, userManager }: AppProps) {
         chatControllerRef.current = controller;
         unsubscribeChatRef.current = controller.subscribe(setChatState);
         await controller.start(nextSession.userID);
+        agentControllerRef.current?.stop();
+        unsubscribeAgentRef.current?.();
+        const agentController = new AgentController({
+          workspace: () => getAgentWorkspace(config.platformAPIBaseURL, identity.id_token!, config.deviceID),
+          approve: (intentID, digest) => approveAgentIntent(config.platformAPIBaseURL, identity.id_token!, config.deviceID, intentID, digest)
+        }, createOpenIMAgentTransport());
+        agentControllerRef.current = agentController;
+        unsubscribeAgentRef.current = agentController.subscribe(setAgentState);
+        agentStartedRef.current = false;
         setConnection({ state: "connected" });
         setPhase("connected");
       } catch (cause) {
@@ -114,6 +135,8 @@ export function App({ config, userManager }: AppProps) {
       detachRef.current?.();
       chatControllerRef.current?.stop();
       unsubscribeChatRef.current?.();
+      agentControllerRef.current?.stop();
+      unsubscribeAgentRef.current?.();
     };
   }, [config.oidcRedirectURI, connect, userManager]);
 
@@ -147,7 +170,14 @@ export function App({ config, userManager }: AppProps) {
       chatControllerRef.current = null;
       unsubscribeChatRef.current?.();
       unsubscribeChatRef.current = null;
+      agentControllerRef.current?.stop();
+      agentControllerRef.current = null;
+      unsubscribeAgentRef.current?.();
+      unsubscribeAgentRef.current = null;
+      agentStartedRef.current = false;
       setChatState(initialChatState);
+      setAgentState(initialAgentState);
+      setActiveModule("messages");
       await userManager.signoutRedirect();
     } catch (cause) {
       setError(messageOf(cause));
@@ -167,6 +197,19 @@ export function App({ config, userManager }: AppProps) {
     const profile = user?.profile;
     return String(profile?.name ?? profile?.preferred_username ?? profile?.sub ?? "Enterprise member");
   }, [user]);
+
+  const selectModule = async (moduleID: string) => {
+    if (moduleID !== "messages" && moduleID !== "agent") return;
+    setActiveModule(moduleID);
+    if (moduleID === "agent" && !agentStartedRef.current) {
+      agentStartedRef.current = true;
+      try {
+        await agentControllerRef.current?.start();
+      } catch {
+        // AgentState contains the explicit initialization error.
+      }
+    }
+  };
 
   if (phase === "signed-out") {
     return (
@@ -195,8 +238,12 @@ export function App({ config, userManager }: AppProps) {
 
   if (phase === "connected" && session && chatControllerRef.current) {
     return (
-      <WorkspaceShell activeModule="messages" modules={workspaceModules} displayName={displayName} onLogout={() => void logout()}>
+      <WorkspaceShell activeModule={activeModule} modules={workspaceModules} displayName={displayName} onModuleSelect={(moduleID) => void selectModule(moduleID)} onLogout={() => void logout()}>
+        {activeModule === "messages" ? (
           <ChatWorkspace controller={chatControllerRef.current} state={chatState} selfUserID={session.userID} connection={connection} />
+        ) : agentControllerRef.current ? (
+          <AgentWorkspace controller={agentControllerRef.current} state={agentState} />
+        ) : null}
       </WorkspaceShell>
     );
   }

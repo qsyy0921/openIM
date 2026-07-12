@@ -10,6 +10,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/qsyy0921/openim/platform/services/platform-api/internal/action"
+	"github.com/qsyy0921/openim/platform/services/platform-api/internal/agent"
 	"github.com/qsyy0921/openim/platform/services/platform-api/internal/app"
 	"github.com/qsyy0921/openim/platform/services/platform-api/internal/config"
 	"github.com/qsyy0921/openim/platform/services/platform-api/internal/httpserver"
@@ -57,7 +58,9 @@ func main() {
 	)
 	actionStore := action.NewStore(pool)
 	approvals := action.NewService(verifier, identity.NewPostgresStore(pool), actionStore)
-	handler := httpserver.NewHandler(cfg.Version, sessions, approvals)
+	agentStore := agent.NewStore(pool)
+	workspace := agent.NewWorkspaceService(verifier, identity.NewPostgresStore(pool), agentStore, openIM)
+	handler := httpserver.NewHandler(cfg.Version, sessions, approvals, workspace)
 
 	listener, err := net.Listen("tcp", cfg.HTTPAddr)
 	if err != nil {

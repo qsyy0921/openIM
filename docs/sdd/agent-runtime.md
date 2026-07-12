@@ -77,6 +77,7 @@ Lifecycle logs use event ID, Run ID, model name, and OpenIM server message ID. R
 ## Source evidence
 
 - `platform/services/platform-api/internal/agent/`
+- `platform/services/platform-api/internal/agent/workspace.go`
 - `platform/services/platform-api/cmd/agent-runtime/main.go`
 - `platform/services/platform-api/internal/openim/client.go`
 - `platform/services/platform-api/internal/migrations/sql/0003_agent.sql`
@@ -92,6 +93,7 @@ Lifecycle logs use event ID, Run ID, model name, and OpenIM server message ID. R
 - ACL-RAG smoke evidence is recorded in `acl-retrieval.md`; unknown citations fail validation and a zero-result query bypasses the model with an explicit abstention.
 - The approved-action smoke is recorded in `action-executor.md`; no business row existed while the Run waited for approval.
 - On node2 release `d663256`, authorized Run `00c88cd5-ec6f-4a9e-aacf-6fc4a0faf79b`, revoked-grant Run `24e91528-c5d1-4298-ba7b-cdf1d9953eff`, and no-match Run `a54ee93a-d1c3-4db3-aec5-ddd9cf144053` all reached a real OpenIM reply. Only the authorized Run invoked DeepSeek and persisted a citation.
+- Web workbench acceptance on node2 release `b89a618` created cited Run `f0e2bc13-b33c-44d1-a761-70ccf03e3a26` through the unchanged OpenIM trigger path; the authenticated projection restored its exact `C1` provenance after browser reload.
 
 ## Open questions
 

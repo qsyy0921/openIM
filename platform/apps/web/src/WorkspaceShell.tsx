@@ -12,6 +12,7 @@ type WorkspaceShellProps = {
   activeModule: string;
   modules: WorkspaceModule[];
   displayName: string;
+  onModuleSelect: (moduleID: string) => void;
   onLogout: () => void;
   children: ReactNode;
 };
@@ -21,7 +22,7 @@ function initials(displayName: string): string {
   return value ? value.slice(0, 1).toUpperCase() : "U";
 }
 
-export function WorkspaceShell({ activeModule, modules, displayName, onLogout, children }: WorkspaceShellProps) {
+export function WorkspaceShell({ activeModule, modules, displayName, onModuleSelect, onLogout, children }: WorkspaceShellProps) {
   return (
     <div className="workspace-shell chat-shell">
       <aside className="workspace-nav" aria-label="工作区导航">
@@ -34,6 +35,7 @@ export function WorkspaceShell({ activeModule, modules, displayName, onLogout, c
               aria-current={activeModule === id ? "page" : undefined}
               aria-label={label}
               title={label}
+              onClick={() => onModuleSelect(id)}
             >
               <Icon size={21} strokeWidth={1.8} />
               <span>{label}</span>

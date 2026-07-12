@@ -10,7 +10,7 @@ depends_on:
 
 ## Scope
 
-Provide a browser single-chat vertical slice from enterprise OIDC Authorization Code with PKCE through Platform API session exchange to the official OpenIM WASM SDK: list single conversations and unread counts, load text history, send and receive text messages, mark the active conversation read, expose send failures, and restore state after reconnection. This slice does not implement group chat, files, images, audio, video, search, contacts, approval UI, documents, or administration.
+Provide an extensible browser collaboration shell with the verified OpenIM single-chat vertical slice and an independently owned Agent workspace module. The Agent module is specified in `agent-workspace.md`; this unit continues to own shell, identity/session bootstrap, and IM behavior rather than Agent business state. This slice does not implement group chat, files, images, audio, video, search, contacts, documents, or administration.
 
 ## Responsibilities and non-goals
 
@@ -83,6 +83,7 @@ The UI exposes coarse connection phase and endpoint readiness. Platform and Open
 - `platform/apps/web/src/App.tsx`
 - `platform/apps/web/src/WorkspaceShell.tsx`
 - `platform/apps/web/src/ChatWorkspace.tsx`
+- `platform/apps/web/src/AgentWorkspace.tsx`
 - `platform/apps/web/vite.config.ts`
 - `platform/apps/web/scripts/patch-openim-worker.mjs`
 - `platform/apps/web/src/config.test.ts`
@@ -91,11 +92,12 @@ The UI exposes coarse connection phase and endpoint readiness. Platform and Open
 
 ## Verification evidence
 
-- `npm run typecheck` passed and Vitest passed 13 configuration, Platform API, connection-foundation, and single-chat controller tests.
+- `npm run typecheck` passed and Vitest passed 19 configuration, Platform API, connection, single-chat, Agent API, and Agent controller tests.
 - `npm run test:e2e:node2` passed against the real `.2` runtime: system Chrome completed Keycloak Authorization Code with PKCE, exchanged the ID Token at `/v1/im/session`, initialized and synchronized the official WASM SDK, and connected to node2 OpenIM.
 - The E2E injected real `imAdmin -> Web` messages through node2, observed unread increment and read clearing, sent `Web -> imAdmin` text to the server, received an active-conversation message in real time, recovered from browser offline/online, and found all three messages after reload.
 - The same test observed zero HTTP failures and zero console errors, found no localStorage entries or token-shaped visible text, and confirmed the callback authorization code was removed from the URL.
 - Desktop `1280x720` and mobile `390x844` chat/list screenshots passed horizontal-overflow checks and visual inspection without overlapping controls or text; the mobile E2E exercised explicit conversation-list and chat-detail navigation.
+- The node2 Playwright configuration uses one worker because the real single-chat and Agent scenarios intentionally share one authenticated account and global OpenIM unread state.
 
 ## Open questions
 
