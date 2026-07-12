@@ -83,6 +83,9 @@ class FakePort implements ChatPort {
   historyMessages: MessageItem[] = [];
   historyEnd = true;
   historyCalls = 0;
+  surroundingMessages: MessageItem[] = [];
+  surroundingError: Error | null = null;
+  surroundingCalls: Array<{ conversationID: string; clientMsgID: string }> = [];
   sentResult: MessageItem | null = null;
   sendError: Error | null = null;
   handlers: ChatEvents | null = null;
@@ -120,6 +123,11 @@ class FakePort implements ChatPort {
   history = async () => {
     this.historyCalls += 1;
     return { isEnd: this.historyEnd, messageList: this.historyMessages };
+  };
+  surrounding = async (conversationID: string, message: MessageItem) => {
+    this.surroundingCalls.push({ conversationID, clientMsgID: message.clientMsgID });
+    if (this.surroundingError) throw this.surroundingError;
+    return this.surroundingMessages;
   };
   createText = async (text: string) => message("m100", "self", "peer", text, MessageStatus.Sending);
   createQuote = async (text: string, source: MessageItem) => {
@@ -798,5 +806,37 @@ describe("ConversationController", () => {
     expect(controller.getState()).toMatchObject({ totalUnread: 4, restoring: false, activeConversationID: "single" });
     expect(controller.getState().messages.map((item) => item.clientMsgID)).toEqual(["m2"]);
     expect(port.markedRead).toEqual(["single"]);
+  });
+
+  it("opens an official bidirectional-history context and highlights the exact search hit", async () => {
+    const port = new FakePort();
+    port.conversations = [conversation("single", "peer"), conversation("target", "other")];
+    port.historyMessages = [message("m1", "peer", "self", "current")];
+    const hit = message("m20", "other", "self", "needle");
+    port.surroundingMessages = [message("m19", "other", "self", "before"), hit, message("m21", "self", "other", "after")];
+    const controller = new ConversationController(port);
+    await controller.start("self");
+    await controller.select("single");
+
+    await controller.openSearchResult("target", hit);
+
+    expect(controller.getState()).toMatchObject({ activeConversationID: "target", searchTargetClientMsgID: "m20" });
+    expect(controller.getState().messages.map((item) => item.clientMsgID)).toEqual(["m19", "m20", "m21"]);
+    expect(port.surroundingCalls).toEqual([{ conversationID: "target", clientMsgID: "m20" }]);
+  });
+
+  it("preserves the current timeline when bidirectional-history context fails", async () => {
+    const port = new FakePort();
+    port.conversations = [conversation("single", "peer"), conversation("target", "other")];
+    port.historyMessages = [message("m1", "peer", "self", "current")];
+    port.surroundingError = new Error("search context unavailable");
+    const controller = new ConversationController(port);
+    await controller.start("self");
+    await controller.select("single");
+
+    await expect(controller.openSearchResult("target", message("m20", "other", "self", "needle"))).rejects.toThrow("search context unavailable");
+
+    expect(controller.getState().activeConversationID).toBe("single");
+    expect(controller.getState().messages.map((item) => item.clientMsgID)).toEqual(["m1"]);
   });
 });

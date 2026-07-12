@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from "react";
 import { canForwardMessage, canInviteGroupMembers, canQuoteMessage, canRemoveGroupMember, canRequestRevoke, type ChatState, type ConversationController } from "./chat";
 import type { ContactController, ContactState } from "./contact";
 import { MemberPicker } from "./MemberPicker";
+import type { MessageSearchController, MessageSearchHit, MessageSearchState } from "./message-search";
 import type { ConnectionUpdate } from "./openim";
 
 type ChatWorkspaceProps = {
@@ -14,6 +15,8 @@ type ChatWorkspaceProps = {
   connection: ConnectionUpdate;
   contactController: ContactController;
   contactState: ContactState;
+  searchController: MessageSearchController;
+  searchState: MessageSearchState;
 };
 
 function conversationSource(conversation: ConversationItem): string {
@@ -64,13 +67,18 @@ function revokedText(message: MessageItem, selfUserID: string): string {
   }
 }
 
-export function ChatWorkspace({ controller, state, selfUserID, connection, contactController, contactState }: ChatWorkspaceProps) {
+function searchType(message: MessageItem): string {
+  return message.contentType === MessageType.FileMessage ? "文件" : "文本";
+}
+
+export function ChatWorkspace({ controller, state, selfUserID, connection, contactController, contactState, searchController, searchState }: ChatWorkspaceProps) {
   const [targetUserID, setTargetUserID] = useState("");
   const [draft, setDraft] = useState("");
   const [working, setWorking] = useState(false);
   const [mobileDetail, setMobileDetail] = useState(false);
   const [showCreateGroup, setShowCreateGroup] = useState(false);
   const [showGroupMembers, setShowGroupMembers] = useState(false);
+  const [showMessageSearch, setShowMessageSearch] = useState(false);
   const [showInviteGroup, setShowInviteGroup] = useState(false);
   const [inviteMemberIDs, setInviteMemberIDs] = useState<string[]>([]);
   const [pendingGroupAction, setPendingGroupAction] = useState<{ kind: "remove"; member: GroupMemberItem } | { kind: "leave" | "dismiss" } | null>(null);
@@ -84,6 +92,7 @@ export function ChatWorkspace({ controller, state, selfUserID, connection, conta
   const [groupMemberIDs, setGroupMemberIDs] = useState<string[]>([]);
   const [previewImage, setPreviewImage] = useState<{ url: string; alt: string } | null>(null);
   const messageEnd = useRef<HTMLDivElement | null>(null);
+  const messageScroll = useRef<HTMLDivElement | null>(null);
   const imageInput = useRef<HTMLInputElement | null>(null);
   const fileInput = useRef<HTMLInputElement | null>(null);
   const active = state.conversations.find((item) => item.conversationID === state.activeConversationID) ?? null;
@@ -94,6 +103,12 @@ export function ChatWorkspace({ controller, state, selfUserID, connection, conta
   useEffect(() => {
     messageEnd.current?.scrollIntoView({ block: "end" });
   }, [state.messages.length, state.activeConversationID]);
+
+  useEffect(() => {
+    if (!state.searchTargetClientMsgID) return;
+    const row = messageScroll.current?.querySelector<HTMLElement>(`[data-message-id="${state.searchTargetClientMsgID}"]`);
+    row?.scrollIntoView({ block: "center" });
+  }, [state.searchTargetClientMsgID, state.messages.length]);
 
   useEffect(() => {
     const closeOnEscape = (event: KeyboardEvent) => {
@@ -117,7 +132,9 @@ export function ChatWorkspace({ controller, state, selfUserID, connection, conta
     setForwardSource(null);
     setForwardTargetID("");
     setRevokeSource(null);
-  }, [active?.conversationID]);
+    setShowMessageSearch(false);
+    searchController.close();
+  }, [active?.conversationID, searchController]);
 
   const openDirect = async () => {
     if (working) return;
@@ -228,6 +245,26 @@ export function ChatWorkspace({ controller, state, selfUserID, connection, conta
       setRevokeSource(null);
     } catch {
       // The controller retains the source and exposes the SDK error.
+    }
+  };
+
+  const searchMessages = async () => {
+    if (!active) return;
+    try {
+      await searchController.search(active.conversationID);
+    } catch {
+      // MessageSearchState exposes the exact validation or SDK error.
+    }
+  };
+
+  const openSearchHit = async (hit: MessageSearchHit) => {
+    try {
+      await controller.openSearchResult(hit.conversationID, hit.message);
+      setShowMessageSearch(false);
+      searchController.close();
+      setMobileDetail(true);
+    } catch {
+      // ChatState preserves the prior timeline and exposes the exact jump error.
     }
   };
 
@@ -369,8 +406,11 @@ export function ChatWorkspace({ controller, state, selfUserID, connection, conta
               {active ? conversationSource(active) : selfUserID}
             </span>
           </div>
+          <button className="icon-button" aria-label="搜索当前会话消息" title="搜索消息" disabled={!active} onClick={() => { setShowGroupMembers(false); setShowMessageSearch((value) => !value); if (showMessageSearch) searchController.close(); }}>
+            <Search size={18} />
+          </button>
           {active?.conversationType === SessionType.Group && (
-            <button className="icon-button member-toggle" aria-label="查看群成员" title="群成员" onClick={() => setShowGroupMembers((value) => !value)}>
+            <button className="icon-button member-toggle" aria-label="查看群成员" title="群成员" onClick={() => { setShowMessageSearch(false); searchController.close(); setShowGroupMembers((value) => !value); }}>
               <Users size={18} />
             </button>
           )}
@@ -386,7 +426,7 @@ export function ChatWorkspace({ controller, state, selfUserID, connection, conta
 
         {active ? (
           <>
-            <div className="message-scroll">
+            <div className="message-scroll" ref={messageScroll}>
               {!state.historyEnded && (
                 <button className="history-button" disabled={state.loadingHistory} onClick={() => void controller.loadOlder().catch(() => undefined)}>
                   <ChevronUp size={15} />{state.loadingHistory ? "加载中" : "加载更早"}
@@ -398,7 +438,7 @@ export function ChatWorkspace({ controller, state, selfUserID, connection, conta
                 const pictureURL = message.contentType === MessageType.PictureMessage ? imageURL(message) : null;
                 const fileURL = message.contentType === MessageType.FileMessage ? safeMediaURL(message.fileElem?.sourceUrl) : null;
                 return (
-                  <article key={message.clientMsgID} className={`message-row ${outgoing ? "outgoing" : "incoming"}`} data-message-id={message.clientMsgID} data-message-seq={message.seq}>
+                  <article key={message.clientMsgID} className={`message-row ${outgoing ? "outgoing" : "incoming"} ${state.searchTargetClientMsgID === message.clientMsgID ? "search-target" : ""}`} data-message-id={message.clientMsgID} data-message-seq={message.seq}>
                     {message.contentType !== MessageType.RevokeMessage && (
                       <div className="message-actions">
                         <button type="button" className="message-action-trigger" aria-label={`消息操作 ${message.clientMsgID}`} title="消息操作" disabled={Boolean(state.messageAction)} onClick={() => setMessageMenuID((value) => value === message.clientMsgID ? null : message.clientMsgID)}>
@@ -537,6 +577,40 @@ export function ChatWorkspace({ controller, state, selfUserID, connection, conta
                 ) : (
                   <button className="group-danger-action" disabled={Boolean(state.groupAction)} onClick={() => setPendingGroupAction({ kind: "leave" })}><LogOut size={16} />退出群聊</button>
                 )}
+              </footer>
+            )}
+          </aside>
+        )}
+
+        {active && showMessageSearch && (
+          <aside className="message-search-panel" aria-label="消息搜索">
+            <header>
+              <div><strong>搜索消息</strong><span>当前会话</span></div>
+              <button className="icon-button" aria-label="关闭消息搜索" title="关闭" onClick={() => { setShowMessageSearch(false); searchController.close(); }}><X size={18} /></button>
+            </header>
+            <form className="message-search-form" onSubmit={(event) => { event.preventDefault(); void searchMessages(); }}>
+              <div><Search size={17} /><input aria-label="搜索当前会话消息关键词" maxLength={100} value={searchState.query} onChange={(event) => searchController.setQuery(event.target.value)} placeholder="搜索文本或文件名" /></div>
+              <button className="primary-button" type="submit" disabled={searchState.loading || !searchState.query.trim()}>{searchState.loading ? <LoaderCircle className="spin" size={16} /> : <Search size={16} />}搜索</button>
+            </form>
+            {searchState.error && <div className="inline-error" role="alert"><span>{searchState.error}</span></div>}
+            <div className="message-search-summary">
+              <span>{searchState.submittedQuery ? `“${searchState.submittedQuery}”` : "输入关键词开始搜索"}</span>
+              {searchState.submittedQuery && <strong>{searchState.totalCount} 条</strong>}
+            </div>
+            <div className="message-search-results">
+              {searchState.hits.map((hit) => (
+                <button type="button" key={`${hit.conversationID}-${hit.message.clientMsgID}`} data-testid={`search-hit-${hit.message.clientMsgID}`} onClick={() => void openSearchHit(hit)}>
+                  <span className="search-hit-meta"><strong>{hit.message.senderNickname || hit.message.sendID}</strong><small>{searchType(hit.message)} · {messageTime(hit.message)}</small></span>
+                  <span className="search-hit-content">{messageSummary(hit.message)}</span>
+                </button>
+              ))}
+              {!searchState.loading && searchState.submittedQuery && searchState.hits.length === 0 && <p className="empty-note centered">没有匹配消息</p>}
+            </div>
+            {searchState.totalCount > 0 && (
+              <footer className="message-search-pagination">
+                <button className="secondary-button" disabled={searchState.loading || searchState.page <= 1} onClick={() => void searchController.previousPage().catch(() => undefined)}>上一页</button>
+                <span>第 {searchState.page} / {Math.max(1, Math.ceil(searchState.totalCount / 20))} 页</span>
+                <button className="secondary-button" disabled={searchState.loading || searchState.page * 20 >= searchState.totalCount} onClick={() => void searchController.nextPage().catch(() => undefined)}>下一页</button>
               </footer>
             )}
           </aside>

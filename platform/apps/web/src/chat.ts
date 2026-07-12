@@ -31,6 +31,7 @@ export type ChatState = {
   loadingGroupMembers: boolean;
   groupAction: { groupID: string; kind: "invite" | "remove" | "leave" | "dismiss"; userID?: string } | null;
   messageAction: { kind: "quote" | "forward" | "revoke"; clientMsgID: string; targetConversationID?: string } | null;
+  searchTargetClientMsgID: string | null;
   restoring: boolean;
   uploadProgressByClientMsgID: Record<string, number>;
   error: string | null;
@@ -53,6 +54,7 @@ export type ChatPort = {
   totalUnread: () => Promise<number>;
   oneConversation: (sourceID: string, sessionType: SessionType) => Promise<ConversationItem>;
   history: (conversationID: string, startClientMsgID: string) => Promise<{ isEnd: boolean; messageList: MessageItem[] }>;
+  surrounding: (conversationID: string, message: MessageItem) => Promise<MessageItem[]>;
   createText: (text: string) => Promise<MessageItem>;
   createQuote: (text: string, source: MessageItem) => Promise<MessageItem>;
   createForward: (source: MessageItem) => Promise<MessageItem>;
@@ -83,6 +85,7 @@ export const initialChatState: ChatState = {
   loadingGroupMembers: false,
   groupAction: null,
   messageAction: null,
+  searchTargetClientMsgID: null,
   restoring: false,
   uploadProgressByClientMsgID: {},
   error: null
@@ -265,7 +268,7 @@ export class ConversationController {
       throw new Error("conversation is unavailable");
     }
     this.groupMemberRequest += 1;
-    this.update({ activeConversationID: conversationID, messages: [], uploadProgressByClientMsgID: {}, historyEnded: !loadExistingHistory, groupMembers: [], loadingGroupMembers: false, messageAction: null, error: null });
+    this.update({ activeConversationID: conversationID, messages: [], uploadProgressByClientMsgID: {}, historyEnded: !loadExistingHistory, groupMembers: [], loadingGroupMembers: false, messageAction: null, searchTargetClientMsgID: null, error: null });
     if (loadExistingHistory) await this.loadHistory(conversationID, false);
     await this.markRead(conversationID);
     if (conversation.conversationType === SessionType.Group) await this.loadGroupMembers(conversation.groupID);
@@ -381,6 +384,32 @@ export class ConversationController {
       throw error;
     }
     await this.sendDraft(conversation, draft, false);
+  }
+
+  async openSearchResult(conversationID: string, message: MessageItem): Promise<void> {
+    const conversation = this.state.conversations.find((item) => item.conversationID === conversationID);
+    if (!conversation || !message.clientMsgID) this.reject("搜索结果对应的会话或消息已不可用");
+    try {
+      const context = supportedMessages(await this.port.surrounding(conversationID, message));
+      if (!context.some((item) => item.clientMsgID === message.clientMsgID)) this.reject("OpenIM 未返回搜索消息上下文");
+      this.groupMemberRequest += 1;
+      this.update({
+        activeConversationID: conversationID,
+        messages: mergeMessages([], context),
+        uploadProgressByClientMsgID: {},
+        historyEnded: false,
+        groupMembers: [],
+        loadingGroupMembers: false,
+        messageAction: null,
+        searchTargetClientMsgID: message.clientMsgID,
+        error: null
+      });
+      await this.markRead(conversationID);
+      if (conversation.conversationType === SessionType.Group) await this.loadGroupMembers(conversation.groupID);
+    } catch (error) {
+      this.fail(error);
+      throw error;
+    }
   }
 
   async sendQuote(text: string, sourceClientMsgID: string): Promise<void> {
@@ -759,6 +788,19 @@ export function createOpenIMChatPort(): ChatPort {
         viewType: ViewType.History
       });
       return data;
+    },
+    surrounding: async (conversationID, message) => {
+      const params = {
+        conversationID,
+        startClientMsgID: message.clientMsgID,
+        count: 20,
+        viewType: ViewType.Search
+      };
+      const [before, after] = await Promise.all([
+        sdk.getAdvancedHistoryMessageList(params),
+        sdk.getAdvancedHistoryMessageListReverse(params)
+      ]);
+      return [...before.data.messageList, message, ...after.data.messageList];
     },
     createText: async (text) => (await sdk.createTextMessage(text)).data,
     createQuote: async (text, source) => (await sdk.createQuoteMessage({ text, message: JSON.stringify(source) })).data,
