@@ -19,7 +19,7 @@ It preserves enterprise OIDC, `/v1/im/session`, the official OpenIM WASM SDK, SD
 
 ## Responsibilities and non-goals
 
-The Web client owns presentation state, conversation selection, optimistic text-send state, bounded group-member presentation, and mapping user commands to the official SDK. OpenIM owns group membership, conversation/message state, local SDK storage, synchronization, and server authorization. Platform API continues to own enterprise identity exchange. This unit does not duplicate OpenIM group or message facts in PostgreSQL and does not treat a client-side optimistic message as server acceptance. The contacts/member-picker extension is specified in `im-client-contacts.md`, and the admitted image/file extension is specified in `im-client-media.md`, so the verified conversation foundation remains stable.
+The Web client owns presentation state, conversation selection, optimistic text-send state, bounded group-member presentation, and mapping user commands to the official SDK. OpenIM owns group membership, conversation/message state, local SDK storage, synchronization, and server authorization. Platform API continues to own enterprise identity exchange. This unit does not duplicate OpenIM group or message facts in PostgreSQL and does not treat a client-side optimistic message as server acceptance. Contacts/member-picker, image/file, and admitted conversation settings are specified in `im-client-contacts.md`, `im-client-media.md`, and `im-client-conversations.md`, so the verified conversation foundation remains stable.
 
 ## Open-source reuse boundary
 

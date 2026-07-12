@@ -1,4 +1,4 @@
-import { GroupMemberRole, MessageStatus, MessageType, SessionType, type ConversationItem, type GroupMemberItem, type MessageItem } from "@openim/wasm-client-sdk";
+import { GroupMemberRole, MessageReceiveOptType, MessageStatus, MessageType, SessionType, type ConversationItem, type GroupMemberItem, type MessageItem } from "@openim/wasm-client-sdk";
 import { describe, expect, it } from "vitest";
 
 import { MAX_FILE_BYTES, MAX_IMAGE_BYTES, ConversationController, type ChatEvents, type ChatPort } from "./chat";
@@ -13,7 +13,8 @@ function conversation(id: string, userID: string, unreadCount = 0, type = Sessio
     unreadCount,
     latestMsg: "",
     latestMsgSendTime: 1,
-    isPinned: false
+    isPinned: false,
+    recvMsgOpt: MessageReceiveOptType.Normal
   } as ConversationItem;
 }
 
@@ -88,8 +89,14 @@ class FakePort implements ChatPort {
   createdGroupArgs: { name: string; memberUserIDs: string[] } | null = null;
   imageCreates = 0;
   fileCreates = 0;
+  settingCalls: Array<{ conversationID: string; patch: { isPinned?: boolean; recvMsgOpt?: MessageReceiveOptType } }> = [];
+  settingError: Error | null = null;
 
   listConversations = async () => this.conversations;
+  setConversation = async (conversationID: string, patch: { isPinned?: boolean; recvMsgOpt?: MessageReceiveOptType }) => {
+    this.settingCalls.push({ conversationID, patch });
+    if (this.settingError) throw this.settingError;
+  };
   totalUnread = async () => this.unread;
   oneConversation = async (sourceID: string, sessionType: SessionType) => conversation(
     sessionType === SessionType.Group ? `group_${sourceID}` : `si_self_${sourceID}`,
@@ -166,6 +173,111 @@ describe("ConversationController", () => {
     expect(controller.getState().messages).toHaveLength(1);
     expect(controller.getState().messages[0]).toMatchObject({ clientMsgID: "m100", serverMsgID: "server-sent", status: MessageStatus.Succeed });
     expect(port.sentConversations[0].conversationID).toBe("single");
+  });
+
+  it("filters the authoritative conversation projection by name, user ID, and group ID", async () => {
+    const port = new FakePort();
+    port.conversations = [
+      { ...conversation("single", "peer-user"), showName: "Design Team" },
+      { ...conversation("group", "group-42", 0, SessionType.Group), showName: "Release Room" }
+    ];
+    const controller = new ConversationController(port);
+    await controller.start("self");
+
+    controller.setConversationQuery("  DESIGN ");
+    expect(controller.visibleConversations().map((item) => item.conversationID)).toEqual(["single"]);
+    controller.setConversationQuery("peer-USER");
+    expect(controller.visibleConversations().map((item) => item.conversationID)).toEqual(["single"]);
+    controller.setConversationQuery("GROUP-42");
+    expect(controller.visibleConversations().map((item) => item.conversationID)).toEqual(["group"]);
+    controller.setConversationQuery("");
+    expect(controller.visibleConversations()).toHaveLength(2);
+    expect(controller.getState().conversations).toHaveLength(2);
+  });
+
+  it("pins only after the SDK setting call succeeds and keeps pinned ordering stable", async () => {
+    const port = new FakePort();
+    port.conversations = [
+      { ...conversation("older", "older"), latestMsgSendTime: 10 },
+      { ...conversation("newer", "newer"), latestMsgSendTime: 20 }
+    ];
+    const controller = new ConversationController(port);
+    await controller.start("self");
+
+    await controller.setPinned("older", true);
+
+    expect(port.settingCalls).toEqual([{ conversationID: "older", patch: { isPinned: true } }]);
+    expect(controller.getState().conversations.map((item) => [item.conversationID, item.isPinned])).toEqual([
+      ["older", true],
+      ["newer", false]
+    ]);
+    expect(controller.getState().conversationActionByID).toEqual({});
+  });
+
+  it("maps do-not-disturb to NotNotify and restores Normal when disabled", async () => {
+    const port = new FakePort();
+    port.conversations = [conversation("single", "peer")];
+    const controller = new ConversationController(port);
+    await controller.start("self");
+
+    await controller.setMuted("single", true);
+    await controller.setMuted("single", false);
+
+    expect(port.settingCalls).toEqual([
+      { conversationID: "single", patch: { recvMsgOpt: MessageReceiveOptType.NotNotify } },
+      { conversationID: "single", patch: { recvMsgOpt: MessageReceiveOptType.Normal } }
+    ]);
+    expect(controller.getState().conversations[0].recvMsgOpt).toBe(MessageReceiveOptType.Normal);
+  });
+
+  it("rejects unsupported NotReceive state without changing it", async () => {
+    const port = new FakePort();
+    port.conversations = [{ ...conversation("single", "peer"), recvMsgOpt: MessageReceiveOptType.NotReceive }];
+    const controller = new ConversationController(port);
+    await controller.start("self");
+
+    await expect(controller.setMuted("single", true)).rejects.toThrow("不接收消息");
+
+    expect(port.settingCalls).toEqual([]);
+    expect(controller.getState().conversations[0].recvMsgOpt).toBe(MessageReceiveOptType.NotReceive);
+    expect(controller.getState().error).toContain("不能在此切换");
+  });
+
+  it("keeps prior settings on SDK failure and clears the mutation marker", async () => {
+    const port = new FakePort();
+    port.conversations = [conversation("single", "peer")];
+    port.settingError = new Error("setting rejected");
+    const controller = new ConversationController(port);
+    await controller.start("self");
+
+    await expect(controller.setPinned("single", true)).rejects.toThrow("setting rejected");
+
+    expect(controller.getState().conversations[0].isPinned).toBe(false);
+    expect(controller.getState().conversationActionByID).toEqual({});
+    expect(controller.getState().error).toContain("setting rejected");
+  });
+
+  it("rejects a duplicate write for one conversation while another conversation can update", async () => {
+    const port = new FakePort();
+    port.conversations = [conversation("first", "first"), conversation("second", "second")];
+    let releaseFirst!: () => void;
+    port.setConversation = async (conversationID, patch) => {
+      port.settingCalls.push({ conversationID, patch });
+      if (conversationID === "first") await new Promise<void>((resolve) => { releaseFirst = resolve; });
+    };
+    const controller = new ConversationController(port);
+    await controller.start("self");
+
+    const first = controller.setPinned("first", true);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await expect(controller.setMuted("first", true)).rejects.toThrow("正在更新");
+    await controller.setMuted("second", true);
+    releaseFirst();
+    await first;
+
+    expect(port.settingCalls.map((item) => item.conversationID)).toEqual(["first", "second"]);
+    expect(controller.getState().conversations.find((item) => item.conversationID === "first")?.isPinned).toBe(true);
+    expect(controller.getState().conversations.find((item) => item.conversationID === "second")?.recvMsgOpt).toBe(MessageReceiveOptType.NotNotify);
   });
 
   it("loads supported media history while excluding unsupported custom messages", async () => {

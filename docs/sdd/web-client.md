@@ -10,7 +10,7 @@ depends_on:
 
 ## Scope
 
-Provide an extensible browser collaboration shell with verified OpenIM single/group text conversation foundations and an independently owned Agent workspace module. The group extension is specified in `im-client-foundation.md`, the contacts/member-picker extension is specified in `im-client-contacts.md`, the admitted image/file extension is specified in `im-client-media.md`, and the Agent module is specified in `agent-workspace.md`. This unit continues to own shell, identity/session bootstrap, and IM presentation rather than Agent business state. It does not yet implement audio, video, enterprise-directory search, documents, or administration.
+Provide an extensible browser collaboration shell with verified OpenIM single/group text conversation foundations and an independently owned Agent workspace module. The group extension is specified in `im-client-foundation.md`, the contacts/member-picker extension is specified in `im-client-contacts.md`, the image/file extension is specified in `im-client-media.md`, the admitted search/pin/mute extension is specified in `im-client-conversations.md`, and the Agent module is specified in `agent-workspace.md`. This unit continues to own shell, identity/session bootstrap, and IM presentation rather than Agent business state. It does not yet implement audio, video, enterprise-directory search, documents, or administration.
 
 ## Responsibilities and non-goals
 
@@ -76,6 +76,7 @@ The UI exposes coarse connection phase and endpoint readiness. Platform and Open
 - Real node2 members exchange single and group text; unread state clears when selected, history survives reload/reconnect, group members resolve, and sent messages converge from sending to succeeded.
 - A real node2 member finds another user by exact OpenIM user ID, submits and processes a friend application, opens direct chat from the friend list, and creates a group through the reusable member picker.
 - Real node2 single and group conversations upload, send, receive, preview, download/open, and restore image/file messages through the pinned SDK and OpenIM MinIO path described by `im-client-media.md`.
+- Real node2 conversation search filters only the synchronized projection; pin and per-conversation `NotNotify` persist across reload while muted messages continue to synchronize.
 - Browser inspection confirms no token in visible UI, URL, localStorage, or console output.
 
 ## Source evidence
@@ -108,6 +109,7 @@ The UI exposes coarse connection phase and endpoint readiness. Platform and Open
 - The node2 Playwright configuration uses one worker because the real single-chat and Agent scenarios intentionally share one authenticated account and global OpenIM unread state.
 - The verified contacts extension adds exact user-ID discovery, real friend request/acceptance, callback-driven friend state, direct-chat entry, and MemberPicker-based group creation without a second relationship store or browser Admin Token. The final full Agent plus IM/contact suite passed serially in 37.5 seconds.
 - The verified media extension adds official-SDK image/file creation and upload, exact `clientMsgID` progress state, explicit validation/failure, safe HTTP(S) rendering, preview/download, real Node2 inbound media, and single/group history restoration. The final full Agent plus IM/contact/media suite passed serially in 42.1 seconds.
+- The verified conversation-management extension adds projection-only search, real OpenIM pinning, and real `NotNotify` do-not-disturb with per-conversation concurrency protection. The final Agent plus conversation-management plus IM/contact/media suite passed serially in 48.4 seconds.
 
 ## Open questions
 

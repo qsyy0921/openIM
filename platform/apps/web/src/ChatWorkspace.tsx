@@ -1,5 +1,5 @@
-import { ArrowLeft, ChevronUp, CircleAlert, Download, FileText, ImagePlus, LoaderCircle, MessageSquarePlus, Paperclip, Plus, RefreshCw, Send, Users, Wifi, WifiOff, X } from "lucide-react";
-import { MessageStatus, MessageType, SessionType, type ConversationItem, type MessageItem } from "@openim/wasm-client-sdk";
+import { ArrowLeft, BellOff, ChevronUp, CircleAlert, Download, FileText, ImagePlus, LoaderCircle, MessageSquarePlus, MoreHorizontal, Paperclip, Pin, Plus, RefreshCw, Search, Send, Users, Wifi, WifiOff, X } from "lucide-react";
+import { MessageReceiveOptType, MessageStatus, MessageType, SessionType, type ConversationItem, type MessageItem } from "@openim/wasm-client-sdk";
 import { useEffect, useRef, useState } from "react";
 
 import type { ChatState, ConversationController } from "./chat";
@@ -50,6 +50,7 @@ export function ChatWorkspace({ controller, state, selfUserID, connection, conta
   const [mobileDetail, setMobileDetail] = useState(false);
   const [showCreateGroup, setShowCreateGroup] = useState(false);
   const [showGroupMembers, setShowGroupMembers] = useState(false);
+  const [conversationMenuID, setConversationMenuID] = useState<string | null>(null);
   const [groupName, setGroupName] = useState("");
   const [groupMemberIDs, setGroupMemberIDs] = useState<string[]>([]);
   const [previewImage, setPreviewImage] = useState<{ url: string; alt: string } | null>(null);
@@ -57,10 +58,17 @@ export function ChatWorkspace({ controller, state, selfUserID, connection, conta
   const imageInput = useRef<HTMLInputElement | null>(null);
   const fileInput = useRef<HTMLInputElement | null>(null);
   const active = state.conversations.find((item) => item.conversationID === state.activeConversationID) ?? null;
+  const visibleConversations = controller.visibleConversations();
 
   useEffect(() => {
     messageEnd.current?.scrollIntoView({ block: "end" });
   }, [state.messages.length, state.activeConversationID]);
+
+  useEffect(() => {
+    const closeOnEscape = (event: KeyboardEvent) => { if (event.key === "Escape") setConversationMenuID(null); };
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, []);
 
   const openDirect = async () => {
     if (working) return;
@@ -77,12 +85,23 @@ export function ChatWorkspace({ controller, state, selfUserID, connection, conta
   };
 
   const selectConversation = async (conversationID: string) => {
+    setConversationMenuID(null);
     try {
       await controller.select(conversationID);
       setMobileDetail(true);
       setShowGroupMembers(false);
     } catch {
       // The controller publishes the explicit error in ChatState.
+    }
+  };
+
+  const updateConversationSetting = async (conversation: ConversationItem, action: "pin" | "mute") => {
+    try {
+      if (action === "pin") await controller.setPinned(conversation.conversationID, !conversation.isPinned);
+      else await controller.setMuted(conversation.conversationID, conversation.recvMsgOpt !== MessageReceiveOptType.NotNotify);
+      setConversationMenuID(null);
+    } catch {
+      // The controller publishes the explicit SDK or state error.
     }
   };
 
@@ -158,25 +177,75 @@ export function ChatWorkspace({ controller, state, selfUserID, connection, conta
           </button>
         </div>
 
+        <div className="conversation-search">
+          <Search size={16} />
+          <input
+            aria-label="搜索会话"
+            placeholder="搜索会话"
+            value={state.conversationQuery}
+            onChange={(event) => { controller.setConversationQuery(event.target.value); setConversationMenuID(null); }}
+          />
+          {state.conversationQuery && (
+            <button type="button" aria-label="清除会话搜索" title="清除" onClick={() => controller.setConversationQuery("")}><X size={15} /></button>
+          )}
+        </div>
+
         <nav className="conversation-list">
-          {state.conversations.map((conversation) => (
-            <button
+          {visibleConversations.map((conversation) => (
+            <div
               key={conversation.conversationID}
-              data-testid={`conversation-${conversationSource(conversation)}`}
-              className={`conversation-row ${conversation.conversationID === state.activeConversationID ? "selected" : ""}`}
-              onClick={() => void selectConversation(conversation.conversationID)}
+              className="conversation-item"
+              data-testid={`conversation-item-${conversationSource(conversation)}`}
+              data-pinned={String(conversation.isPinned)}
+              data-muted={String(conversation.recvMsgOpt === MessageReceiveOptType.NotNotify)}
             >
-              <span className={`avatar ${conversation.conversationType === SessionType.Group ? "group-avatar" : ""}`}>
-                {conversation.conversationType === SessionType.Group ? <Users size={18} /> : (conversation.showName || conversation.userID).slice(0, 1).toUpperCase()}
-              </span>
-              <span className="conversation-copy">
-                <strong>{conversation.showName || conversationSource(conversation)}</strong>
-                <small>{latestText(conversation)}</small>
-              </span>
-              {conversation.unreadCount > 0 && <b className="unread-badge" data-testid={`unread-${conversation.userID}`}>{conversation.unreadCount}</b>}
-            </button>
+              <button
+                data-testid={`conversation-${conversationSource(conversation)}`}
+                className={`conversation-row ${conversation.conversationID === state.activeConversationID ? "selected" : ""}`}
+                onClick={() => void selectConversation(conversation.conversationID)}
+              >
+                <span className={`avatar ${conversation.conversationType === SessionType.Group ? "group-avatar" : ""}`}>
+                  {conversation.conversationType === SessionType.Group ? <Users size={18} /> : (conversation.showName || conversation.userID).slice(0, 1).toUpperCase()}
+                </span>
+                <span className="conversation-copy">
+                  <strong>{conversation.showName || conversationSource(conversation)}</strong>
+                  <small>{latestText(conversation)}</small>
+                </span>
+                <span className="conversation-statuses">
+                  {conversation.isPinned && <Pin size={13} aria-label="已置顶" />}
+                  {conversation.recvMsgOpt === MessageReceiveOptType.NotNotify && <BellOff size={13} aria-label="已免打扰" />}
+                  {conversation.recvMsgOpt === MessageReceiveOptType.NotReceive && <CircleAlert size={13} aria-label="不接收消息" />}
+                  {conversation.unreadCount > 0 && <b className="unread-badge" data-testid={`unread-${conversation.userID}`}>{conversation.unreadCount}</b>}
+                </span>
+              </button>
+              <button
+                type="button"
+                className="conversation-menu-trigger"
+                aria-label={`会话操作 ${conversation.showName || conversationSource(conversation)}`}
+                aria-expanded={conversationMenuID === conversation.conversationID}
+                title="会话操作"
+                onClick={() => setConversationMenuID((value) => value === conversation.conversationID ? null : conversation.conversationID)}
+              >
+                {state.conversationActionByID[conversation.conversationID] ? <LoaderCircle className="spin" size={16} /> : <MoreHorizontal size={17} />}
+              </button>
+              {conversationMenuID === conversation.conversationID && (
+                <div className="conversation-menu" role="menu" aria-label={`管理会话 ${conversation.showName || conversationSource(conversation)}`}>
+                  <button role="menuitem" disabled={Boolean(state.conversationActionByID[conversation.conversationID])} onClick={() => void updateConversationSetting(conversation, "pin")}>
+                    <Pin size={15} />{conversation.isPinned ? "取消置顶" : "置顶会话"}
+                  </button>
+                  <button
+                    role="menuitem"
+                    disabled={Boolean(state.conversationActionByID[conversation.conversationID]) || conversation.recvMsgOpt === MessageReceiveOptType.NotReceive}
+                    onClick={() => void updateConversationSetting(conversation, "mute")}
+                  >
+                    <BellOff size={15} />{conversation.recvMsgOpt === MessageReceiveOptType.NotReceive ? "当前不接收消息" : conversation.recvMsgOpt === MessageReceiveOptType.NotNotify ? "关闭免打扰" : "开启免打扰"}
+                  </button>
+                </div>
+              )}
+            </div>
           ))}
           {state.conversations.length === 0 && <p className="empty-note">暂无会话</p>}
+          {state.conversations.length > 0 && visibleConversations.length === 0 && <p className="empty-note">没有匹配的会话</p>}
         </nav>
       </aside>
 
