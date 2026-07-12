@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/qsyy0921/openim/platform/services/platform-api/internal/action"
+	"github.com/qsyy0921/openim/platform/services/platform-api/internal/agent"
 	"github.com/qsyy0921/openim/platform/services/platform-api/internal/config"
 	"github.com/qsyy0921/openim/platform/services/platform-api/internal/httpserver"
 	"github.com/qsyy0921/openim/platform/services/platform-api/internal/identity"
@@ -26,7 +27,7 @@ func TestRunServesHealthAndShutsDown(t *testing.T) {
 		done <- Run(ctx, config.Config{
 			Version:         "test-version",
 			ShutdownTimeout: time.Second,
-		}, listener, httpserver.NewHandler("test-version", sessionStub{}, approvalStub{}))
+		}, listener, httpserver.NewHandler("test-version", sessionStub{}, approvalStub{}, agentWorkspaceStub{}))
 	}()
 
 	client := &http.Client{Timeout: time.Second}
@@ -67,6 +68,11 @@ func TestRunServesHealthAndShutsDown(t *testing.T) {
 
 type sessionStub struct{}
 type approvalStub struct{}
+type agentWorkspaceStub struct{}
+
+func (agentWorkspaceStub) Get(context.Context, string, string, int32) (agent.Workspace, error) {
+	return agent.Workspace{}, nil
+}
 
 func (approvalStub) Approve(context.Context, string, string, int32, string, string) (action.ApprovalResult, error) {
 	return action.ApprovalResult{}, nil

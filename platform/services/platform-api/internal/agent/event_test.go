@@ -49,7 +49,7 @@ func TestReplyTargetAndBotID(t *testing.T) {
 	if err != nil || target.GroupID != "group-1" || target.SessionType != 2 {
 		t.Fatalf("replyTarget() = %#v, %v", target, err)
 	}
-	if botUserID("tenant-1") != botUserID("tenant-1") || botUserID("tenant-1") == botUserID("tenant-2") {
+	if BotUserID("tenant-1") != BotUserID("tenant-1") || BotUserID("tenant-1") == BotUserID("tenant-2") {
 		t.Fatal("bot user ID is not deterministic per tenant")
 	}
 }

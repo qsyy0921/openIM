@@ -107,7 +107,7 @@ func (w *Worker) runOnce(ctx context.Context) error {
 		return nil
 	}
 
-	botID := botUserID(run.TenantID)
+	botID := BotUserID(run.TenantID)
 	if err := w.store.EnsureBotIdentity(ctx, run.TenantID, botID); err != nil {
 		return w.retry(ctx, *run, err)
 	}
@@ -202,7 +202,7 @@ func replyTarget(run Run) (openim.TextTarget, error) {
 	}
 }
 
-func botUserID(tenantID string) string {
+func BotUserID(tenantID string) string {
 	digest := sha256.Sum256([]byte("agent-bot\x00" + tenantID))
 	encoded := base32.StdEncoding.WithPadding(base32.NoPadding).EncodeToString(digest[:20])
 	return "agent_" + strings.ToLower(encoded)

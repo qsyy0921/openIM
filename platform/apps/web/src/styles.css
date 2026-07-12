@@ -146,6 +146,53 @@ h2 { margin: 0; font-size: 17px; }
 .send-button { width: 42px; height: 42px; }
 .conversation-empty { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; color: #8b929d; background: #f2f4f7; }
 
+.agent-layout { width: 100%; height: 100%; min-height: 0; display: grid; grid-template-columns: 300px minmax(0, 1fr); background: #fff; }
+.agent-sidebar { min-width: 0; display: flex; flex-direction: column; padding: 0 10px; border-right: 1px solid #dfe3e8; background: #f8f9fb; }
+.agent-sidebar-header { padding: 18px 10px 15px; }
+.agent-sidebar-header h1 { font-size: 21px; }
+.agent-sidebar-header p { margin: 3px 0 0; color: #8a919c; font-size: 12px; }
+.agent-item { width: 100%; min-height: 66px; display: grid; grid-template-columns: 42px minmax(0, 1fr); align-items: center; gap: 10px; padding: 9px 10px; border: 0; border-radius: 7px; color: #242830; background: transparent; text-align: left; }
+.agent-item.active { background: #e7ecff; }
+.agent-item > span:last-child { min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.agent-item strong, .agent-item small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.agent-item small { color: #858c97; }
+.agent-avatar { width: 42px; height: 42px; display: grid; place-items: center; border-radius: 50%; color: #315efb; background: #e4e9ff; }
+.agent-avatar.small { width: 30px; height: 30px; }
+.agent-main { min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+.agent-header { min-height: 68px; display: grid; grid-template-columns: 42px minmax(0, 1fr) auto; align-items: center; gap: 11px; padding: 10px 22px; border-bottom: 1px solid #e1e4e8; }
+.agent-header > div { min-width: 0; }
+.agent-header h2, .agent-header span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.agent-header > div span { margin-top: 3px; color: #8a919c; font-size: 11px; }
+.agent-policy { display: inline-flex !important; align-items: center; gap: 5px; color: #16794f; font-size: 11px; }
+.agent-timeline { min-height: 0; flex: 1; overflow-y: auto; padding: 22px max(28px, 6vw); background: #f2f4f7; }
+.agent-empty { min-height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; color: #858c97; }
+.agent-run { max-width: 900px; margin: 0 auto 28px; }
+.agent-run.pending { opacity: 0.86; }
+.agent-question { display: flex; justify-content: flex-end; align-items: flex-start; gap: 9px; }
+.agent-question > span { width: 28px; height: 28px; display: grid; place-items: center; order: 2; border-radius: 50%; color: #624315; background: #f3d9a6; font-size: 11px; font-weight: 700; }
+.agent-question p { max-width: 72%; margin: 0; padding: 10px 13px; border: 1px solid #cedafc; border-radius: 7px; background: #dfe7ff; white-space: pre-wrap; overflow-wrap: anywhere; }
+.agent-answer { display: grid; grid-template-columns: 30px minmax(0, 1fr); align-items: flex-start; gap: 10px; margin-top: 14px; }
+.agent-response { min-width: 0; }
+.agent-response > p { margin: 8px 0 0; line-height: 1.65; white-space: pre-wrap; overflow-wrap: anywhere; }
+.run-state { display: inline-flex; align-items: center; gap: 5px; color: #737b87; font-size: 11px; }
+.run-state.succeeded { color: #16794f; }
+.run-state.failed, .agent-run-error { color: #b42318; }
+.citation-section { margin-top: 14px; padding-top: 12px; border-top: 1px solid #dce1e7; }
+.citation-section h3 { display: flex; align-items: center; gap: 6px; margin: 0 0 8px; color: #59616d; font-size: 12px; }
+.citation-row { display: grid; grid-template-columns: auto minmax(120px, 1fr) minmax(120px, 1fr); gap: 8px; align-items: center; min-height: 30px; color: #68717d; font-size: 11px; }
+.citation-row b { color: #315efb; }
+.citation-row code { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #8a919c; }
+.approval-panel { display: grid; grid-template-columns: 36px minmax(0, 1fr) auto; align-items: center; gap: 10px; margin-top: 14px; padding: 12px; border: 1px solid #d8dee8; border-radius: 7px; background: #fff; }
+.approval-icon { width: 36px; height: 36px; display: grid; place-items: center; border-radius: 6px; color: #8a650d; background: #f8edca; }
+.approval-copy { min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.approval-copy span { color: #757d89; font-size: 11px; }
+.approval-copy code { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #16794f; font-size: 10px; }
+.approve-button { min-height: 34px; display: inline-flex; align-items: center; gap: 6px; padding: 0 12px; border: 0; border-radius: 6px; color: #fff; background: #315efb; cursor: pointer; }
+.approve-button:disabled { background: #9caae0; cursor: wait; }
+.agent-composer { min-height: 78px; display: grid; grid-template-columns: minmax(0, 1fr) 42px; align-items: end; gap: 12px; padding: 13px 20px; border-top: 1px solid #e1e4e8; }
+.agent-composer textarea { width: 100%; min-height: 48px; max-height: 120px; resize: vertical; padding: 12px; border: 1px solid #d5dae1; border-radius: 6px; color: #242830; }
+.agent-composer textarea:focus { outline: 2px solid rgba(49, 94, 251, 0.18); border-color: #315efb; }
+
 /* Connection-error view retained outside the authenticated collaboration shell. */
 .rail { background: #252b35; padding: 16px 14px; display: flex; flex-direction: column; align-items: center; gap: 24px; }
 .rail-button { width: 36px; height: 36px; display: grid; place-items: center; border: 0; border-radius: 6px; color: #c3c8d0; background: transparent; }
@@ -190,4 +237,15 @@ h2 { margin: 0; font-size: 17px; }
   .workspace-header { align-items: flex-start; }
   .status-band { grid-template-columns: 48px 1fr; }
   .status-band .secondary-button { grid-column: 1 / -1; }
+  .agent-layout { grid-template-columns: minmax(0, 1fr); }
+  .agent-sidebar { display: none; }
+  .agent-header { min-height: 58px; padding: 8px 12px; }
+  .agent-policy { font-size: 0; }
+  .agent-timeline { padding: 16px 12px; }
+  .agent-question p { max-width: 86%; }
+  .citation-row { grid-template-columns: auto minmax(0, 1fr); }
+  .citation-row code { grid-column: 2; }
+  .approval-panel { grid-template-columns: 36px minmax(0, 1fr); }
+  .approve-button { grid-column: 1 / -1; justify-content: center; }
+  .agent-composer { min-height: 68px; padding: 9px 10px; gap: 8px; }
 }

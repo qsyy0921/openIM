@@ -9,10 +9,12 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/qsyy0921/openim/platform/services/platform-api/internal/action"
+	"github.com/qsyy0921/openim/platform/services/platform-api/internal/agent"
 	"github.com/qsyy0921/openim/platform/services/platform-api/internal/identity"
 )
 
@@ -28,10 +30,13 @@ type SessionService interface {
 type ApprovalService interface {
 	Approve(context.Context, string, string, int32, string, string) (action.ApprovalResult, error)
 }
+type AgentWorkspaceService interface {
+	Get(context.Context, string, string, int32) (agent.Workspace, error)
+}
 
-func NewHandler(version string, sessions SessionService, approvals ApprovalService) http.Handler {
-	if sessions == nil || approvals == nil {
-		panic("session and approval services are required")
+func NewHandler(version string, sessions SessionService, approvals ApprovalService, workspace AgentWorkspaceService) http.Handler {
+	if sessions == nil || approvals == nil || workspace == nil {
+		panic("session, approval, and Agent workspace services are required")
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
@@ -44,8 +49,42 @@ func NewHandler(version string, sessions SessionService, approvals ApprovalServi
 		})
 	})
 	mux.Handle("POST /v1/im/session", &sessionHandler{service: sessions})
+	mux.Handle("GET /v1/agent/workspace", &agentWorkspaceHandler{service: workspace})
 	mux.Handle("POST /v1/agent/intents/{intent_id}/approve", &approvalHandler{service: approvals})
 	return requestLogger(mux)
+}
+
+type agentWorkspaceHandler struct{ service AgentWorkspaceService }
+
+func (h *agentWorkspaceHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	correlationID := correlationID(r)
+	w.Header().Set("X-Correlation-ID", correlationID)
+	token, ok := bearerToken(r.Header.Get("Authorization"))
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "AUTHENTICATION_REQUIRED", "a valid bearer token is required", false, correlationID)
+		return
+	}
+	deviceID := strings.TrimSpace(r.URL.Query().Get("device_id"))
+	platformValue := r.URL.Query().Get("platform_id")
+	platformID, err := strconv.ParseInt(platformValue, 10, 32)
+	if err != nil || !validPlatformID(int32(platformID)) || deviceID == "" || len(deviceID) > 128 {
+		writeError(w, http.StatusBadRequest, "INVALID_REQUEST", "platform_id or device_id is invalid", false, correlationID)
+		return
+	}
+	workspace, err := h.service.Get(r.Context(), token, deviceID, int32(platformID))
+	if err != nil {
+		slog.Warn("read Agent workspace failed", "correlation_id", correlationID, "error", err)
+		switch {
+		case errors.Is(err, identity.ErrUnauthenticated):
+			writeError(w, http.StatusUnauthorized, "AUTHENTICATION_REQUIRED", "enterprise identity is invalid or expired", false, correlationID)
+		case errors.Is(err, identity.ErrForbidden):
+			writeError(w, http.StatusForbidden, "MEMBER_OR_DEVICE_FORBIDDEN", "member or device is not active", false, correlationID)
+		default:
+			writeError(w, http.StatusBadGateway, "AGENT_WORKSPACE_UNAVAILABLE", "Agent workspace dependencies are unavailable", true, correlationID)
+		}
+		return
+	}
+	writeJSON(w, http.StatusOK, workspace)
 }
 
 type approvalHandler struct{ service ApprovalService }

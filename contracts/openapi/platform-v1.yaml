@@ -73,6 +73,38 @@ paths:
         "403": { "$ref": "#/components/responses/ErrorResponse" }
         "409": { "$ref": "#/components/responses/ErrorResponse" }
         "500": { "$ref": "#/components/responses/ErrorResponse" }
+  /v1/agent/workspace:
+    get:
+      operationId: getAgentWorkspace
+      security:
+        - oidcBearer: []
+      parameters:
+        - in: query
+          name: platform_id
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 11
+            not: { const: 10 }
+        - in: query
+          name: device_id
+          required: true
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 128
+      responses:
+        "200":
+          description: Authenticated member Agent workspace projection.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentWorkspace"
+        "400": { "$ref": "#/components/responses/ErrorResponse" }
+        "401": { "$ref": "#/components/responses/ErrorResponse" }
+        "403": { "$ref": "#/components/responses/ErrorResponse" }
+        "502": { "$ref": "#/components/responses/ErrorResponse" }
 components:
   securitySchemes:
     oidcBearer:
@@ -158,6 +190,57 @@ components:
         intent_id: { type: string, minLength: 1 }
         execution_id: { type: string, minLength: 1 }
         state: { type: string, enum: [queued, running, unknown, succeeded, failed] }
+    AgentWorkspace:
+      type: object
+      additionalProperties: false
+      required: [agent_user_id, runs]
+      properties:
+        agent_user_id: { type: string, minLength: 1 }
+        runs:
+          type: array
+          maxItems: 30
+          items: { "$ref": "#/components/schemas/AgentRun" }
+    AgentRun:
+      type: object
+      additionalProperties: false
+      required: [run_id, conversation_id, prompt, state, created_at, updated_at, citations]
+      properties:
+        run_id: { type: string, minLength: 1 }
+        conversation_id: { type: string, minLength: 1 }
+        prompt: { type: string }
+        state: { type: string, enum: [queued, running, reply_pending, waiting_approval, succeeded, failed] }
+        answer: { type: string }
+        model: { type: string }
+        last_error: { type: string }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+        citations:
+          type: array
+          items: { "$ref": "#/components/schemas/AgentCitation" }
+        intent: { "$ref": "#/components/schemas/AgentIntent" }
+    AgentCitation:
+      type: object
+      additionalProperties: false
+      required: [citation_id, title, source_uri, checksum]
+      properties:
+        citation_id: { type: string, minLength: 1 }
+        title: { type: string, minLength: 1 }
+        source_uri: { type: string, minLength: 1 }
+        checksum: { type: string, minLength: 1 }
+    AgentIntent:
+      type: object
+      additionalProperties: false
+      required: [intent_id, action_type, title, payload_digest, state, expires_at]
+      properties:
+        intent_id: { type: string, minLength: 1 }
+        action_type: { type: string, const: create_ticket }
+        title: { type: string, minLength: 1, maxLength: 200 }
+        payload_digest: { type: string, pattern: "^sha256:[0-9a-f]{64}$" }
+        state: { type: string, enum: [pending_approval, approved, executing, succeeded, failed, expired] }
+        expires_at: { type: string, format: date-time }
+        execution_id: { type: string }
+        execution_state: { type: string, enum: [queued, running, unknown, succeeded, failed] }
+        ticket_id: { type: string }
     Error:
       type: object
       additionalProperties: false

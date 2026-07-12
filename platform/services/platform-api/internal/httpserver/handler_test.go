@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/qsyy0921/openim/platform/services/platform-api/internal/action"
+	"github.com/qsyy0921/openim/platform/services/platform-api/internal/agent"
 	"github.com/qsyy0921/openim/platform/services/platform-api/internal/identity"
 )
 
@@ -18,7 +19,7 @@ func TestHealth(t *testing.T) {
 	recorder := httptest.NewRecorder()
 	request := httptest.NewRequest(http.MethodGet, "/healthz", nil)
 
-	NewHandler("test-version", stubSessionService{}, stubApprovalService{}).ServeHTTP(recorder, request)
+	NewHandler("test-version", stubSessionService{}, stubApprovalService{}, stubAgentWorkspaceService{}).ServeHTTP(recorder, request)
 
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusOK)
@@ -41,7 +42,7 @@ func TestHealthRejectsOtherMethods(t *testing.T) {
 	recorder := httptest.NewRecorder()
 	request := httptest.NewRequest(http.MethodPost, "/healthz", nil)
 
-	NewHandler("test-version", stubSessionService{}, stubApprovalService{}).ServeHTTP(recorder, request)
+	NewHandler("test-version", stubSessionService{}, stubApprovalService{}, stubAgentWorkspaceService{}).ServeHTTP(recorder, request)
 
 	if recorder.Code != http.StatusMethodNotAllowed {
 		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusMethodNotAllowed)
@@ -50,6 +51,11 @@ func TestHealthRejectsOtherMethods(t *testing.T) {
 
 type stubSessionService struct{}
 type stubApprovalService struct{}
+type stubAgentWorkspaceService struct{}
+
+func (stubAgentWorkspaceService) Get(context.Context, string, string, int32) (agent.Workspace, error) {
+	return agent.Workspace{}, nil
+}
 
 func (stubApprovalService) Approve(context.Context, string, string, int32, string, string) (action.ApprovalResult, error) {
 	return action.ApprovalResult{}, nil
@@ -73,7 +79,7 @@ func TestCreateSession(t *testing.T) {
 	request.Header.Set("Authorization", "Bearer enterprise-token")
 	request.Header.Set("X-Correlation-ID", "test-correlation")
 
-	NewHandler("test-version", service, stubApprovalService{}).ServeHTTP(recorder, request)
+	NewHandler("test-version", service, stubApprovalService{}, stubAgentWorkspaceService{}).ServeHTTP(recorder, request)
 
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("status = %d, body = %s", recorder.Code, recorder.Body.String())
@@ -106,7 +112,7 @@ func TestCreateSessionRejectsInvalidRequests(t *testing.T) {
 			recorder := httptest.NewRecorder()
 			request := httptest.NewRequest(http.MethodPost, "/v1/im/session", bytes.NewBufferString(tt.body))
 			request.Header.Set("Authorization", tt.authorization)
-			NewHandler("test-version", &recordingSessionService{}, stubApprovalService{}).ServeHTTP(recorder, request)
+			NewHandler("test-version", &recordingSessionService{}, stubApprovalService{}, stubAgentWorkspaceService{}).ServeHTTP(recorder, request)
 			if recorder.Code != tt.wantStatus {
 				t.Fatalf("status = %d, want %d", recorder.Code, tt.wantStatus)
 			}
@@ -120,7 +126,7 @@ func TestCreateSessionMapsDependencyError(t *testing.T) {
 	request.Header.Set("Authorization", "Bearer token")
 	service := &recordingSessionService{err: identity.ErrDependencyUnavailable}
 
-	NewHandler("test-version", service, stubApprovalService{}).ServeHTTP(recorder, request)
+	NewHandler("test-version", service, stubApprovalService{}, stubAgentWorkspaceService{}).ServeHTTP(recorder, request)
 
 	if recorder.Code != http.StatusBadGateway {
 		t.Fatalf("status = %d", recorder.Code)
@@ -140,12 +146,51 @@ func TestApproveAction(t *testing.T) {
 	digest := "sha256:" + strings.Repeat("a", 64)
 	request := httptest.NewRequest(http.MethodPost, "/v1/agent/intents/intent-1/approve", bytes.NewBufferString(`{"platform_id":5,"device_id":"browser-1","payload_digest":"`+digest+`"}`))
 	request.Header.Set("Authorization", "Bearer enterprise-token")
-	NewHandler("test-version", stubSessionService{}, approvals).ServeHTTP(recorder, request)
+	NewHandler("test-version", stubSessionService{}, approvals, stubAgentWorkspaceService{}).ServeHTTP(recorder, request)
 	if recorder.Code != http.StatusAccepted {
 		t.Fatalf("status=%d body=%s", recorder.Code, recorder.Body.String())
 	}
 	if approvals.intentID != "intent-1" || approvals.digest != digest || approvals.token != "enterprise-token" {
 		t.Fatalf("approval input=%#v", approvals)
+	}
+}
+
+func TestGetAgentWorkspace(t *testing.T) {
+	service := &recordingAgentWorkspaceService{workspace: agent.Workspace{
+		AgentUserID: "agent-1",
+		Runs:        []agent.WorkspaceRun{{ID: "run-1", State: "waiting_approval"}},
+	}}
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodGet, "/v1/agent/workspace?platform_id=5&device_id=browser-1", nil)
+	request.Header.Set("Authorization", "Bearer enterprise-token")
+	NewHandler("test-version", stubSessionService{}, stubApprovalService{}, service).ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+	if service.token != "enterprise-token" || service.deviceID != "browser-1" || service.platformID != 5 {
+		t.Fatalf("workspace service input=%#v", service)
+	}
+	var response agent.Workspace
+	if err := json.NewDecoder(recorder.Body).Decode(&response); err != nil {
+		t.Fatal(err)
+	}
+	if response.AgentUserID != "agent-1" || len(response.Runs) != 1 || response.Runs[0].ID != "run-1" {
+		t.Fatalf("workspace response=%#v", response)
+	}
+}
+
+func TestGetAgentWorkspaceRejectsInvalidDeviceContext(t *testing.T) {
+	for _, target := range []string{
+		"/v1/agent/workspace?platform_id=10&device_id=browser-1",
+		"/v1/agent/workspace?platform_id=5",
+	} {
+		recorder := httptest.NewRecorder()
+		request := httptest.NewRequest(http.MethodGet, target, nil)
+		request.Header.Set("Authorization", "Bearer enterprise-token")
+		NewHandler("test-version", stubSessionService{}, stubApprovalService{}, stubAgentWorkspaceService{}).ServeHTTP(recorder, request)
+		if recorder.Code != http.StatusBadRequest {
+			t.Fatalf("target=%s status=%d", target, recorder.Code)
+		}
 	}
 }
 
@@ -161,6 +206,18 @@ type recordingApprovalService struct {
 	result                  action.ApprovalResult
 	err                     error
 	intentID, digest, token string
+}
+
+type recordingAgentWorkspaceService struct {
+	workspace       agent.Workspace
+	err             error
+	token, deviceID string
+	platformID      int32
+}
+
+func (s *recordingAgentWorkspaceService) Get(_ context.Context, token, deviceID string, platformID int32) (agent.Workspace, error) {
+	s.token, s.deviceID, s.platformID = token, deviceID, platformID
+	return s.workspace, s.err
 }
 
 func (s *recordingApprovalService) Approve(_ context.Context, token, device string, platform int32, intentID, digest string) (action.ApprovalResult, error) {

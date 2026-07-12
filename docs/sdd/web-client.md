@@ -10,7 +10,7 @@ depends_on:
 
 ## Scope
 
-Provide a browser single-chat vertical slice from enterprise OIDC Authorization Code with PKCE through Platform API session exchange to the official OpenIM WASM SDK: list single conversations and unread counts, load text history, send and receive text messages, mark the active conversation read, expose send failures, and restore state after reconnection. This slice does not implement group chat, files, images, audio, video, search, contacts, approval UI, documents, or administration.
+Provide an extensible browser collaboration shell with the verified OpenIM single-chat vertical slice and an independently owned Agent workspace module. The Agent module is specified in `agent-workspace.md`; this unit continues to own shell, identity/session bootstrap, and IM behavior rather than Agent business state. This slice does not implement group chat, files, images, audio, video, search, contacts, documents, or administration.
 
 ## Responsibilities and non-goals
 
@@ -83,6 +83,7 @@ The UI exposes coarse connection phase and endpoint readiness. Platform and Open
 - `platform/apps/web/src/App.tsx`
 - `platform/apps/web/src/WorkspaceShell.tsx`
 - `platform/apps/web/src/ChatWorkspace.tsx`
+- `platform/apps/web/src/AgentWorkspace.tsx`
 - `platform/apps/web/vite.config.ts`
 - `platform/apps/web/scripts/patch-openim-worker.mjs`
 - `platform/apps/web/src/config.test.ts`

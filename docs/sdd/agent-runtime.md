@@ -77,6 +77,7 @@ Lifecycle logs use event ID, Run ID, model name, and OpenIM server message ID. R
 ## Source evidence
 
 - `platform/services/platform-api/internal/agent/`
+- `platform/services/platform-api/internal/agent/workspace.go`
 - `platform/services/platform-api/cmd/agent-runtime/main.go`
 - `platform/services/platform-api/internal/openim/client.go`
 - `platform/services/platform-api/internal/migrations/sql/0003_agent.sql`

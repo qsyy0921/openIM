@@ -73,6 +73,7 @@ Record intent/execution/Run IDs, digest, approval actor, state transitions, leas
 - `platform/services/platform-api/internal/action/`
 - `platform/services/platform-api/cmd/action-executor/main.go`
 - `platform/services/platform-api/internal/httpserver/handler.go`
+- `platform/services/platform-api/internal/agent/workspace.go`
 - `platform/services/platform-api/internal/migrations/sql/0007_approved_ticket_action.sql`
 
 ## Verification evidence
