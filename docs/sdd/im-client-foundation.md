@@ -19,7 +19,7 @@ It preserves enterprise OIDC, `/v1/im/session`, the official OpenIM WASM SDK, SD
 
 ## Responsibilities and non-goals
 
-The Web client owns presentation state, conversation selection, optimistic text-send state, bounded group-member presentation, and mapping user commands to the official SDK. OpenIM owns group membership, conversation/message state, local SDK storage, synchronization, and server authorization. Platform API continues to own enterprise identity exchange. This unit does not duplicate OpenIM group or message facts in PostgreSQL and does not treat a client-side optimistic message as server acceptance. The admitted contacts/member-picker extension is specified separately in `im-client-contacts.md` so the verified conversation foundation remains stable.
+The Web client owns presentation state, conversation selection, optimistic text-send state, bounded group-member presentation, and mapping user commands to the official SDK. OpenIM owns group membership, conversation/message state, local SDK storage, synchronization, and server authorization. Platform API continues to own enterprise identity exchange. This unit does not duplicate OpenIM group or message facts in PostgreSQL and does not treat a client-side optimistic message as server acceptance. The contacts/member-picker extension is specified in `im-client-contacts.md`, and the admitted image/file extension is specified in `im-client-media.md`, so the verified conversation foundation remains stable.
 
 ## Open-source reuse boundary
 
@@ -118,7 +118,7 @@ The UI exposes connection, restore, loading, optimistic send, and explicit error
 
 - Whether enterprise contacts should be sourced from OpenIM friendship, the future organization domain, or a composed read model.
 - Whether desktop packaging should reuse the official Electron SDK or continue with browser WASM inside a thin desktop shell.
-- Which image/file upload path and retention policy will be authoritative before the media slice.
+- Enterprise media retention, malware scanning, DLP, and download audit policy remain open; the verified transport path is the pinned OpenIM SDK through third RPC to Node2 MinIO as specified in `im-client-media.md`.
 - Whether one-to-one calling uses the OpenIM commercial/LiveKit path or an independently governed meeting service.
 
 ## Source evidence
@@ -129,6 +129,7 @@ The UI exposes connection, restore, loading, optimistic send, and explicit error
 - `platform/apps/web/src/App.tsx`
 - `platform/apps/web/src/chat.test.ts`
 - `docs/sdd/im-client-contacts.md`
+- `docs/sdd/im-client-media.md`
 - `platform/apps/web/scripts/patch-openim-worker.mjs`
 - `ops/cleanup-node2-web-e2e-group.ps1`
 - `ops/cleanup-node2-web-e2e-group.sh`

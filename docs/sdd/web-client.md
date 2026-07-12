@@ -10,7 +10,7 @@ depends_on:
 
 ## Scope
 
-Provide an extensible browser collaboration shell with verified OpenIM single/group text conversation foundations and an independently owned Agent workspace module. The group extension is specified in `im-client-foundation.md`, the admitted OpenIM contacts/member-picker extension is specified in `im-client-contacts.md`, and the Agent module is specified in `agent-workspace.md`. This unit continues to own shell, identity/session bootstrap, and IM presentation rather than Agent business state. It does not yet implement files, images, audio, video, enterprise-directory search, documents, or administration.
+Provide an extensible browser collaboration shell with verified OpenIM single/group text conversation foundations and an independently owned Agent workspace module. The group extension is specified in `im-client-foundation.md`, the contacts/member-picker extension is specified in `im-client-contacts.md`, the admitted image/file extension is specified in `im-client-media.md`, and the Agent module is specified in `agent-workspace.md`. This unit continues to own shell, identity/session bootstrap, and IM presentation rather than Agent business state. It does not yet implement audio, video, enterprise-directory search, documents, or administration.
 
 ## Responsibilities and non-goals
 
@@ -75,6 +75,7 @@ The UI exposes coarse connection phase and endpoint readiness. Platform and Open
 - A real browser completes PKCE login, `/v1/im/session`, WASM SDK login, and node2 WebSocket connection.
 - Real node2 members exchange single and group text; unread state clears when selected, history survives reload/reconnect, group members resolve, and sent messages converge from sending to succeeded.
 - A real node2 member finds another user by exact OpenIM user ID, submits and processes a friend application, opens direct chat from the friend list, and creates a group through the reusable member picker.
+- Real node2 single and group conversations upload, send, receive, preview, download/open, and restore image/file messages through the pinned SDK and OpenIM MinIO path described by `im-client-media.md`.
 - Browser inspection confirms no token in visible UI, URL, localStorage, or console output.
 
 ## Source evidence
@@ -99,13 +100,14 @@ The UI exposes coarse connection phase and endpoint readiness. Platform and Open
 
 ## Verification evidence
 
-- `npm run typecheck` passed and Vitest passed 23 configuration, Platform API, connection, single/group-chat, Agent API, and Agent controller tests.
+- `npm run typecheck` passed and Vitest passed 38 configuration, Platform API, connection, single/group/media-chat, contacts, Agent API, and Agent controller tests.
 - `npm run test:e2e:node2` passed against the real `.2` runtime: system Chrome completed Keycloak Authorization Code with PKCE, exchanged the ID Token at `/v1/im/session`, initialized and synchronized the official WASM SDK, and connected to node2 OpenIM.
 - The E2E injected real `imAdmin -> Web` messages through node2, observed unread increment and read clearing, sent `Web -> imAdmin` text, recovered from browser offline/online, and found the messages after reload. It also created a real group, sent group text, loaded members, restored group history, and dismissed the test group.
 - The same test observed zero HTTP failures and no unexpected console errors, found no localStorage entries or token-shaped visible text, and confirmed the callback authorization code was removed from the URL. One exact bounded OpenIM new-group update diagnostic is documented in `im-client-foundation.md`.
 - Desktop `1280x720` group chat and mobile `390x844` single-chat/list screenshots passed horizontal-overflow checks and visual inspection without overlapping controls or text; the mobile E2E exercised explicit conversation-list and chat-detail navigation.
 - The node2 Playwright configuration uses one worker because the real single-chat and Agent scenarios intentionally share one authenticated account and global OpenIM unread state.
 - The verified contacts extension adds exact user-ID discovery, real friend request/acceptance, callback-driven friend state, direct-chat entry, and MemberPicker-based group creation without a second relationship store or browser Admin Token. The final full Agent plus IM/contact suite passed serially in 37.5 seconds.
+- The verified media extension adds official-SDK image/file creation and upload, exact `clientMsgID` progress state, explicit validation/failure, safe HTTP(S) rendering, preview/download, real Node2 inbound media, and single/group history restoration. The final full Agent plus IM/contact/media suite passed serially in 42.1 seconds.
 
 ## Open questions
 

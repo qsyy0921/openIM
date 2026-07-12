@@ -1,5 +1,5 @@
-import { ArrowLeft, ChevronUp, CircleAlert, LoaderCircle, MessageSquarePlus, Plus, RefreshCw, Send, Users, Wifi, WifiOff, X } from "lucide-react";
-import { MessageStatus, SessionType, type ConversationItem, type MessageItem } from "@openim/wasm-client-sdk";
+import { ArrowLeft, ChevronUp, CircleAlert, Download, FileText, ImagePlus, LoaderCircle, MessageSquarePlus, Paperclip, Plus, RefreshCw, Send, Users, Wifi, WifiOff, X } from "lucide-react";
+import { MessageStatus, MessageType, SessionType, type ConversationItem, type MessageItem } from "@openim/wasm-client-sdk";
 import { useEffect, useRef, useState } from "react";
 
 import type { ChatState, ConversationController } from "./chat";
@@ -24,6 +24,8 @@ function latestText(conversation: ConversationItem): string {
   if (!conversation.latestMsg) return "";
   try {
     const message = JSON.parse(conversation.latestMsg) as MessageItem;
+    if (message.contentType === MessageType.PictureMessage) return "[图片]";
+    if (message.contentType === MessageType.FileMessage) return `[文件] ${message.fileElem?.fileName ?? ""}`.trim();
     return message.textElem?.content ?? "";
   } catch {
     return "";
@@ -50,7 +52,10 @@ export function ChatWorkspace({ controller, state, selfUserID, connection, conta
   const [showGroupMembers, setShowGroupMembers] = useState(false);
   const [groupName, setGroupName] = useState("");
   const [groupMemberIDs, setGroupMemberIDs] = useState<string[]>([]);
+  const [previewImage, setPreviewImage] = useState<{ url: string; alt: string } | null>(null);
   const messageEnd = useRef<HTMLDivElement | null>(null);
+  const imageInput = useRef<HTMLInputElement | null>(null);
+  const fileInput = useRef<HTMLInputElement | null>(null);
   const active = state.conversations.find((item) => item.conversationID === state.activeConversationID) ?? null;
 
   useEffect(() => {
@@ -106,6 +111,19 @@ export function ChatWorkspace({ controller, state, selfUserID, connection, conta
       await controller.sendText(content);
     } catch {
       // The failed optimistic message and error remain visible in ChatState.
+    } finally {
+      setWorking(false);
+    }
+  };
+
+  const sendMedia = async (kind: "image" | "file", file: File) => {
+    if (working || connection.state !== "connected") return;
+    setWorking(true);
+    try {
+      if (kind === "image") await controller.sendImage(file);
+      else await controller.sendFile(file);
+    } catch {
+      // The controller exposes validation, upload, and send failures in ChatState.
     } finally {
       setWorking(false);
     }
@@ -201,33 +219,75 @@ export function ChatWorkspace({ controller, state, selfUserID, connection, conta
               )}
               {state.messages.map((message) => {
                 const outgoing = message.sendID === selfUserID;
+                const progress = state.uploadProgressByClientMsgID[message.clientMsgID];
+                const pictureURL = message.contentType === MessageType.PictureMessage ? imageURL(message) : null;
+                const fileURL = message.contentType === MessageType.FileMessage ? safeMediaURL(message.fileElem?.sourceUrl) : null;
                 return (
                   <article key={message.clientMsgID} className={`message-row ${outgoing ? "outgoing" : "incoming"}`} data-message-id={message.clientMsgID}>
                     <div>
                       {!outgoing && active.conversationType === SessionType.Group && <div className="message-sender">{message.senderNickname || message.sendID}</div>}
-                      <div className="message-bubble">{message.textElem?.content}</div>
+                      {message.contentType === MessageType.PictureMessage && (
+                        <div className="media-message image-message" data-testid={`image-message-${message.clientMsgID}`}>
+                          {pictureURL ? (
+                            <button type="button" className="image-preview-trigger" aria-label="预览图片" onClick={() => setPreviewImage({ url: pictureURL, alt: `来自 ${message.senderNickname || message.sendID} 的图片` })}>
+                              <img src={pictureURL} alt="聊天图片" loading="lazy" />
+                            </button>
+                          ) : <div className="media-unavailable"><ImagePlus size={19} /><span>图片地址不可用</span></div>}
+                        </div>
+                      )}
+                      {message.contentType === MessageType.FileMessage && (
+                        <div className="media-message file-message" data-testid={`file-message-${message.clientMsgID}`}>
+                          <span className="file-icon"><FileText size={22} /></span>
+                          <span className="file-copy"><strong>{message.fileElem?.fileName || "未命名文件"}</strong><small>{formatBytes(message.fileElem?.fileSize ?? 0)}</small></span>
+                          {fileURL ? (
+                            <a href={fileURL} target="_blank" rel="noreferrer" download={message.fileElem?.fileName} aria-label={`下载文件 ${message.fileElem?.fileName || "未命名文件"}`} title="下载文件"><Download size={18} /></a>
+                          ) : <span className="file-unavailable" title="文件地址不可用"><CircleAlert size={17} /></span>}
+                        </div>
+                      )}
+                      {message.contentType === MessageType.TextMessage && <div className="message-bubble">{message.textElem?.content}</div>}
+                      {progress !== undefined && message.status === MessageStatus.Sending && (
+                        <div className="upload-progress" role="progressbar" aria-label={`上传进度 ${progress}%`} aria-valuemin={0} aria-valuemax={100} aria-valuenow={progress}>
+                          <span style={{ width: `${progress}%` }} />
+                        </div>
+                      )}
                     </div>
                     <div className="message-meta"><time>{messageTime(message)}</time>{outgoing && <span className={message.status === MessageStatus.Failed ? "failed" : ""}>{sendState(message)}</span>}</div>
                   </article>
                 );
               })}
-              {state.messages.length === 0 && !state.loadingHistory && <p className="empty-note centered">还没有文本消息</p>}
+              {state.messages.length === 0 && !state.loadingHistory && <p className="empty-note centered">还没有消息</p>}
               <div ref={messageEnd} />
             </div>
             <footer className="composer">
-              <textarea
-                aria-label="消息内容"
-                placeholder="输入消息"
-                maxLength={6000}
-                value={draft}
-                onChange={(event) => setDraft(event.target.value)}
-                onKeyDown={(event) => {
-                  if (event.key === "Enter" && !event.shiftKey) {
-                    event.preventDefault();
-                    void send();
-                  }
-                }}
-              />
+              <div className="composer-main">
+                <div className="composer-tools" aria-label="消息附件">
+                  <button type="button" className="composer-tool" title="发送图片" aria-label="发送图片" disabled={working || connection.state !== "connected"} onClick={() => imageInput.current?.click()}><ImagePlus size={19} /></button>
+                  <input ref={imageInput} className="visually-hidden" type="file" aria-label="选择图片" accept="image/jpeg,image/png,image/gif,image/webp" onChange={(event) => {
+                    const file = event.currentTarget.files?.[0];
+                    event.currentTarget.value = "";
+                    if (file) void sendMedia("image", file);
+                  }} />
+                  <button type="button" className="composer-tool" title="发送文件" aria-label="发送文件" disabled={working || connection.state !== "connected"} onClick={() => fileInput.current?.click()}><Paperclip size={19} /></button>
+                  <input ref={fileInput} className="visually-hidden" type="file" aria-label="选择文件" onChange={(event) => {
+                    const file = event.currentTarget.files?.[0];
+                    event.currentTarget.value = "";
+                    if (file) void sendMedia("file", file);
+                  }} />
+                </div>
+                <textarea
+                  aria-label="消息内容"
+                  placeholder="输入消息"
+                  maxLength={6000}
+                  value={draft}
+                  onChange={(event) => setDraft(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter" && !event.shiftKey) {
+                      event.preventDefault();
+                      void send();
+                    }
+                  }}
+                />
+              </div>
               <button className="send-button" disabled={!draft.trim() || working || connection.state !== "connected"} onClick={() => void send()} title="发送" aria-label="发送">
                 <Send size={18} />
               </button>
@@ -280,6 +340,47 @@ export function ChatWorkspace({ controller, state, selfUserID, connection, conta
           </section>
         </div>
       )}
+
+      {previewImage && (
+        <div className="image-preview-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setPreviewImage(null); }}>
+          <section className="image-preview-dialog" role="dialog" aria-modal="true" aria-label="图片预览">
+            <button type="button" className="preview-close" aria-label="关闭图片预览" title="关闭" onClick={() => setPreviewImage(null)}><X size={20} /></button>
+            <img src={previewImage.url} alt={previewImage.alt} />
+          </section>
+        </div>
+      )}
     </div>
+  );
+}
+
+function formatBytes(bytes: number): string {
+  if (!Number.isFinite(bytes) || bytes < 0) return "";
+  if (bytes < 1024) return `${bytes} B`;
+  const units = ["KiB", "MiB", "GiB"];
+  let value = bytes / 1024;
+  let unit = units[0];
+  for (let index = 1; index < units.length && value >= 1024; index += 1) {
+    value /= 1024;
+    unit = units[index];
+  }
+  return `${value >= 10 ? value.toFixed(0) : value.toFixed(1)} ${unit}`;
+}
+
+function safeMediaURL(value: string | undefined, allowBlob = false): string | null {
+  if (!value) return null;
+  try {
+    const url = new URL(value);
+    if (url.username || url.password) return null;
+    if (url.protocol === "https:" || url.protocol === "http:" || (allowBlob && url.protocol === "blob:")) return url.href;
+  } catch {
+    return null;
+  }
+  return null;
+}
+
+function imageURL(message: MessageItem): string | null {
+  return safeMediaURL(
+    message.pictureElem?.bigPicture?.url || message.pictureElem?.sourcePicture?.url || message.pictureElem?.snapshotPicture?.url,
+    message.status === MessageStatus.Sending || message.status === MessageStatus.Failed
   );
 }
