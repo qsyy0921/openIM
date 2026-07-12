@@ -6,6 +6,7 @@ import { expect, test } from "@playwright/test";
 
 const execFileAsync = promisify(execFile);
 let createdGroupID = "";
+let webUserID = "";
 
 function required(key: string): string {
   const value = process.env[key]?.trim();
@@ -43,11 +44,35 @@ async function cleanupGroupOnNode2(groupID: string): Promise<void> {
   ], { timeout: 60_000, windowsHide: true });
 }
 
+async function manageFriendOnNode2(action: "accept" | "reset", userID: string): Promise<void> {
+  const script = resolve(process.cwd(), "../../../ops/manage-node2-web-e2e-friend.ps1");
+  await execFileAsync("powershell.exe", [
+    "-NoProfile",
+    "-NonInteractive",
+    "-File",
+    script,
+    "-Action",
+    action,
+    "-WebUserID",
+    userID,
+    "-SshHost",
+    required("OPENIM_E2E_SSH_HOST")
+  ], { timeout: 60_000, windowsHide: true });
+}
+
 test.afterEach(async () => {
-  if (!createdGroupID) return;
-  const groupID = createdGroupID;
-  createdGroupID = "";
-  await cleanupGroupOnNode2(groupID);
+  const failures: Error[] = [];
+  if (createdGroupID) {
+    const groupID = createdGroupID;
+    createdGroupID = "";
+    try { await cleanupGroupOnNode2(groupID); } catch (error) { failures.push(error as Error); }
+  }
+  if (webUserID) {
+    const userID = webUserID;
+    webUserID = "";
+    try { await manageFriendOnNode2("reset", userID); } catch (error) { failures.push(error as Error); }
+  }
+  if (failures.length > 0) throw failures[0];
 });
 
 test("real node2 single and group chat survive send, receive, reconnect, and reload", async ({ page, context }) => {
@@ -75,6 +100,17 @@ test("real node2 single and group chat survive send, receive, reconnect, and rel
   expect(page.url()).toBe("http://127.0.0.1:3000/");
   const selfUserID = (await page.getByTestId("self-user-id").innerText()).trim();
   expect(selfUserID).not.toBe("");
+  webUserID = selfUserID;
+  await manageFriendOnNode2("reset", selfUserID);
+  const adminConversation = page.getByTestId("conversation-imAdmin");
+  await expect(adminConversation).toBeVisible({ timeout: 30_000 });
+  if (await page.getByTestId("unread-imAdmin").count()) {
+    await adminConversation.click();
+    await expect(page.getByTestId("unread-imAdmin")).toHaveCount(0);
+    await page.reload();
+    await expect(page.getByRole("heading", { name: "消息" })).toBeVisible({ timeout: 60_000 });
+    await expect(page.getByTestId("connection-state")).toHaveText("在线");
+  }
   const initialUnread = Number((await page.getByTestId("total-unread").innerText()).trim());
   expect(Number.isInteger(initialUnread)).toBe(true);
   await expect(page.getByTestId("unread-imAdmin")).toHaveCount(0);
@@ -85,7 +121,6 @@ test("real node2 single and group chat survive send, receive, reconnect, and rel
   const realtimeText = `node2 realtime ${nonce}`;
   await sendFromNode2(selfUserID, unreadText);
 
-  const adminConversation = page.getByTestId("conversation-imAdmin");
   await expect(adminConversation).toBeVisible({ timeout: 30_000 });
   await expect(page.getByTestId("unread-imAdmin")).toBeVisible();
   await expect.poll(async () => Number(await page.getByTestId("total-unread").innerText())).toBeGreaterThan(initialUnread);
@@ -118,12 +153,33 @@ test("real node2 single and group chat survive send, receive, reconnect, and rel
   await expect(messageList.getByText(outgoingText, { exact: true })).toBeVisible();
   await expect(messageList.getByText(realtimeText, { exact: true })).toBeVisible();
 
+  await page.getByRole("button", { name: "通讯录" }).click();
+  await expect(page.getByRole("heading", { name: "通讯录" })).toBeVisible();
+  await page.getByRole("button", { name: "查找用户" }).click();
+  await page.getByRole("textbox", { name: "查找 OpenIM 用户" }).fill("imAdmin");
+  await page.getByRole("button", { name: "查找", exact: true }).click();
+  await expect(page.getByTestId("lookup-imAdmin")).toBeVisible({ timeout: 30_000 });
+  await page.getByTestId("lookup-imAdmin").getByRole("button", { name: "添加好友" }).click();
+  await page.getByRole("button", { name: "发出的申请" }).click();
+  await expect(page.getByTestId("outgoing-application-imAdmin")).toContainText("待处理", { timeout: 30_000 });
+
+  await manageFriendOnNode2("accept", selfUserID);
+  await page.getByRole("button", { name: /^好友/ }).click();
+  const adminFriend = page.getByTestId("friend-imAdmin");
+  await expect(adminFriend).toBeVisible({ timeout: 30_000 });
+  await page.screenshot({ path: "test-results/node2/desktop-contacts.png", fullPage: true });
+  await adminFriend.getByRole("button", { name: "发消息" }).click();
+  await expect(page.getByTestId("active-peer-id")).toHaveText("imAdmin");
+
   const groupName = `Web Group ${nonce}`;
   const groupText = `web group ${nonce}`;
   await page.getByRole("button", { name: "创建群聊" }).click();
   const createGroupDialog = page.getByRole("dialog", { name: "创建群聊" });
   await createGroupDialog.getByLabel("群名称").fill(groupName);
-  await createGroupDialog.getByLabel("成员 OpenIM 用户 ID").fill("imAdmin");
+  await expect(createGroupDialog.getByLabel("选择群成员")).toContainText("imAdmin");
+  await createGroupDialog.locator("label.member-candidate", { hasText: "imAdmin" }).click();
+  await expect(createGroupDialog.getByLabel("已选群成员")).toContainText("imAdmin");
+  await page.screenshot({ path: "test-results/node2/desktop-member-picker.png", fullPage: true });
   await createGroupDialog.getByRole("button", { name: "创建", exact: true }).click();
   await expect(page.getByTestId("active-group-id")).toBeVisible({ timeout: 30_000 });
   const groupID = (await page.getByTestId("active-group-id").innerText()).trim();
@@ -173,12 +229,32 @@ test("real node2 single and group chat survive send, receive, reconnect, and rel
   await expect(page.getByRole("heading", { name: "消息" })).toBeVisible();
   await expect(page.getByTestId("conversation-imAdmin")).toBeVisible();
   await page.screenshot({ path: "test-results/node2/mobile-conversation-list.png", fullPage: true });
+  await page.getByRole("button", { name: "通讯录" }).click();
+  await expect(page.getByTestId("friend-imAdmin")).toBeVisible();
+  await page.screenshot({ path: "test-results/node2/mobile-contacts.png", fullPage: true });
+  await page.getByRole("button", { name: "消息", exact: true }).click();
+  await page.getByRole("button", { name: "创建群聊" }).click();
+  const mobileGroupDialog = page.getByRole("dialog", { name: "创建群聊" });
+  await mobileGroupDialog.getByLabel("群名称").fill(`Mobile preview ${nonce}`);
+  await mobileGroupDialog.locator("label.member-candidate", { hasText: "imAdmin" }).click();
+  await page.screenshot({ path: "test-results/node2/mobile-member-picker.png", fullPage: true });
+  await mobileGroupDialog.getByRole("button", { name: "关闭创建群聊" }).click();
   await page.getByTestId(`conversation-${groupID}`).click();
   await expect(page.getByLabel("群聊消息").getByText(groupText, { exact: true })).toBeVisible();
   await page.screenshot({ path: "test-results/node2/mobile-group-chat.png", fullPage: true });
   await page.getByRole("button", { name: "返回会话列表" }).click();
   await page.getByTestId("conversation-imAdmin").click();
   await expect(messageList.getByText(realtimeText, { exact: true })).toBeVisible();
+
+  const finalBrowserState = await page.evaluate(() => ({
+    local: Object.entries(localStorage),
+    width: { viewport: window.innerWidth, document: document.documentElement.scrollWidth }
+  }));
+  expect(finalBrowserState.local).toEqual([]);
+  expect(finalBrowserState.width.document).toBeLessThanOrEqual(finalBrowserState.width.viewport);
+  expect(failedResponses).toEqual([]);
+  expect(consoleErrors.filter((item) => item.text !== "updateColumnsConversation no record updated")).toEqual([]);
+  expect(consoleErrors.filter((item) => item.text === "updateColumnsConversation no record updated").length).toBeLessThanOrEqual(1);
 
   await page.getByRole("button", { name: "退出" }).click();
   await expect(page.getByRole("heading", { name: "企业协作台" })).toBeVisible({ timeout: 30_000 });

@@ -3,6 +3,8 @@ import { MessageStatus, SessionType, type ConversationItem, type MessageItem } f
 import { useEffect, useRef, useState } from "react";
 
 import type { ChatState, ConversationController } from "./chat";
+import type { ContactController, ContactState } from "./contact";
+import { MemberPicker } from "./MemberPicker";
 import type { ConnectionUpdate } from "./openim";
 
 type ChatWorkspaceProps = {
@@ -10,6 +12,8 @@ type ChatWorkspaceProps = {
   state: ChatState;
   selfUserID: string;
   connection: ConnectionUpdate;
+  contactController: ContactController;
+  contactState: ContactState;
 };
 
 function conversationSource(conversation: ConversationItem): string {
@@ -37,7 +41,7 @@ function sendState(message: MessageItem): string {
   return "已发送";
 }
 
-export function ChatWorkspace({ controller, state, selfUserID, connection }: ChatWorkspaceProps) {
+export function ChatWorkspace({ controller, state, selfUserID, connection, contactController, contactState }: ChatWorkspaceProps) {
   const [targetUserID, setTargetUserID] = useState("");
   const [draft, setDraft] = useState("");
   const [working, setWorking] = useState(false);
@@ -45,7 +49,7 @@ export function ChatWorkspace({ controller, state, selfUserID, connection }: Cha
   const [showCreateGroup, setShowCreateGroup] = useState(false);
   const [showGroupMembers, setShowGroupMembers] = useState(false);
   const [groupName, setGroupName] = useState("");
-  const [groupMemberIDs, setGroupMemberIDs] = useState("");
+  const [groupMemberIDs, setGroupMemberIDs] = useState<string[]>([]);
   const messageEnd = useRef<HTMLDivElement | null>(null);
   const active = state.conversations.find((item) => item.conversationID === state.activeConversationID) ?? null;
 
@@ -81,9 +85,9 @@ export function ChatWorkspace({ controller, state, selfUserID, connection }: Cha
     if (working) return;
     setWorking(true);
     try {
-      await controller.createGroup(groupName, groupMemberIDs.split(/[\s,，;；]+/));
+      await controller.createGroup(groupName, groupMemberIDs);
       setGroupName("");
-      setGroupMemberIDs("");
+      setGroupMemberIDs([]);
       setShowCreateGroup(false);
       setMobileDetail(true);
     } catch {
@@ -265,10 +269,11 @@ export function ChatWorkspace({ controller, state, selfUserID, connection }: Cha
               <button className="icon-button" aria-label="关闭创建群聊" title="关闭" onClick={() => setShowCreateGroup(false)}><X size={18} /></button>
             </header>
             <label>群名称<input maxLength={60} value={groupName} onChange={(event) => setGroupName(event.target.value)} placeholder="例如：项目讨论组" /></label>
-            <label>成员 OpenIM 用户 ID<textarea value={groupMemberIDs} onChange={(event) => setGroupMemberIDs(event.target.value)} placeholder="至少一个用户，用逗号或空格分隔" /></label>
+            <MemberPicker controller={contactController} state={contactState} selfUserID={selfUserID} selectedUserIDs={groupMemberIDs} onChange={setGroupMemberIDs} disabled={working} />
+            {state.error && <div className="inline-error" role="alert"><span>{state.error}</span><button type="button" onClick={() => controller.clearError()}>关闭</button></div>}
             <footer>
               <button className="secondary-button" onClick={() => setShowCreateGroup(false)}>取消</button>
-              <button className="primary-button" disabled={working || !groupName.trim() || !groupMemberIDs.trim()} onClick={() => void createGroup()}>
+              <button className="primary-button" disabled={working || !groupName.trim() || groupMemberIDs.length === 0} onClick={() => void createGroup()}>
                 {working ? <LoaderCircle className="spin" size={17} /> : <Users size={17} />}创建
               </button>
             </footer>

@@ -19,7 +19,7 @@ It preserves enterprise OIDC, `/v1/im/session`, the official OpenIM WASM SDK, SD
 
 ## Responsibilities and non-goals
 
-The Web client owns presentation state, conversation selection, optimistic text-send state, bounded group-member presentation, and mapping user commands to the official SDK. OpenIM owns group membership, conversation/message state, local SDK storage, synchronization, and server authorization. Platform API continues to own enterprise identity exchange. This unit does not duplicate OpenIM group or message facts in PostgreSQL and does not treat a client-side optimistic message as server acceptance.
+The Web client owns presentation state, conversation selection, optimistic text-send state, bounded group-member presentation, and mapping user commands to the official SDK. OpenIM owns group membership, conversation/message state, local SDK storage, synchronization, and server authorization. Platform API continues to own enterprise identity exchange. This unit does not duplicate OpenIM group or message facts in PostgreSQL and does not treat a client-side optimistic message as server acceptance. The admitted contacts/member-picker extension is specified separately in `im-client-contacts.md` so the verified conversation foundation remains stable.
 
 ## Open-source reuse boundary
 
@@ -96,13 +96,12 @@ The UI exposes connection, restore, loading, optimistic send, and explicit error
 
 ## Planned follow-up slices
 
-1. Contacts, friend requests, user search, and a reusable member picker.
-2. Image and file messages with MinIO-backed upload progress and failure recovery.
-3. Conversation pin, mute, drafts, local/global message search, and message actions.
-4. Group administration, mentions, receipts, and notification rendering.
-5. Account, device, privacy, appearance, and notification settings.
-6. One-to-one call evaluation; multi-party meetings remain a separate architecture decision.
-7. Only after the client foundation is stable: Agent Catalog, Tool/Skill Registry, MCP, Memory, and business Agents.
+1. Image and file messages with MinIO-backed upload progress and failure recovery.
+2. Conversation pin, mute, drafts, local/global message search, and message actions.
+3. Group administration, mentions, receipts, and notification rendering.
+4. Account, device, privacy, appearance, and notification settings.
+5. One-to-one call evaluation; multi-party meetings remain a separate architecture decision.
+6. Only after the client foundation is stable: Agent Catalog, Tool/Skill Registry, MCP, Memory, and business Agents.
 
 ## Verification evidence
 
@@ -129,6 +128,7 @@ The UI exposes connection, restore, loading, optimistic send, and explicit error
 - `platform/apps/web/src/openim.ts`
 - `platform/apps/web/src/App.tsx`
 - `platform/apps/web/src/chat.test.ts`
+- `docs/sdd/im-client-contacts.md`
 - `platform/apps/web/scripts/patch-openim-worker.mjs`
 - `ops/cleanup-node2-web-e2e-group.ps1`
 - `ops/cleanup-node2-web-e2e-group.sh`

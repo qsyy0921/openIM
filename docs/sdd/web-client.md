@@ -10,11 +10,11 @@ depends_on:
 
 ## Scope
 
-Provide an extensible browser collaboration shell with verified OpenIM single/group text conversation foundations and an independently owned Agent workspace module. The group extension is specified in `im-client-foundation.md`; the Agent module is specified in `agent-workspace.md`. This unit continues to own shell, identity/session bootstrap, and IM presentation rather than Agent business state. It does not yet implement files, images, audio, video, search, contacts, documents, or administration.
+Provide an extensible browser collaboration shell with verified OpenIM single/group text conversation foundations and an independently owned Agent workspace module. The group extension is specified in `im-client-foundation.md`, the admitted OpenIM contacts/member-picker extension is specified in `im-client-contacts.md`, and the Agent module is specified in `agent-workspace.md`. This unit continues to own shell, identity/session bootstrap, and IM presentation rather than Agent business state. It does not yet implement files, images, audio, video, enterprise-directory search, documents, or administration.
 
 ## Responsibilities and non-goals
 
-The unit owns interactive sign-in/out, the extensible workspace shell, use of an explicitly configured enrolled device identity, in-memory OpenIM session material, WASM SDK initialization, connection state, single/group conversation presentation, bounded history and group-member loading, text composition, optimistic send state, real-time receive handling, active-conversation read state, and explicit client errors. It does not own enterprise credentials, OpenIM Admin Tokens, device enrollment, identity provisioning rules, server authorization, authoritative group state, or an alternate IM transport.
+The unit owns interactive sign-in/out, the extensible workspace shell, use of an explicitly configured enrolled device identity, in-memory OpenIM session material, WASM SDK initialization, connection state, single/group conversation presentation, OpenIM contacts presentation, bounded history and group-member loading, text composition, optimistic send state, real-time receive handling, active-conversation read state, and explicit client errors. It does not own enterprise credentials, OpenIM Admin Tokens, device enrollment, identity provisioning rules, server authorization, authoritative relationship/group state, or an alternate IM transport.
 
 ## Contracts and dependencies
 
@@ -46,9 +46,10 @@ The unit owns interactive sign-in/out, the extensible workspace shell, use of an
 5. Validate the exact response and require the returned WebSocket endpoint to match configured OpenIM topology.
 6. Login through the official WASM SDK, wait for initial `OnSyncServerFinish`, and observe connecting, connected, sync, failed, kicked, and token-invalid events.
 7. Load supported single/group conversations and total unread state, then load bounded history and group members for the selected conversation.
-8. Create and optimistically render a text message; replace it with the SDK result or mark it failed.
-9. Merge real-time message and conversation events by stable IDs and mark the visible conversation read.
-10. On successful reconnection, reload conversations, unread state, and active history before declaring the chat state restored.
+8. Load the SDK-synchronized friend/application projection, subscribe to relationship callbacks, and provide exact user-ID lookup plus authoritative friend mutations.
+9. Create and optimistically render a text message; replace it with the SDK result or mark it failed.
+10. Merge real-time message, conversation, friend, and application events by stable IDs and mark the visible conversation read.
+11. On successful reconnection, reload conversations, contacts, unread state, and active history before declaring the client state restored.
 
 ## Data ownership and state
 
@@ -73,6 +74,7 @@ The UI exposes coarse connection phase and endpoint readiness. Platform and Open
 - TypeScript typecheck and production build pass with pinned dependencies.
 - A real browser completes PKCE login, `/v1/im/session`, WASM SDK login, and node2 WebSocket connection.
 - Real node2 members exchange single and group text; unread state clears when selected, history survives reload/reconnect, group members resolve, and sent messages converge from sending to succeeded.
+- A real node2 member finds another user by exact OpenIM user ID, submits and processes a friend application, opens direct chat from the friend list, and creates a group through the reusable member picker.
 - Browser inspection confirms no token in visible UI, URL, localStorage, or console output.
 
 ## Source evidence
@@ -83,11 +85,16 @@ The UI exposes coarse connection phase and endpoint readiness. Platform and Open
 - `platform/apps/web/src/App.tsx`
 - `platform/apps/web/src/WorkspaceShell.tsx`
 - `platform/apps/web/src/ChatWorkspace.tsx`
+- `platform/apps/web/src/contact.ts`
+- `platform/apps/web/src/ContactsWorkspace.tsx`
+- `platform/apps/web/src/MemberPicker.tsx`
 - `platform/apps/web/src/AgentWorkspace.tsx`
 - `platform/apps/web/vite.config.ts`
 - `platform/apps/web/scripts/patch-openim-worker.mjs`
 - `platform/apps/web/src/config.test.ts`
 - `platform/apps/web/src/platform-api.test.ts`
+- `platform/apps/web/src/contact.test.ts`
+- `platform/apps/web/src/MemberPicker.test.ts`
 - `platform/apps/web/e2e/node2-foundation.spec.ts`
 
 ## Verification evidence
@@ -98,6 +105,7 @@ The UI exposes coarse connection phase and endpoint readiness. Platform and Open
 - The same test observed zero HTTP failures and no unexpected console errors, found no localStorage entries or token-shaped visible text, and confirmed the callback authorization code was removed from the URL. One exact bounded OpenIM new-group update diagnostic is documented in `im-client-foundation.md`.
 - Desktop `1280x720` group chat and mobile `390x844` single-chat/list screenshots passed horizontal-overflow checks and visual inspection without overlapping controls or text; the mobile E2E exercised explicit conversation-list and chat-detail navigation.
 - The node2 Playwright configuration uses one worker because the real single-chat and Agent scenarios intentionally share one authenticated account and global OpenIM unread state.
+- The verified contacts extension adds exact user-ID discovery, real friend request/acceptance, callback-driven friend state, direct-chat entry, and MemberPicker-based group creation without a second relationship store or browser Admin Token. The final full Agent plus IM/contact suite passed serially in 37.5 seconds.
 
 ## Open questions
 
