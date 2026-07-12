@@ -1,0 +1,229 @@
+---
+unit: agent-catalog
+status: proposed
+depends_on:
+  - agent-runtime
+  - identity-session
+  - adr-0003
+  - adr-0005
+---
+
+# Agent Catalog v1
+
+## Scope
+
+Add a tenant-scoped Agent control-plane foundation that represents the current implicit Agent as a stable definition with immutable versions, resolves the existing `@Agent` trigger, and pins every new Run to the exact published version it executes. This slice preserves the verified answer, citation, approval, ticket, OpenIM Bot, and Web workspace behavior.
+
+It does not add Agent creation UI, arbitrary prompts, generic workflows, another model provider, Tool/Skill Registry, MCP Gateway, memory, multi-Agent orchestration, per-channel policy, per-Agent OpenIM users, canary traffic, or production fallback.
+
+## Current gap
+
+- `event.go` recognizes a literal `@agent` marker.
+- `worker.go` fixes retrieval to purpose `agent_answer`, limit `5`, and permits only `create_ticket`.
+- `agent.runs` does not record an Agent or configuration version.
+- `agent.bot_identities` intentionally maps one platform Agent Bot per tenant.
+
+This prevents exact replay and makes future configuration edits unsafe because a queued Run could otherwise observe a different configuration from the one active when it was accepted.
+
+## Domain model
+
+```mermaid
+erDiagram
+    AGENT_DEFINITION ||--o{ AGENT_VERSION : owns
+    AGENT_DEFINITION ||--o{ AGENT_DEPLOYMENT : deploys
+    AGENT_VERSION ||--o{ AGENT_DEPLOYMENT : activated_as
+    AGENT_DEFINITION ||--o{ AGENT_TRIGGER : invoked_by
+    AGENT_DEFINITION ||--o{ RUN : selected_for
+    AGENT_VERSION ||--o{ RUN : pinned_to
+    AGENT_DEPLOYMENT ||--o{ RUN : resolved_from
+    AGENT_TRIGGER ||--o{ RUN : matched_by
+```
+
+### AgentDefinition
+
+Stable tenant-owned product identity:
+
+- `id`, `tenant_id`, immutable `slug`.
+- Mutable `display_name` and `description` for presentation only.
+- `status`: `active`, `disabled`, or `archived`.
+- Nullable `created_by_member_id`, audit timestamps, and optimistic revision; null is reserved for the migration-owned built-in Agent.
+- Unique `(tenant_id, slug)`.
+
+Changing display fields does not create an execution version because they must not affect model behavior. `disabled` blocks new Run insertion. `archived` also blocks new deployments and triggers; history remains readable.
+
+### AgentVersion
+
+Immutable complete execution snapshot:
+
+- `id`, `agent_id`, monotonically increasing `version_number`.
+- `spec_schema_version` and canonical `spec` JSONB.
+- SHA-256 `spec_checksum` over canonical JSON.
+- Nullable `created_by_member_id`, `created_at`, and non-null `published_at`; null creator is reserved for the migration-owned built-in version.
+- Unique `(agent_id, version_number)` and `(agent_id, spec_checksum)`.
+
+The first supported specification is deliberately closed:
+
+```json
+{
+  "runtime_kind": "knowledge_ticket_v1",
+  "instructions": "Answer only from authorized evidence and abstain when evidence is absent.",
+  "model_route": "deepseek-v4-pro",
+  "retrieval": {
+    "purpose": "agent_answer",
+    "limit": 5
+  },
+  "allowed_action_types": ["create_ticket"],
+  "max_model_attempts": 3
+}
+```
+
+The value contains a logical model route, never a key or endpoint credential. Go validates the complete schema and semantics before insert. Every v1 AgentVersion is a published snapshot and PostgreSQL rejects all updates and deletes. A future editable draft is a separate entity, not a mutable AgentVersion. Unknown fields, runtime kinds, action types, and out-of-range limits fail closed.
+
+### AgentDeployment
+
+Mutable release pointer:
+
+- `id`, `tenant_id`, `agent_id`, `slot`, `active_version_id`.
+- v1 permits only `slot=production`.
+- `activated_by_member_id`, `activated_at`, and optimistic revision.
+- Unique `(tenant_id, agent_id, slot)`.
+
+Activation is one transaction that verifies tenant ownership, version ownership, published status, supported schema, and checksum. Moving the pointer is a rollout or rollback; it never changes existing Runs.
+
+### AgentTrigger
+
+Tenant-scoped invocation mapping:
+
+- `id`, `tenant_id`, `agent_id`.
+- `trigger_type=mention_alias` and normalized `trigger_value=@agent`.
+- `enabled`, timestamps.
+- Unique `(tenant_id, trigger_type, trigger_value)`.
+
+v1 supports one exact, case-insensitive text mention alias. Substring matches inside words are rejected. Trigger parsing extracts candidates; PostgreSQL resolution selects the authoritative tenant mapping.
+
+## Run contract changes
+
+Add the following non-null fields after migration backfill:
+
+- `agent_id`
+- `agent_version_id`
+- `agent_deployment_id`
+- `agent_trigger_id`
+- `agent_spec_checksum`
+
+The Run stores the checksum as tamper evidence but the version row remains authoritative. On claim, the Worker loads by `agent_version_id`, verifies the checksum, validates the supported schema, then derives retrieval and action policy. A mismatch or unsupported specification fails the Run before retrieval or model invocation.
+
+## Runtime flow
+
+1. Parse an accepted OpenIM text event into a normalized mention candidate and prompt without choosing a default Agent.
+2. In the Run insertion transaction, resolve tenant trigger, active definition, `production` deployment, and published version.
+3. Insert the Run with all four catalog references and checksum under the existing unique `source_event_id`.
+4. Commit the source Kafka offset only after the Run or durable rejection is committed.
+5. Claim the Run using the existing fencing lease.
+6. Load the exact immutable version stored on the Run and validate checksum/schema.
+7. Execute the existing `knowledge_ticket_v1` retrieval, candidate, citation, reply, approval, and action path using values from that version.
+8. Deployment changes affect only Runs inserted after the activation transaction.
+
+## API and Web boundary
+
+The bounded public surface is:
+
+- `GET /v1/agents`: list active Agent definitions available to the authenticated tenant member, including ID, display name, description, trigger alias, production version number, and platform Bot user ID.
+- Extend `AgentWorkspace` and Run projection with `agent_id`, `agent_display_name`, `agent_version_number`, and `agent_spec_checksum`.
+
+There is no public create, update, publish, delete, or arbitrary execute API in v1 because the required administrator authorization model and release UI are not yet admitted. The migration seeds the built-in Agent. The Web client obtains the trigger from the API instead of hardcoding it, while prompt ingress remains the official OpenIM SDK.
+
+## Bot identity decision
+
+Keep one deterministic platform Agent Bot per tenant for v1. Logical Agent selection occurs through the catalog and is shown in the Run projection; OpenIM sender identity remains the tenant Bot. This avoids Bot provisioning, group membership, contact-list, and credential growth while the control-plane semantics are established. Per-Agent OpenIM Bot identities require a later product and migration decision.
+
+## Migration
+
+Migration `0008_agent_catalog.sql` must execute in this order. Proposed table names are `agent.definitions`, `agent.versions`, `agent.deployments`, and `agent.triggers`:
+
+1. Create definitions, versions, deployments, and triggers with tenant foreign keys and constraints.
+2. For every `identity.tenants` row, seed one `knowledge-agent` definition; mirror a disabled tenant as a disabled definition and disabled trigger.
+3. Create version 1 from the current hard-coded behavior, canonicalize the spec, and store its checksum.
+4. Create the `production` deployment and `@agent` trigger.
+5. Add nullable catalog columns to `agent.runs` and backfill every historical Run deterministically by tenant.
+6. Verify zero unresolved Runs, then add foreign keys and non-null constraints.
+7. Add the database guard that prevents mutation/deletion of published versions.
+
+Migration failure aborts the transaction. There is no default global Agent and no cross-tenant backfill.
+
+## Invariants
+
+- A Run has exactly one Agent, version, deployment, trigger, and checksum.
+- Run creation and version selection are atomic.
+- A Worker never resolves `latest`, `production`, or a mutable prompt after Run insertion.
+- An AgentVersion cannot be edited or deleted.
+- A deployment can point only to a published version of the same tenant and Agent.
+- Unknown, disabled, archived, ambiguous, missing, or checksum-invalid catalog state never falls back to another Agent.
+- New tools, actions, Skills, and MCP servers are unavailable until a new validated version explicitly references them.
+- Current OpenIM Admin, model, database, and action credentials remain outside Agent specs and the Python Worker.
+
+## Failure handling
+
+| Failure | Required behavior |
+| --- | --- |
+| Unknown mention | Treat as non-trigger; do not create a Run |
+| Known trigger with disabled Agent | Write a durable typed rejection; do not call the model |
+| Missing deployment/version | Write a durable typed rejection; do not choose version 1 |
+| Checksum/schema mismatch at execution | Mark Run failed with typed catalog error before retrieval/model |
+| Concurrent deployment activation | Optimistic revision allows one commit; loser receives conflict |
+| Activation after Run insertion | Existing Run keeps its stored version; new Run sees the new pointer |
+| Catalog database unavailable | Do not commit Kafka offset until retry or durable rejection is possible |
+
+Disabling an Agent blocks new Runs. Already pinned Runs continue under their immutable version so retry semantics remain stable. A separate platform kill switch may pause all Agent execution during an incident.
+
+## Security and authorization
+
+- All catalog rows are tenant-scoped and every lookup includes `tenant_id`.
+- v1 exposes read-only catalog data to authenticated active members; mutation APIs are absent.
+- Future effective permission is `member permission ∩ Agent policy ∩ resource ACL ∩ tool policy`; this slice keeps the current member and ACL rules unchanged.
+- MCP annotations and Skill metadata are not authorization evidence.
+- Specs reject secrets and arbitrary endpoint URLs.
+
+## Observability
+
+Add `agent_id`, `agent_version_id`, `agent_version_number`, `runtime_kind`, and checksum prefix to Run logs, metrics labels with bounded cardinality, traces, and support projection. Deployment activation produces an immutable audit event containing old/new version IDs and actor. Prompt content and credentials remain excluded from logs.
+
+## Acceptance criteria
+
+- Migration preserves every existing Run and the current `@Agent` behavior.
+- Duplicate source event still creates exactly one Run pinned to one version.
+- A trigger in tenant A cannot resolve tenant B's Agent or version.
+- Switching production from version 1 to version 2 affects only later Runs.
+- Reclaiming an older Run still executes version 1 after production moves to version 2.
+- Rolling production back to version 1 creates later Runs pinned to version 1 without mutating history.
+- Disabled Agent, missing deployment, invalid schema, and checksum mismatch make no retrieval, model, OpenIM reply, or action call.
+- Existing Go, Python, Web, PostgreSQL integration, OpenIM contract, and real Agent workspace suites remain green.
+
+## Implementation slices
+
+1. **Catalog persistence and migration**: schema, seed/backfill, immutable version validation, repository tests.
+2. **Run pinning**: trigger resolution transaction, Run fields, Worker exact-version loading, failure tests.
+3. **Read projection**: `GET /v1/agents`, OpenAPI types, workspace provenance, Web trigger lookup.
+4. **Release verification**: full tests, two-version switch/rollback integration test, real `.1` to `.2` OpenIM smoke.
+
+Each slice updates this SDD and stops after its acceptance criteria. Administration, generic capabilities, and additional Agent types require new SDDs.
+
+## Source evidence
+
+- `platform/services/platform-api/internal/agent/event.go`
+- `platform/services/platform-api/internal/agent/store.go`
+- `platform/services/platform-api/internal/agent/worker.go`
+- `platform/services/platform-api/internal/migrations/sql/0003_agent.sql`
+- `platform/services/platform-api/internal/migrations/sql/0004_agent_bot_identity.sql`
+- `platform/services/platform-api/internal/migrations/sql/0005_acl_retrieval.sql`
+- `platform/services/platform-api/internal/migrations/sql/0007_approved_ticket_action.sql`
+- `contracts/openapi/platform-v1.yaml`
+- `docs/research/agent-platform-reference-analysis.md`
+
+## Open questions deferred from v1
+
+- Which enterprise roles may create, publish, disable, and roll back Agents?
+- Should a later release add `staging`, tenant cohorts, or percentage canaries?
+- When does an Agent require its own OpenIM user rather than the shared tenant Bot?
+- How are ToolDefinition and Skill package signatures, versions, risk policies, and revocations represented?
+- Which evaluation gates are mandatory before production activation?
