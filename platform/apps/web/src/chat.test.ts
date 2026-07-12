@@ -1,7 +1,7 @@
 import { GroupMemberRole, MessageStatus, MessageType, SessionType, type ConversationItem, type GroupMemberItem, type MessageItem } from "@openim/wasm-client-sdk";
 import { describe, expect, it } from "vitest";
 
-import { ConversationController, type ChatEvents, type ChatPort } from "./chat";
+import { MAX_FILE_BYTES, MAX_IMAGE_BYTES, ConversationController, type ChatEvents, type ChatPort } from "./chat";
 
 function conversation(id: string, userID: string, unreadCount = 0, type = SessionType.Single): ConversationItem {
   return {
@@ -42,6 +42,36 @@ function message(
   } as MessageItem;
 }
 
+function mediaMessage(
+  id: string,
+  contentType: MessageType.PictureMessage | MessageType.FileMessage,
+  sendID = "self",
+  recvID = "peer",
+  sessionType = SessionType.Single,
+  groupID = ""
+): MessageItem {
+  const common = {
+    ...message(id, sendID, recvID, "", MessageStatus.Sending, sessionType, groupID),
+    contentType,
+    textElem: undefined
+  };
+  if (contentType === MessageType.PictureMessage) {
+    const picture = { uuid: `uuid-${id}`, type: "image/png", size: 4, width: 2, height: 2, url: "https://media.example/image.png" };
+    return { ...common, pictureElem: { sourcePath: "", sourcePicture: picture, bigPicture: picture, snapshotPicture: picture } } as MessageItem;
+  }
+  return {
+    ...common,
+    fileElem: {
+      filePath: "",
+      uuid: `uuid-${id}`,
+      sourceUrl: "https://media.example/report.txt",
+      fileName: "report.txt",
+      fileSize: 4,
+      fileType: "text/plain"
+    }
+  } as MessageItem;
+}
+
 class FakePort implements ChatPort {
   conversations: ConversationItem[] = [];
   unread = 0;
@@ -56,6 +86,8 @@ class FakePort implements ChatPort {
   members: GroupMemberItem[] = [];
   createdGroup = conversation("group-new", "group-new", 0, SessionType.Group);
   createdGroupArgs: { name: string; memberUserIDs: string[] } | null = null;
+  imageCreates = 0;
+  fileCreates = 0;
 
   listConversations = async () => this.conversations;
   totalUnread = async () => this.unread;
@@ -70,6 +102,14 @@ class FakePort implements ChatPort {
     return { isEnd: this.historyEnd, messageList: this.historyMessages };
   };
   createText = async (text: string) => message("m100", "self", "peer", text, MessageStatus.Sending);
+  createImage = async (_file: File) => {
+    this.imageCreates += 1;
+    return mediaMessage("image-100", MessageType.PictureMessage);
+  };
+  createFile = async (_file: File) => {
+    this.fileCreates += 1;
+    return mediaMessage("file-100", MessageType.FileMessage);
+  };
   send = async (target: ConversationItem, draft: MessageItem) => {
     this.sentConversations.push(target);
     if (this.sendError) throw this.sendError;
@@ -126,6 +166,105 @@ describe("ConversationController", () => {
     expect(controller.getState().messages).toHaveLength(1);
     expect(controller.getState().messages[0]).toMatchObject({ clientMsgID: "m100", serverMsgID: "server-sent", status: MessageStatus.Succeed });
     expect(port.sentConversations[0].conversationID).toBe("single");
+  });
+
+  it("loads supported media history while excluding unsupported custom messages", async () => {
+    const port = new FakePort();
+    port.conversations = [conversation("single", "peer")];
+    port.historyMessages = [
+      message("m1", "peer", "self"),
+      mediaMessage("image-1", MessageType.PictureMessage, "peer", "self"),
+      mediaMessage("file-1", MessageType.FileMessage, "peer", "self"),
+      { ...message("custom-1", "peer", "self"), contentType: MessageType.CustomMessage }
+    ];
+    const controller = new ConversationController(port);
+    await controller.start("self");
+
+    await controller.select("single");
+
+    expect(controller.getState().messages.map((item) => item.clientMsgID)).toEqual(["m1", "image-1", "file-1"]);
+  });
+
+  it("scopes and clamps real upload progress to the optimistic image", async () => {
+    const port = new FakePort();
+    port.conversations = [conversation("single", "peer")];
+    let resolveSend!: (message: MessageItem) => void;
+    port.send = async (_target, draft) => new Promise<MessageItem>((resolve) => {
+      resolveSend = () => resolve({ ...draft, serverMsgID: "server-image", status: MessageStatus.Succeed });
+    });
+    const controller = new ConversationController(port);
+    await controller.start("self");
+    await controller.select("single");
+
+    const sending = controller.sendImage(new File(["png"], "photo.png", { type: "image/png" }));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    port.handlers?.uploadProgress("unknown", 55);
+    port.handlers?.uploadProgress("image-100", 145.4);
+
+    expect(controller.getState().uploadProgressByClientMsgID).toEqual({ "image-100": 100 });
+    resolveSend(mediaMessage("unused", MessageType.PictureMessage));
+    await sending;
+    expect(controller.getState().messages[0]).toMatchObject({ clientMsgID: "image-100", serverMsgID: "server-image", status: MessageStatus.Succeed });
+    expect(controller.getState().uploadProgressByClientMsgID).toEqual({});
+  });
+
+  it("sends a file through the selected group conversation", async () => {
+    const port = new FakePort();
+    port.conversations = [conversation("group", "group-1", 0, SessionType.Group)];
+    const controller = new ConversationController(port);
+    await controller.start("self");
+    await controller.select("group");
+
+    await controller.sendFile(new File(["data"], "report.txt", { type: "text/plain" }));
+
+    expect(port.fileCreates).toBe(1);
+    expect(port.sentConversations[0]).toMatchObject({ conversationID: "group", groupID: "group-1" });
+    expect(controller.getState().messages[0]).toMatchObject({ contentType: MessageType.FileMessage, status: MessageStatus.Succeed });
+  });
+
+  it("rejects invalid media before invoking the SDK creation path", async () => {
+    const port = new FakePort();
+    port.conversations = [conversation("single", "peer")];
+    const controller = new ConversationController(port);
+    await controller.start("self");
+    await controller.select("single");
+
+    await expect(controller.sendImage(new File(["svg"], "vector.svg", { type: "image/svg+xml" }))).rejects.toThrow("仅支持");
+    await expect(controller.sendImage({ name: "large.png", size: MAX_IMAGE_BYTES + 1, type: "image/png" } as File)).rejects.toThrow("20 MiB");
+    await expect(controller.sendFile(new File([], "empty.txt", { type: "text/plain" }))).rejects.toThrow("空文件");
+    await expect(controller.sendFile({ name: "large.bin", size: MAX_FILE_BYTES + 1, type: "application/octet-stream" } as File)).rejects.toThrow("100 MiB");
+    expect(port.imageCreates).toBe(0);
+    expect(port.fileCreates).toBe(0);
+    expect(controller.getState().error).toContain("100 MiB");
+  });
+
+  it("keeps failed media visible and retains its last upload progress", async () => {
+    const port = new FakePort();
+    port.conversations = [conversation("single", "peer")];
+    port.send = async (_target, draft) => {
+      port.handlers?.uploadProgress(draft.clientMsgID, 42);
+      throw new Error("upload rejected");
+    };
+    const controller = new ConversationController(port);
+    await controller.start("self");
+    await controller.select("single");
+
+    await expect(controller.sendFile(new File(["data"], "report.txt", { type: "text/plain" }))).rejects.toThrow("upload rejected");
+
+    expect(controller.getState().messages[0].status).toBe(MessageStatus.Failed);
+    expect(controller.getState().uploadProgressByClientMsgID).toEqual({ "file-100": 42 });
+    expect(controller.getState().error).toContain("发送失败");
+  });
+
+  it("removes SDK event handlers when stopped", async () => {
+    const port = new FakePort();
+    const controller = new ConversationController(port);
+    await controller.start("self");
+    expect(port.handlers).not.toBeNull();
+
+    controller.stop();
+
+    expect(port.handlers).toBeNull();
   });
 
   it("loads group history and members, then sends to the selected group", async () => {

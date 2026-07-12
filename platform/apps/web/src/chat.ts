@@ -23,6 +23,7 @@ export type ChatState = {
   groupMembers: GroupMemberItem[];
   loadingGroupMembers: boolean;
   restoring: boolean;
+  uploadProgressByClientMsgID: Record<string, number>;
   error: string | null;
 };
 
@@ -30,6 +31,7 @@ export type ChatEvents = {
   conversationsChanged: (items: ConversationItem[]) => void;
   totalUnreadChanged: (count: number) => void;
   messagesReceived: (items: MessageItem[]) => void;
+  uploadProgress: (clientMsgID: string, progress: number) => void;
 };
 
 export type ChatPort = {
@@ -38,6 +40,8 @@ export type ChatPort = {
   oneConversation: (sourceID: string, sessionType: SessionType) => Promise<ConversationItem>;
   history: (conversationID: string, startClientMsgID: string) => Promise<{ isEnd: boolean; messageList: MessageItem[] }>;
   createText: (text: string) => Promise<MessageItem>;
+  createImage: (file: File) => Promise<MessageItem>;
+  createFile: (file: File) => Promise<MessageItem>;
   send: (conversation: ConversationItem, message: MessageItem) => Promise<MessageItem>;
   createGroup: (name: string, memberUserIDs: string[]) => Promise<ConversationItem>;
   groupMembers: (groupID: string) => Promise<GroupMemberItem[]>;
@@ -55,8 +59,13 @@ export const initialChatState: ChatState = {
   groupMembers: [],
   loadingGroupMembers: false,
   restoring: false,
+  uploadProgressByClientMsgID: {},
   error: null
 };
+
+export const MAX_IMAGE_BYTES = 20 * 1024 * 1024;
+export const MAX_FILE_BYTES = 100 * 1024 * 1024;
+const SUPPORTED_IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/gif", "image/webp"]);
 
 function errorMessage(error: unknown): string {
   if (error instanceof Error) return error.message;
@@ -74,10 +83,28 @@ function supportedConversations(items: ConversationItem[]): ConversationItem[] {
     .sort((left, right) => Number(right.isPinned) - Number(left.isPinned) || right.latestMsgSendTime - left.latestMsgSendTime);
 }
 
-function textMessages(items: MessageItem[]): MessageItem[] {
+function supportedMessages(items: MessageItem[]): MessageItem[] {
   return items.filter((item) =>
-    (item.sessionType === SessionType.Single || item.sessionType === SessionType.Group) && item.contentType === MessageType.TextMessage
+    (item.sessionType === SessionType.Single || item.sessionType === SessionType.Group) &&
+    (item.contentType === MessageType.TextMessage || item.contentType === MessageType.PictureMessage || item.contentType === MessageType.FileMessage)
   );
+}
+
+function validateFileName(file: File): void {
+  if (!file.name.trim()) throw new Error("文件名不能为空");
+  if (file.name.length > 255) throw new Error("文件名不能超过 255 个字符");
+  if (file.size <= 0) throw new Error("不能发送空文件");
+}
+
+export function validateImage(file: File): void {
+  validateFileName(file);
+  if (!SUPPORTED_IMAGE_TYPES.has(file.type.toLowerCase())) throw new Error("仅支持 JPEG、PNG、GIF 和 WebP 图片");
+  if (file.size > MAX_IMAGE_BYTES) throw new Error("图片不能超过 20 MiB");
+}
+
+export function validateFile(file: File): void {
+  validateFileName(file);
+  if (file.size > MAX_FILE_BYTES) throw new Error("文件不能超过 100 MiB");
 }
 
 function mergeMessages(current: MessageItem[], incoming: MessageItem[]): MessageItem[] {
@@ -119,7 +146,8 @@ export class ConversationController {
     this.unsubscribePort = this.port.subscribe({
       conversationsChanged: (items) => this.update({ conversations: upsertConversations(this.state.conversations, items) }),
       totalUnreadChanged: (count) => this.update({ totalUnread: count }),
-      messagesReceived: (items) => void this.receive(items)
+      messagesReceived: (items) => void this.receive(items),
+      uploadProgress: (clientMsgID, progress) => this.applyUploadProgress(clientMsgID, progress)
     });
     await this.restore();
   }
@@ -166,7 +194,7 @@ export class ConversationController {
       throw new Error("conversation is unavailable");
     }
     this.groupMemberRequest += 1;
-    this.update({ activeConversationID: conversationID, messages: [], historyEnded: !loadExistingHistory, groupMembers: [], loadingGroupMembers: false, error: null });
+    this.update({ activeConversationID: conversationID, messages: [], uploadProgressByClientMsgID: {}, historyEnded: !loadExistingHistory, groupMembers: [], loadingGroupMembers: false, error: null });
     if (loadExistingHistory) await this.loadHistory(conversationID, false);
     await this.markRead(conversationID);
     if (conversation.conversationType === SessionType.Group) await this.loadGroupMembers(conversation.groupID);
@@ -214,18 +242,35 @@ export class ConversationController {
       this.fail(error);
       throw error;
     }
-    draft = { ...draft, status: MessageStatus.Sending };
-    this.update({ messages: mergeMessages(this.state.messages, [draft]), error: null });
+    await this.sendDraft(conversation, draft, false);
+  }
+
+  async sendImage(file: File): Promise<void> {
+    const conversation = this.activeConversation();
+    if (!conversation) throw new Error("发送图片前请选择会话");
+    let draft: MessageItem;
     try {
-      const sent = await this.port.send(conversation, draft);
-      this.update({ messages: mergeMessages(this.state.messages, [{ ...sent, status: MessageStatus.Succeed }]) });
+      validateImage(file);
+      draft = await this.port.createImage(file);
     } catch (error) {
-      this.update({
-        messages: mergeMessages(this.state.messages, [{ ...draft, status: MessageStatus.Failed }]),
-        error: `发送失败：${errorMessage(error)}`
-      });
+      this.fail(error);
       throw error;
     }
+    await this.sendDraft(conversation, draft, true);
+  }
+
+  async sendFile(file: File): Promise<void> {
+    const conversation = this.activeConversation();
+    if (!conversation) throw new Error("发送文件前请选择会话");
+    let draft: MessageItem;
+    try {
+      validateFile(file);
+      draft = await this.port.createFile(file);
+    } catch (error) {
+      this.fail(error);
+      throw error;
+    }
+    await this.sendDraft(conversation, draft, true);
   }
 
   clearError(): void {
@@ -238,9 +283,10 @@ export class ConversationController {
     try {
       const result = await this.port.history(conversationID, start);
       if (this.state.activeConversationID !== conversationID) return;
-      const incoming = textMessages(result.messageList);
+      const incoming = supportedMessages(result.messageList);
       this.update({
         messages: older ? mergeMessages(incoming, this.state.messages) : mergeMessages([], incoming),
+        uploadProgressByClientMsgID: older ? this.state.uploadProgressByClientMsgID : {},
         historyEnded: result.isEnd,
         loadingHistory: false
       });
@@ -252,7 +298,7 @@ export class ConversationController {
 
   private async receive(items: MessageItem[]): Promise<void> {
     const active = this.activeConversation();
-    const incoming = textMessages(items).filter((message) => {
+    const incoming = supportedMessages(items).filter((message) => {
       if (!active) return false;
       if (active.conversationType === SessionType.Group) return message.groupID === active.groupID;
       return (message.sendID === active.userID && message.recvID === this.selfUserID) ||
@@ -297,6 +343,42 @@ export class ConversationController {
     return this.state.conversations.find((item) => item.conversationID === this.state.activeConversationID) ?? null;
   }
 
+  private async sendDraft(conversation: ConversationItem, message: MessageItem, tracksUpload: boolean): Promise<void> {
+    const draft = { ...message, status: MessageStatus.Sending };
+    const progress = tracksUpload
+      ? { ...this.state.uploadProgressByClientMsgID, [draft.clientMsgID]: 0 }
+      : this.state.uploadProgressByClientMsgID;
+    this.update({ messages: mergeMessages(this.state.messages, [draft]), uploadProgressByClientMsgID: progress, error: null });
+    try {
+      const sent = await this.port.send(conversation, draft);
+      const nextProgress = { ...this.state.uploadProgressByClientMsgID };
+      delete nextProgress[draft.clientMsgID];
+      this.update({
+        messages: mergeMessages(this.state.messages, [{ ...sent, status: MessageStatus.Succeed }]),
+        uploadProgressByClientMsgID: nextProgress
+      });
+    } catch (error) {
+      this.update({
+        messages: mergeMessages(this.state.messages, [{ ...draft, status: MessageStatus.Failed }]),
+        error: `发送失败：${errorMessage(error)}`
+      });
+      throw error;
+    }
+  }
+
+  private applyUploadProgress(clientMsgID: string, progress: number): void {
+    if (!Number.isFinite(progress)) return;
+    const message = this.state.messages.find((item) => item.clientMsgID === clientMsgID);
+    if (!message || message.status !== MessageStatus.Sending ||
+      (message.contentType !== MessageType.PictureMessage && message.contentType !== MessageType.FileMessage)) return;
+    this.update({
+      uploadProgressByClientMsgID: {
+        ...this.state.uploadProgressByClientMsgID,
+        [clientMsgID]: Math.max(0, Math.min(100, Math.round(progress)))
+      }
+    });
+  }
+
   private fail(error: unknown, patch: Partial<ChatState> = {}): void {
     this.update({ ...patch, error: errorMessage(error) });
   }
@@ -309,6 +391,7 @@ export class ConversationController {
 
 export function createOpenIMChatPort(): ChatPort {
   const sdk = getSDK();
+  const localPreviewURLs = new Map<string, string>();
   return {
     listConversations: async () => (await sdk.getConversationListSplit({ offset: 0, count: 200 })).data,
     totalUnread: async () => (await sdk.getTotalUnreadMsgCount()).data,
@@ -323,11 +406,54 @@ export function createOpenIMChatPort(): ChatPort {
       return data;
     },
     createText: async (text) => (await sdk.createTextMessage(text)).data,
-    send: async (conversation, message) => (await sdk.sendMessage({
-      recvID: conversation.conversationType === SessionType.Single ? conversation.userID : "",
-      groupID: conversation.conversationType === SessionType.Group ? conversation.groupID : "",
-      message
+    createImage: async (file) => {
+      const { width, height } = await readImageDimensions(file);
+      const previewURL = URL.createObjectURL(file);
+      const base = {
+        uuid: secureUUID(),
+        type: file.type,
+        size: file.size,
+        width,
+        height,
+        url: previewURL
+      };
+      try {
+        const message = (await sdk.createImageMessageByFile({
+          sourcePicture: { ...base },
+          bigPicture: { ...base },
+          snapshotPicture: { ...base },
+          sourcePath: "",
+          file
+        })).data;
+        localPreviewURLs.set(message.clientMsgID, previewURL);
+        return message;
+      } catch (error) {
+        URL.revokeObjectURL(previewURL);
+        throw error;
+      }
+    },
+    createFile: async (file) => (await sdk.createFileMessageByFile({
+      filePath: "",
+      fileName: file.name,
+      uuid: secureUUID(),
+      sourceUrl: "",
+      fileSize: file.size,
+      fileType: file.type || "application/octet-stream",
+      file
     })).data,
+    send: async (conversation, message) => {
+      const sent = (await sdk.sendMessage({
+        recvID: conversation.conversationType === SessionType.Single ? conversation.userID : "",
+        groupID: conversation.conversationType === SessionType.Group ? conversation.groupID : "",
+        message
+      })).data;
+      const previewURL = localPreviewURLs.get(message.clientMsgID);
+      if (previewURL) {
+        URL.revokeObjectURL(previewURL);
+        localPreviewURLs.delete(message.clientMsgID);
+      }
+      return sent;
+    },
     createGroup: async (name, memberUserIDs) => {
       let expectedGroupID = "";
       const observed = new Map<string, ConversationItem>();
@@ -376,16 +502,46 @@ export function createOpenIMChatPort(): ChatPort {
       const newConversation = ({ data }: WSEvent<ConversationItem[]>) => events.conversationsChanged(data);
       const totalUnreadChanged = ({ data }: WSEvent<number>) => events.totalUnreadChanged(data);
       const messagesReceived = ({ data }: WSEvent<MessageItem[]>) => events.messagesReceived(data);
+      const uploadProgress = ({ data }: WSEvent<{ progress: number; clientMsgID: string }>) => events.uploadProgress(data.clientMsgID, data.progress);
       sdk.on(CbEvents.OnConversationChanged, conversationsChanged);
       sdk.on(CbEvents.OnNewConversation, newConversation);
       sdk.on(CbEvents.OnTotalUnreadMessageCountChanged, totalUnreadChanged);
       sdk.on(CbEvents.OnRecvNewMessages, messagesReceived);
+      sdk.on(CbEvents.OnProgress, uploadProgress);
       return () => {
         sdk.off(CbEvents.OnConversationChanged, conversationsChanged);
         sdk.off(CbEvents.OnNewConversation, newConversation);
         sdk.off(CbEvents.OnTotalUnreadMessageCountChanged, totalUnreadChanged);
         sdk.off(CbEvents.OnRecvNewMessages, messagesReceived);
+        sdk.off(CbEvents.OnProgress, uploadProgress);
+        for (const previewURL of localPreviewURLs.values()) URL.revokeObjectURL(previewURL);
+        localPreviewURLs.clear();
       };
     }
   };
+}
+
+function secureUUID(): string {
+  if (!globalThis.crypto?.randomUUID) throw new Error("浏览器不支持安全的媒体标识生成");
+  return globalThis.crypto.randomUUID();
+}
+
+function readImageDimensions(file: File): Promise<{ width: number; height: number }> {
+  return new Promise((resolve, reject) => {
+    const source = URL.createObjectURL(file);
+    const image = new Image();
+    const release = () => URL.revokeObjectURL(source);
+    image.onload = () => {
+      const width = image.naturalWidth;
+      const height = image.naturalHeight;
+      release();
+      if (width <= 0 || height <= 0) reject(new Error("无法读取图片尺寸"));
+      else resolve({ width, height });
+    };
+    image.onerror = () => {
+      release();
+      reject(new Error("图片无法解码"));
+    };
+    image.src = source;
+  });
 }
