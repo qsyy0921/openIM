@@ -3,6 +3,7 @@ import {
   getSDK,
   GroupMemberFilter,
   GroupType,
+  MessageReceiveOptType,
   MessageStatus,
   MessageType,
   SessionType,
@@ -15,6 +16,8 @@ import {
 
 export type ChatState = {
   conversations: ConversationItem[];
+  conversationQuery: string;
+  conversationActionByID: Record<string, "pin" | "mute">;
   totalUnread: number;
   activeConversationID: string | null;
   messages: MessageItem[];
@@ -36,6 +39,7 @@ export type ChatEvents = {
 
 export type ChatPort = {
   listConversations: () => Promise<ConversationItem[]>;
+  setConversation: (conversationID: string, patch: { isPinned?: boolean; recvMsgOpt?: MessageReceiveOptType }) => Promise<void>;
   totalUnread: () => Promise<number>;
   oneConversation: (sourceID: string, sessionType: SessionType) => Promise<ConversationItem>;
   history: (conversationID: string, startClientMsgID: string) => Promise<{ isEnd: boolean; messageList: MessageItem[] }>;
@@ -51,6 +55,8 @@ export type ChatPort = {
 
 export const initialChatState: ChatState = {
   conversations: [],
+  conversationQuery: "",
+  conversationActionByID: {},
   totalUnread: 0,
   activeConversationID: null,
   messages: [],
@@ -81,6 +87,13 @@ function supportedConversations(items: ConversationItem[]): ConversationItem[] {
     .filter((item) => item.conversationType === SessionType.Single ||
       (item.conversationType === SessionType.Group && !item.isNotInGroup))
     .sort((left, right) => Number(right.isPinned) - Number(left.isPinned) || right.latestMsgSendTime - left.latestMsgSendTime);
+}
+
+export function filterConversations(items: ConversationItem[], query: string): ConversationItem[] {
+  const normalized = query.trim().toLowerCase();
+  if (!normalized) return items;
+  return items.filter((item) => [item.showName, item.userID, item.groupID]
+    .some((value) => value?.toLowerCase().includes(normalized)));
 }
 
 function supportedMessages(items: MessageItem[]): MessageItem[] {
@@ -132,6 +145,8 @@ export class ConversationController {
   constructor(private readonly port: ChatPort) {}
 
   getState = (): ChatState => this.state;
+
+  visibleConversations = (): ConversationItem[] => filterConversations(this.state.conversations, this.state.conversationQuery);
 
   subscribe = (listener: (state: ChatState) => void): (() => void) => {
     this.listeners.add(listener);
@@ -198,6 +213,26 @@ export class ConversationController {
     if (loadExistingHistory) await this.loadHistory(conversationID, false);
     await this.markRead(conversationID);
     if (conversation.conversationType === SessionType.Group) await this.loadGroupMembers(conversation.groupID);
+  }
+
+  setConversationQuery(query: string): void {
+    this.update({ conversationQuery: query });
+  }
+
+  async setPinned(conversationID: string, isPinned: boolean): Promise<void> {
+    await this.updateConversationSetting(conversationID, "pin", { isPinned });
+  }
+
+  async setMuted(conversationID: string, isMuted: boolean): Promise<void> {
+    const conversation = this.state.conversations.find((item) => item.conversationID === conversationID);
+    if (conversation?.recvMsgOpt === MessageReceiveOptType.NotReceive) {
+      const error = new Error("当前会话处于不接收消息状态，不能在此切换免打扰");
+      this.fail(error);
+      throw error;
+    }
+    await this.updateConversationSetting(conversationID, "mute", {
+      recvMsgOpt: isMuted ? MessageReceiveOptType.NotNotify : MessageReceiveOptType.Normal
+    });
   }
 
   async createGroup(name: string, memberUserIDs: string[]): Promise<void> {
@@ -343,6 +378,40 @@ export class ConversationController {
     return this.state.conversations.find((item) => item.conversationID === this.state.activeConversationID) ?? null;
   }
 
+  private async updateConversationSetting(
+    conversationID: string,
+    action: "pin" | "mute",
+    patch: { isPinned?: boolean; recvMsgOpt?: MessageReceiveOptType }
+  ): Promise<void> {
+    const conversation = this.state.conversations.find((item) => item.conversationID === conversationID);
+    if (!conversation) {
+      const error = new Error("会话不可用");
+      this.fail(error);
+      throw error;
+    }
+    if (this.state.conversationActionByID[conversationID]) {
+      const error = new Error("该会话设置正在更新");
+      this.fail(error);
+      throw error;
+    }
+    this.update({
+      conversationActionByID: { ...this.state.conversationActionByID, [conversationID]: action },
+      error: null
+    });
+    try {
+      await this.port.setConversation(conversationID, patch);
+      const current = this.state.conversations.find((item) => item.conversationID === conversationID) ?? conversation;
+      this.update({ conversations: upsertConversations(this.state.conversations, [{ ...current, ...patch }]) });
+    } catch (error) {
+      this.fail(error);
+      throw error;
+    } finally {
+      const next = { ...this.state.conversationActionByID };
+      delete next[conversationID];
+      this.update({ conversationActionByID: next });
+    }
+  }
+
   private async sendDraft(conversation: ConversationItem, message: MessageItem, tracksUpload: boolean): Promise<void> {
     const draft = { ...message, status: MessageStatus.Sending };
     const progress = tracksUpload
@@ -394,6 +463,7 @@ export function createOpenIMChatPort(): ChatPort {
   const localPreviewURLs = new Map<string, string>();
   return {
     listConversations: async () => (await sdk.getConversationListSplit({ offset: 0, count: 200 })).data,
+    setConversation: async (conversationID, patch) => { await sdk.setConversation({ conversationID, ...patch }); },
     totalUnread: async () => (await sdk.getTotalUnreadMsgCount()).data,
     oneConversation: async (sourceID, sessionType) => (await sdk.getOneConversation({ sourceID, sessionType })).data,
     history: async (conversationID, startClientMsgID) => {
