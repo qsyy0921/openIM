@@ -2,6 +2,7 @@ import {
   CbEvents,
   getSDK,
   GroupMemberFilter,
+  GroupMemberRole,
   GroupType,
   MessageReceiveOptType,
   MessageStatus,
@@ -9,6 +10,7 @@ import {
   SessionType,
   ViewType,
   type ConversationItem,
+  type GroupItem,
   type GroupMemberItem,
   type MessageItem,
   type WSEvent
@@ -25,6 +27,7 @@ export type ChatState = {
   loadingHistory: boolean;
   groupMembers: GroupMemberItem[];
   loadingGroupMembers: boolean;
+  groupAction: { groupID: string; kind: "invite" | "remove" | "leave" | "dismiss"; userID?: string } | null;
   restoring: boolean;
   uploadProgressByClientMsgID: Record<string, number>;
   error: string | null;
@@ -35,6 +38,8 @@ export type ChatEvents = {
   totalUnreadChanged: (count: number) => void;
   messagesReceived: (items: MessageItem[]) => void;
   uploadProgress: (clientMsgID: string, progress: number) => void;
+  groupMembersChanged: (groupID: string) => void;
+  groupUnavailable: (groupID: string) => void;
 };
 
 export type ChatPort = {
@@ -49,6 +54,10 @@ export type ChatPort = {
   send: (conversation: ConversationItem, message: MessageItem) => Promise<MessageItem>;
   createGroup: (name: string, memberUserIDs: string[]) => Promise<ConversationItem>;
   groupMembers: (groupID: string) => Promise<GroupMemberItem[]>;
+  inviteGroupMembers: (groupID: string, userIDs: string[]) => Promise<void>;
+  removeGroupMember: (groupID: string, userID: string) => Promise<void>;
+  leaveGroup: (groupID: string) => Promise<void>;
+  dismissGroup: (groupID: string) => Promise<void>;
   markRead: (conversationID: string) => Promise<void>;
   subscribe: (events: ChatEvents) => () => void;
 };
@@ -64,6 +73,7 @@ export const initialChatState: ChatState = {
   loadingHistory: false,
   groupMembers: [],
   loadingGroupMembers: false,
+  groupAction: null,
   restoring: false,
   uploadProgressByClientMsgID: {},
   error: null
@@ -94,6 +104,20 @@ export function filterConversations(items: ConversationItem[], query: string): C
   if (!normalized) return items;
   return items.filter((item) => [item.showName, item.userID, item.groupID]
     .some((value) => value?.toLowerCase().includes(normalized)));
+}
+
+export function canInviteGroupMembers(members: GroupMemberItem[], selfUserID: string): boolean {
+  const role = members.find((member) => member.userID === selfUserID)?.roleLevel;
+  return role === GroupMemberRole.Owner || role === GroupMemberRole.Admin;
+}
+
+export function canRemoveGroupMember(members: GroupMemberItem[], selfUserID: string, targetUserID: string): boolean {
+  if (!targetUserID || targetUserID === selfUserID) return false;
+  const self = members.find((member) => member.userID === selfUserID);
+  const target = members.find((member) => member.userID === targetUserID);
+  if (!self || !target || target.roleLevel === GroupMemberRole.Owner) return false;
+  if (self.roleLevel === GroupMemberRole.Owner) return true;
+  return self.roleLevel === GroupMemberRole.Admin && target.roleLevel === GroupMemberRole.Normal;
 }
 
 function supportedMessages(items: MessageItem[]): MessageItem[] {
@@ -141,6 +165,7 @@ export class ConversationController {
   private unsubscribePort: (() => void) | null = null;
   private selfUserID = "";
   private groupMemberRequest = 0;
+  private unavailableGroupIDs = new Set<string>();
 
   constructor(private readonly port: ChatPort) {}
 
@@ -159,10 +184,12 @@ export class ConversationController {
     this.selfUserID = selfUserID;
     this.unsubscribePort?.();
     this.unsubscribePort = this.port.subscribe({
-      conversationsChanged: (items) => this.update({ conversations: upsertConversations(this.state.conversations, items) }),
+      conversationsChanged: (items) => this.mergeConversationEvents(items),
       totalUnreadChanged: (count) => this.update({ totalUnread: count }),
       messagesReceived: (items) => void this.receive(items),
-      uploadProgress: (clientMsgID, progress) => this.applyUploadProgress(clientMsgID, progress)
+      uploadProgress: (clientMsgID, progress) => this.applyUploadProgress(clientMsgID, progress),
+      groupMembersChanged: (groupID) => this.handleGroupMembersChanged(groupID),
+      groupUnavailable: (groupID) => this.clearUnavailableGroup(groupID)
     });
     await this.restore();
   }
@@ -178,7 +205,8 @@ export class ConversationController {
       const [conversations, totalUnread] = await Promise.all([this.port.listConversations(), this.port.totalUnread()]);
       const active = this.state.activeConversationID;
       const priorActive = this.state.conversations.find((item) => item.conversationID === active);
-      this.update({ conversations: priorActive ? upsertConversations([priorActive], conversations) : supportedConversations(conversations), totalUnread });
+      const available = conversations.filter((item) => !item.groupID || !this.unavailableGroupIDs.has(item.groupID));
+      this.update({ conversations: priorActive ? upsertConversations([priorActive], available) : supportedConversations(available), totalUnread });
       if (active) {
         await this.loadHistory(active, false);
         await this.markRead(active);
@@ -243,6 +271,7 @@ export class ConversationController {
     if (members.length < 1) throw new Error("at least one other OpenIM user is required");
     try {
       const conversation = await this.port.createGroup(groupName, members);
+      this.unavailableGroupIDs.delete(conversation.groupID);
       this.update({ conversations: upsertConversations(this.state.conversations, [conversation]), error: null });
       await this.select(conversation.conversationID, false);
     } catch (error) {
@@ -255,6 +284,52 @@ export class ConversationController {
     const conversation = this.activeConversation();
     if (!conversation || conversation.conversationType !== SessionType.Group) return;
     await this.loadGroupMembers(conversation.groupID);
+  }
+
+  async inviteGroupMembers(userIDs: string[]): Promise<void> {
+    const group = this.activeGroup();
+    if (!group) this.reject("邀请成员前请选择群聊");
+    if (!canInviteGroupMembers(this.state.groupMembers, this.selfUserID)) this.reject("当前角色不能邀请群成员");
+    const existing = new Set(this.state.groupMembers.map((member) => member.userID));
+    const candidates = [...new Set(userIDs.map((userID) => userID.trim()).filter((userID) => userID && userID !== this.selfUserID && !existing.has(userID)))];
+    if (candidates.length === 0) this.reject("请选择尚未入群的成员");
+    await this.runGroupAction({ groupID: group.groupID, kind: "invite" }, async () => {
+      await this.port.inviteGroupMembers(group.groupID, candidates);
+      await this.loadGroupMembers(group.groupID);
+    });
+  }
+
+  async removeGroupMember(userID: string): Promise<void> {
+    const group = this.activeGroup();
+    if (!group) this.reject("移除成员前请选择群聊");
+    if (!canRemoveGroupMember(this.state.groupMembers, this.selfUserID, userID)) this.reject("当前角色不能移除该成员");
+    await this.runGroupAction({ groupID: group.groupID, kind: "remove", userID }, async () => {
+      await this.port.removeGroupMember(group.groupID, userID);
+      await this.loadGroupMembers(group.groupID);
+    });
+  }
+
+  async leaveActiveGroup(): Promise<void> {
+    const group = this.activeGroup();
+    if (!group) this.reject("退出前请选择群聊");
+    const self = this.state.groupMembers.find((member) => member.userID === this.selfUserID);
+    if (!self) this.reject("当前用户不在群成员列表中");
+    if (self.roleLevel === GroupMemberRole.Owner) this.reject("群主不能退出群聊，请解散群聊");
+    await this.runGroupAction({ groupID: group.groupID, kind: "leave" }, async () => {
+      await this.port.leaveGroup(group.groupID);
+      this.clearUnavailableGroup(group.groupID);
+    });
+  }
+
+  async dismissActiveGroup(): Promise<void> {
+    const group = this.activeGroup();
+    if (!group) this.reject("解散前请选择群聊");
+    const self = this.state.groupMembers.find((member) => member.userID === this.selfUserID);
+    if (self?.roleLevel !== GroupMemberRole.Owner) this.reject("只有群主可以解散群聊");
+    await this.runGroupAction({ groupID: group.groupID, kind: "dismiss" }, async () => {
+      await this.port.dismissGroup(group.groupID);
+      this.clearUnavailableGroup(group.groupID);
+    });
   }
 
   async loadOlder(): Promise<void> {
@@ -378,6 +453,60 @@ export class ConversationController {
     return this.state.conversations.find((item) => item.conversationID === this.state.activeConversationID) ?? null;
   }
 
+  private activeGroup(): ConversationItem | null {
+    const active = this.activeConversation();
+    return active?.conversationType === SessionType.Group ? active : null;
+  }
+
+  private async runGroupAction(
+    action: { groupID: string; kind: "invite" | "remove" | "leave" | "dismiss"; userID?: string },
+    operation: () => Promise<void>
+  ): Promise<void> {
+    if (this.state.groupAction) {
+      const error = new Error("群聊操作正在执行");
+      this.fail(error);
+      throw error;
+    }
+    this.update({ groupAction: action, error: null });
+    try {
+      await operation();
+    } catch (error) {
+      this.fail(error);
+      throw error;
+    } finally {
+      this.update({ groupAction: null });
+    }
+  }
+
+  private handleGroupMembersChanged(groupID: string): void {
+    const active = this.activeGroup();
+    if (!active || active.groupID !== groupID) return;
+    void this.loadGroupMembers(groupID).catch(() => undefined);
+  }
+
+  private mergeConversationEvents(items: ConversationItem[]): void {
+    const available = items.filter((item) => !item.groupID || !this.unavailableGroupIDs.has(item.groupID));
+    this.update({ conversations: upsertConversations(this.state.conversations, available) });
+  }
+
+  private clearUnavailableGroup(groupID: string): void {
+    this.unavailableGroupIDs.add(groupID);
+    const active = this.activeGroup();
+    const clearsActive = active?.groupID === groupID;
+    if (clearsActive) this.groupMemberRequest += 1;
+    this.update({
+      conversations: this.state.conversations.filter((item) => item.groupID !== groupID),
+      ...(clearsActive ? {
+        activeConversationID: null,
+        messages: [],
+        groupMembers: [],
+        loadingGroupMembers: false,
+        uploadProgressByClientMsgID: {},
+        historyEnded: true
+      } : {})
+    });
+  }
+
   private async updateConversationSetting(
     conversationID: string,
     action: "pin" | "mute",
@@ -450,6 +579,12 @@ export class ConversationController {
 
   private fail(error: unknown, patch: Partial<ChatState> = {}): void {
     this.update({ ...patch, error: errorMessage(error) });
+  }
+
+  private reject(message: string): never {
+    const error = new Error(message);
+    this.fail(error);
+    throw error;
   }
 
   private update(patch: Partial<ChatState>): void {
@@ -566,6 +701,10 @@ export function createOpenIMChatPort(): ChatPort {
       offset: 0,
       count: 200
     })).data,
+    inviteGroupMembers: async (groupID, userIDs) => { await sdk.inviteUserToGroup({ groupID, reason: "", userIDList: userIDs }); },
+    removeGroupMember: async (groupID, userID) => { await sdk.kickGroupMember({ groupID, reason: "", userIDList: [userID] }); },
+    leaveGroup: async (groupID) => { await sdk.quitGroup(groupID); },
+    dismissGroup: async (groupID) => { await sdk.dismissGroup(groupID); },
     markRead: async (conversationID) => { await sdk.markConversationMessageAsRead(conversationID); },
     subscribe: (events) => {
       const conversationsChanged = ({ data }: WSEvent<ConversationItem[]>) => events.conversationsChanged(data);
@@ -573,17 +712,29 @@ export function createOpenIMChatPort(): ChatPort {
       const totalUnreadChanged = ({ data }: WSEvent<number>) => events.totalUnreadChanged(data);
       const messagesReceived = ({ data }: WSEvent<MessageItem[]>) => events.messagesReceived(data);
       const uploadProgress = ({ data }: WSEvent<{ progress: number; clientMsgID: string }>) => events.uploadProgress(data.clientMsgID, data.progress);
+      const groupMemberChanged = ({ data }: WSEvent<GroupMemberItem>) => events.groupMembersChanged(data.groupID);
+      const groupUnavailable = ({ data }: WSEvent<GroupItem>) => events.groupUnavailable(data.groupID);
       sdk.on(CbEvents.OnConversationChanged, conversationsChanged);
       sdk.on(CbEvents.OnNewConversation, newConversation);
       sdk.on(CbEvents.OnTotalUnreadMessageCountChanged, totalUnreadChanged);
       sdk.on(CbEvents.OnRecvNewMessages, messagesReceived);
       sdk.on(CbEvents.OnProgress, uploadProgress);
+      sdk.on(CbEvents.OnGroupMemberAdded, groupMemberChanged);
+      sdk.on(CbEvents.OnGroupMemberDeleted, groupMemberChanged);
+      sdk.on(CbEvents.OnGroupMemberInfoChanged, groupMemberChanged);
+      sdk.on(CbEvents.OnJoinedGroupDeleted, groupUnavailable);
+      sdk.on(CbEvents.OnGroupDismissed, groupUnavailable);
       return () => {
         sdk.off(CbEvents.OnConversationChanged, conversationsChanged);
         sdk.off(CbEvents.OnNewConversation, newConversation);
         sdk.off(CbEvents.OnTotalUnreadMessageCountChanged, totalUnreadChanged);
         sdk.off(CbEvents.OnRecvNewMessages, messagesReceived);
         sdk.off(CbEvents.OnProgress, uploadProgress);
+        sdk.off(CbEvents.OnGroupMemberAdded, groupMemberChanged);
+        sdk.off(CbEvents.OnGroupMemberDeleted, groupMemberChanged);
+        sdk.off(CbEvents.OnGroupMemberInfoChanged, groupMemberChanged);
+        sdk.off(CbEvents.OnJoinedGroupDeleted, groupUnavailable);
+        sdk.off(CbEvents.OnGroupDismissed, groupUnavailable);
         for (const previewURL of localPreviewURLs.values()) URL.revokeObjectURL(previewURL);
         localPreviewURLs.clear();
       };

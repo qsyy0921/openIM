@@ -10,10 +10,11 @@ export type MemberCandidate = {
   source: "friend" | "lookup";
 };
 
-export function memberCandidates(state: ContactState, selfUserID: string): MemberCandidate[] {
+export function memberCandidates(state: ContactState, selfUserID: string, excludedUserIDs: string[] = []): MemberCandidate[] {
   const values = new Map<string, MemberCandidate>();
+  const excluded = new Set([selfUserID, ...excludedUserIDs]);
   for (const friend of state.friends) {
-    if (friend.userID === selfUserID) continue;
+    if (excluded.has(friend.userID)) continue;
     values.set(friend.userID, {
       userID: friend.userID,
       nickname: friend.remark || friend.nickname || friend.userID,
@@ -22,7 +23,7 @@ export function memberCandidates(state: ContactState, selfUserID: string): Membe
     });
   }
   for (const lookup of state.lookedUpUsers) {
-    if (lookup.userID === selfUserID || values.has(lookup.userID)) continue;
+    if (excluded.has(lookup.userID) || values.has(lookup.userID)) continue;
     values.set(lookup.userID, {
       userID: lookup.userID,
       nickname: lookup.nickname || lookup.userID,
@@ -45,13 +46,15 @@ type MemberPickerProps = {
   state: ContactState;
   selfUserID: string;
   selectedUserIDs: string[];
+  excludedUserIDs?: string[];
   onChange: (selectedUserIDs: string[]) => void;
   disabled?: boolean;
 };
 
-export function MemberPicker({ controller, state, selfUserID, selectedUserIDs, onChange, disabled = false }: MemberPickerProps) {
+export function MemberPicker({ controller, state, selfUserID, selectedUserIDs, excludedUserIDs = [], onChange, disabled = false }: MemberPickerProps) {
   const [query, setQuery] = useState("");
-  const candidates = useMemo(() => memberCandidates(state, selfUserID), [state, selfUserID]);
+  const excludedKey = excludedUserIDs.join("\u0000");
+  const candidates = useMemo(() => memberCandidates(state, selfUserID, excludedUserIDs), [state, selfUserID, excludedKey]);
   const selected = new Set(selectedUserIDs);
   const selectedCandidates = selectedUserIDs.map((userID) => candidates.find((candidate) => candidate.userID === userID)).filter((candidate): candidate is MemberCandidate => Boolean(candidate));
 

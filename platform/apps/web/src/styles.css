@@ -198,12 +198,19 @@ h2 { margin: 0; font-size: 17px; }
 .group-member-panel .icon-button { width: 34px; height: 34px; color: #59616d; background: #eef1f5; }
 .group-member-panel .icon-button:hover { color: #315efb; background: #e4e9ff; }
 .group-member-list { min-height: 0; flex: 1; overflow-y: auto; padding: 8px; }
-.group-member-row { min-height: 58px; display: grid; grid-template-columns: 38px minmax(0, 1fr); gap: 10px; align-items: center; padding: 8px; }
+.group-member-row { min-height: 58px; display: grid; grid-template-columns: 38px minmax(0, 1fr) auto; gap: 10px; align-items: center; padding: 8px; }
 .group-member-row .avatar { width: 38px; height: 38px; font-size: 12px; }
 .group-member-row > span:last-child { min-width: 0; display: flex; flex-direction: column; gap: 4px; }
 .group-member-row strong, .group-member-row small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .group-member-row strong { font-size: 13px; }
 .group-member-row small { color: #858c97; font-size: 11px; }
+.member-remove { width: 32px; height: 32px; display: grid; place-items: center; padding: 0; border: 0; border-radius: 6px; color: #9f342d; background: transparent; cursor: pointer; }
+.member-remove:hover { background: #fbeae8; }
+.member-remove:disabled { color: #a8adb5; cursor: not-allowed; }
+.group-member-footer { padding: 10px 14px; border-top: 1px solid #e1e4e8; }
+.group-danger-action { width: 100%; min-height: 38px; display: flex; align-items: center; justify-content: center; gap: 7px; border: 1px solid #efcbc7; border-radius: 6px; color: #a33830; background: #fff; cursor: pointer; }
+.group-danger-action:hover { background: #fbeae8; }
+.group-danger-action:disabled { color: #a8adb5; border-color: #dfe3e8; background: #f3f5f7; cursor: not-allowed; }
 
 .modal-backdrop { position: fixed; z-index: 40; inset: 0; display: grid; place-items: center; padding: 20px; background: rgba(24, 30, 40, 0.38); }
 .image-preview-backdrop { position: fixed; z-index: 50; inset: 0; display: grid; place-items: center; padding: 24px; background: rgba(17, 21, 28, 0.88); }
@@ -222,6 +229,16 @@ h2 { margin: 0; font-size: 17px; }
 .create-group-dialog textarea { min-height: 92px; resize: vertical; }
 .create-group-dialog input:focus, .create-group-dialog textarea:focus { outline: 2px solid rgba(49, 94, 251, 0.18); border-color: #315efb; }
 .create-group-dialog > footer { display: flex; justify-content: flex-end; gap: 8px; }
+.group-lifecycle-dialog { width: min(540px, 100%); }
+.group-confirm-dialog { width: min(440px, 100%); display: grid; grid-template-columns: 42px minmax(0, 1fr); gap: 12px; padding: 20px; border-radius: 8px; background: #fff; box-shadow: 0 24px 60px rgba(18, 25, 36, 0.22); }
+.danger-dialog-icon { width: 42px; height: 42px; display: grid; place-items: center; border-radius: 6px; color: #a33830; background: #fbeae8; }
+.group-confirm-dialog h2 { margin-top: 2px; font-size: 18px; }
+.group-confirm-dialog p { margin: 7px 0 0; color: #68717d; font-size: 13px; line-height: 1.55; }
+.group-confirm-dialog .inline-error, .group-confirm-dialog > footer { grid-column: 1 / -1; }
+.group-confirm-dialog > footer { display: flex; justify-content: flex-end; gap: 8px; }
+.danger-button { min-height: 40px; display: inline-flex; align-items: center; justify-content: center; gap: 7px; padding: 0 14px; border: 0; border-radius: 6px; color: #fff; background: #b42318; cursor: pointer; }
+.danger-button:hover { background: #8f1d15; }
+.danger-button:disabled { background: #cda8a5; cursor: not-allowed; }
 
 .member-picker { min-height: 0; display: flex; flex-direction: column; gap: 10px; }
 .member-search { display: grid; grid-template-columns: minmax(0, 1fr) 38px; gap: 8px; }

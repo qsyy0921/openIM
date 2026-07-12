@@ -1,8 +1,8 @@
-import { ArrowLeft, BellOff, ChevronUp, CircleAlert, Download, FileText, ImagePlus, LoaderCircle, MessageSquarePlus, MoreHorizontal, Paperclip, Pin, Plus, RefreshCw, Search, Send, Users, Wifi, WifiOff, X } from "lucide-react";
-import { MessageReceiveOptType, MessageStatus, MessageType, SessionType, type ConversationItem, type MessageItem } from "@openim/wasm-client-sdk";
+import { ArrowLeft, BellOff, ChevronUp, CircleAlert, Download, FileText, ImagePlus, LoaderCircle, LogOut, MessageSquarePlus, MoreHorizontal, Paperclip, Pin, Plus, RefreshCw, Search, Send, Trash2, UserMinus, UserPlus, Users, Wifi, WifiOff, X } from "lucide-react";
+import { GroupMemberRole, MessageReceiveOptType, MessageStatus, MessageType, SessionType, type ConversationItem, type GroupMemberItem, type MessageItem } from "@openim/wasm-client-sdk";
 import { useEffect, useRef, useState } from "react";
 
-import type { ChatState, ConversationController } from "./chat";
+import { canInviteGroupMembers, canRemoveGroupMember, type ChatState, type ConversationController } from "./chat";
 import type { ContactController, ContactState } from "./contact";
 import { MemberPicker } from "./MemberPicker";
 import type { ConnectionUpdate } from "./openim";
@@ -50,6 +50,9 @@ export function ChatWorkspace({ controller, state, selfUserID, connection, conta
   const [mobileDetail, setMobileDetail] = useState(false);
   const [showCreateGroup, setShowCreateGroup] = useState(false);
   const [showGroupMembers, setShowGroupMembers] = useState(false);
+  const [showInviteGroup, setShowInviteGroup] = useState(false);
+  const [inviteMemberIDs, setInviteMemberIDs] = useState<string[]>([]);
+  const [pendingGroupAction, setPendingGroupAction] = useState<{ kind: "remove"; member: GroupMemberItem } | { kind: "leave" | "dismiss" } | null>(null);
   const [conversationMenuID, setConversationMenuID] = useState<string | null>(null);
   const [groupName, setGroupName] = useState("");
   const [groupMemberIDs, setGroupMemberIDs] = useState<string[]>([]);
@@ -59,6 +62,8 @@ export function ChatWorkspace({ controller, state, selfUserID, connection, conta
   const fileInput = useRef<HTMLInputElement | null>(null);
   const active = state.conversations.find((item) => item.conversationID === state.activeConversationID) ?? null;
   const visibleConversations = controller.visibleConversations();
+  const selfGroupMember = state.groupMembers.find((member) => member.userID === selfUserID) ?? null;
+  const canInvite = canInviteGroupMembers(state.groupMembers, selfUserID);
 
   useEffect(() => {
     messageEnd.current?.scrollIntoView({ block: "end" });
@@ -69,6 +74,12 @@ export function ChatWorkspace({ controller, state, selfUserID, connection, conta
     window.addEventListener("keydown", closeOnEscape);
     return () => window.removeEventListener("keydown", closeOnEscape);
   }, []);
+
+  useEffect(() => {
+    setShowInviteGroup(false);
+    setInviteMemberIDs([]);
+    setPendingGroupAction(null);
+  }, [active?.groupID]);
 
   const openDirect = async () => {
     if (working) return;
@@ -145,6 +156,29 @@ export function ChatWorkspace({ controller, state, selfUserID, connection, conta
       // The controller exposes validation, upload, and send failures in ChatState.
     } finally {
       setWorking(false);
+    }
+  };
+
+  const inviteGroupMembers = async () => {
+    try {
+      await controller.inviteGroupMembers(inviteMemberIDs);
+      setInviteMemberIDs([]);
+      setShowInviteGroup(false);
+    } catch {
+      // The controller publishes the exact SDK or role error.
+    }
+  };
+
+  const confirmGroupAction = async () => {
+    if (!pendingGroupAction) return;
+    try {
+      if (pendingGroupAction.kind === "remove") await controller.removeGroupMember(pendingGroupAction.member.userID);
+      else if (pendingGroupAction.kind === "leave") await controller.leaveActiveGroup();
+      else await controller.dismissActiveGroup();
+      setPendingGroupAction(null);
+      if (pendingGroupAction.kind !== "remove") setShowGroupMembers(false);
+    } catch {
+      // The controller publishes the exact SDK or role error.
     }
   };
 
@@ -371,6 +405,11 @@ export function ChatWorkspace({ controller, state, selfUserID, connection, conta
             <header>
               <div><strong>群成员</strong><span>{state.groupMembers.length}</span></div>
               <div className="panel-actions">
+                {canInvite && (
+                  <button className="icon-button" aria-label="邀请群成员" title="邀请成员" disabled={Boolean(state.groupAction)} onClick={() => setShowInviteGroup(true)}>
+                    <UserPlus size={17} />
+                  </button>
+                )}
                 <button className="icon-button" aria-label="刷新群成员" title="刷新" disabled={state.loadingGroupMembers} onClick={() => void controller.refreshGroupMembers().catch(() => undefined)}>
                   <RefreshCw className={state.loadingGroupMembers ? "spin" : ""} size={17} />
                 </button>
@@ -381,11 +420,25 @@ export function ChatWorkspace({ controller, state, selfUserID, connection, conta
               {state.groupMembers.map((member) => (
                 <div className="group-member-row" key={member.userID}>
                   <span className="avatar">{(member.nickname || member.userID).slice(0, 1).toUpperCase()}</span>
-                  <span><strong>{member.nickname || member.userID}</strong><small>{member.userID}</small></span>
+                  <span><strong>{member.nickname || member.userID}</strong><small>{member.userID}{member.roleLevel === GroupMemberRole.Owner ? " · 群主" : member.roleLevel === GroupMemberRole.Admin ? " · 管理员" : ""}</small></span>
+                  {canRemoveGroupMember(state.groupMembers, selfUserID, member.userID) && (
+                    <button className="member-remove" aria-label={`移除群成员 ${member.nickname || member.userID}`} title="移除成员" disabled={Boolean(state.groupAction)} onClick={() => setPendingGroupAction({ kind: "remove", member })}>
+                      <UserMinus size={16} />
+                    </button>
+                  )}
                 </div>
               ))}
               {!state.loadingGroupMembers && state.groupMembers.length === 0 && <p className="empty-note">暂无成员数据</p>}
             </div>
+            {selfGroupMember && (
+              <footer className="group-member-footer">
+                {selfGroupMember.roleLevel === GroupMemberRole.Owner ? (
+                  <button className="group-danger-action" disabled={Boolean(state.groupAction)} onClick={() => setPendingGroupAction({ kind: "dismiss" })}><Trash2 size={16} />解散群聊</button>
+                ) : (
+                  <button className="group-danger-action" disabled={Boolean(state.groupAction)} onClick={() => setPendingGroupAction({ kind: "leave" })}><LogOut size={16} />退出群聊</button>
+                )}
+              </footer>
+            )}
           </aside>
         )}
       </section>
@@ -404,6 +457,52 @@ export function ChatWorkspace({ controller, state, selfUserID, connection, conta
               <button className="secondary-button" onClick={() => setShowCreateGroup(false)}>取消</button>
               <button className="primary-button" disabled={working || !groupName.trim() || groupMemberIDs.length === 0} onClick={() => void createGroup()}>
                 {working ? <LoaderCircle className="spin" size={17} /> : <Users size={17} />}创建
+              </button>
+            </footer>
+          </section>
+        </div>
+      )}
+
+      {showInviteGroup && active?.conversationType === SessionType.Group && (
+        <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !state.groupAction) setShowInviteGroup(false); }}>
+          <section className="create-group-dialog group-lifecycle-dialog" role="dialog" aria-modal="true" aria-label="邀请群成员">
+            <header>
+              <div><span className="dialog-icon"><UserPlus size={19} /></span><h2>邀请群成员</h2></div>
+              <button className="icon-button" aria-label="关闭邀请群成员" title="关闭" disabled={Boolean(state.groupAction)} onClick={() => setShowInviteGroup(false)}><X size={18} /></button>
+            </header>
+            <MemberPicker
+              controller={contactController}
+              state={contactState}
+              selfUserID={selfUserID}
+              selectedUserIDs={inviteMemberIDs}
+              excludedUserIDs={state.groupMembers.map((member) => member.userID)}
+              onChange={setInviteMemberIDs}
+              disabled={Boolean(state.groupAction)}
+            />
+            {state.error && <div className="inline-error" role="alert"><span>{state.error}</span><button type="button" onClick={() => controller.clearError()}>关闭</button></div>}
+            <footer>
+              <button className="secondary-button" disabled={Boolean(state.groupAction)} onClick={() => setShowInviteGroup(false)}>取消</button>
+              <button className="primary-button" disabled={Boolean(state.groupAction) || inviteMemberIDs.length === 0} onClick={() => void inviteGroupMembers()}>
+                {state.groupAction?.kind === "invite" ? <LoaderCircle className="spin" size={17} /> : <UserPlus size={17} />}邀请
+              </button>
+            </footer>
+          </section>
+        </div>
+      )}
+
+      {pendingGroupAction && active?.conversationType === SessionType.Group && (
+        <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !state.groupAction) setPendingGroupAction(null); }}>
+          <section className="group-confirm-dialog" role="alertdialog" aria-modal="true" aria-label={pendingGroupAction.kind === "remove" ? "确认移除群成员" : pendingGroupAction.kind === "leave" ? "确认退出群聊" : "确认解散群聊"}>
+            <span className="danger-dialog-icon">{pendingGroupAction.kind === "remove" ? <UserMinus size={20} /> : pendingGroupAction.kind === "leave" ? <LogOut size={20} /> : <Trash2 size={20} />}</span>
+            <div>
+              <h2>{pendingGroupAction.kind === "remove" ? "移除群成员" : pendingGroupAction.kind === "leave" ? "退出群聊" : "解散群聊"}</h2>
+              <p>{pendingGroupAction.kind === "remove" ? `确认将 ${pendingGroupAction.member.nickname || pendingGroupAction.member.userID} 移出群聊？` : pendingGroupAction.kind === "leave" ? "退出后将不再接收该群消息。" : "解散后所有成员都将失去该群聊，操作不可撤销。"}</p>
+            </div>
+            {state.error && <div className="inline-error" role="alert"><span>{state.error}</span><button type="button" onClick={() => controller.clearError()}>关闭</button></div>}
+            <footer>
+              <button className="secondary-button" disabled={Boolean(state.groupAction)} onClick={() => setPendingGroupAction(null)}>取消</button>
+              <button className="danger-button" disabled={Boolean(state.groupAction)} onClick={() => void confirmGroupAction()}>
+                {state.groupAction ? <LoaderCircle className="spin" size={17} /> : null}确认
               </button>
             </footer>
           </section>
