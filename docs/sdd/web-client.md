@@ -10,7 +10,7 @@ depends_on:
 
 ## Scope
 
-Provide an extensible browser collaboration shell with verified OpenIM single/group text conversation foundations and an independently owned Agent workspace module. The group foundation is specified in `im-client-foundation.md`, contacts/member-picker in `im-client-contacts.md`, image/file in `im-client-media.md`, search/pin/mute in `im-client-conversations.md`, the admitted group lifecycle in `im-client-group-lifecycle.md`, and the Agent module in `agent-workspace.md`. This unit continues to own shell, identity/session bootstrap, and IM presentation rather than Agent business state. It does not yet implement audio, video, enterprise-directory search, documents, or administration.
+Provide an extensible browser collaboration shell with verified OpenIM single/group text conversation foundations and an independently owned Agent workspace module. The group foundation is specified in `im-client-foundation.md`, contacts/member-picker in `im-client-contacts.md`, image/file in `im-client-media.md`, search/pin/mute in `im-client-conversations.md`, group lifecycle in `im-client-group-lifecycle.md`, the admitted message actions in `im-client-message-actions.md`, and the Agent module in `agent-workspace.md`. This unit continues to own shell, identity/session bootstrap, and IM presentation rather than Agent business state. It does not yet implement audio, video, enterprise-directory search, documents, or administration.
 
 ## Responsibilities and non-goals
 

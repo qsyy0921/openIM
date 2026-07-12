@@ -13,6 +13,8 @@ import {
   type GroupItem,
   type GroupMemberItem,
   type MessageItem,
+  type ReceiptInfo,
+  type RevokedInfo,
   type WSEvent
 } from "@openim/wasm-client-sdk";
 
@@ -28,6 +30,7 @@ export type ChatState = {
   groupMembers: GroupMemberItem[];
   loadingGroupMembers: boolean;
   groupAction: { groupID: string; kind: "invite" | "remove" | "leave" | "dismiss"; userID?: string } | null;
+  messageAction: { kind: "quote" | "forward" | "revoke"; clientMsgID: string; targetConversationID?: string } | null;
   restoring: boolean;
   uploadProgressByClientMsgID: Record<string, number>;
   error: string | null;
@@ -40,6 +43,8 @@ export type ChatEvents = {
   uploadProgress: (clientMsgID: string, progress: number) => void;
   groupMembersChanged: (groupID: string) => void;
   groupUnavailable: (groupID: string) => void;
+  messageRevoked: (info: RevokedInfo) => void;
+  c2cReadReceipts: (receipts: ReceiptInfo[]) => void;
 };
 
 export type ChatPort = {
@@ -49,6 +54,8 @@ export type ChatPort = {
   oneConversation: (sourceID: string, sessionType: SessionType) => Promise<ConversationItem>;
   history: (conversationID: string, startClientMsgID: string) => Promise<{ isEnd: boolean; messageList: MessageItem[] }>;
   createText: (text: string) => Promise<MessageItem>;
+  createQuote: (text: string, source: MessageItem) => Promise<MessageItem>;
+  createForward: (source: MessageItem) => Promise<MessageItem>;
   createImage: (file: File) => Promise<MessageItem>;
   createFile: (file: File) => Promise<MessageItem>;
   send: (conversation: ConversationItem, message: MessageItem) => Promise<MessageItem>;
@@ -58,6 +65,7 @@ export type ChatPort = {
   removeGroupMember: (groupID: string, userID: string) => Promise<void>;
   leaveGroup: (groupID: string) => Promise<void>;
   dismissGroup: (groupID: string) => Promise<void>;
+  revokeMessage: (conversationID: string, clientMsgID: string) => Promise<void>;
   markRead: (conversationID: string) => Promise<void>;
   subscribe: (events: ChatEvents) => () => void;
 };
@@ -74,6 +82,7 @@ export const initialChatState: ChatState = {
   groupMembers: [],
   loadingGroupMembers: false,
   groupAction: null,
+  messageAction: null,
   restoring: false,
   uploadProgressByClientMsgID: {},
   error: null
@@ -123,8 +132,25 @@ export function canRemoveGroupMember(members: GroupMemberItem[], selfUserID: str
 function supportedMessages(items: MessageItem[]): MessageItem[] {
   return items.filter((item) =>
     (item.sessionType === SessionType.Single || item.sessionType === SessionType.Group) &&
-    (item.contentType === MessageType.TextMessage || item.contentType === MessageType.PictureMessage || item.contentType === MessageType.FileMessage)
+    (item.contentType === MessageType.TextMessage || item.contentType === MessageType.PictureMessage ||
+      item.contentType === MessageType.FileMessage || item.contentType === MessageType.QuoteMessage ||
+      item.contentType === MessageType.RevokeMessage)
   );
+}
+
+const QUOTE_SOURCE_TYPES = new Set([MessageType.TextMessage, MessageType.PictureMessage, MessageType.FileMessage]);
+const FORWARD_SOURCE_TYPES = new Set([MessageType.TextMessage, MessageType.PictureMessage, MessageType.FileMessage]);
+
+export function canQuoteMessage(message: MessageItem): boolean {
+  return message.status === MessageStatus.Succeed && QUOTE_SOURCE_TYPES.has(message.contentType);
+}
+
+export function canForwardMessage(message: MessageItem): boolean {
+  return message.status === MessageStatus.Succeed && FORWARD_SOURCE_TYPES.has(message.contentType);
+}
+
+export function canRequestRevoke(message: MessageItem): boolean {
+  return message.status === MessageStatus.Succeed && message.contentType !== MessageType.RevokeMessage;
 }
 
 function validateFileName(file: File): void {
@@ -189,7 +215,9 @@ export class ConversationController {
       messagesReceived: (items) => void this.receive(items),
       uploadProgress: (clientMsgID, progress) => this.applyUploadProgress(clientMsgID, progress),
       groupMembersChanged: (groupID) => this.handleGroupMembersChanged(groupID),
-      groupUnavailable: (groupID) => this.clearUnavailableGroup(groupID)
+      groupUnavailable: (groupID) => this.clearUnavailableGroup(groupID),
+      messageRevoked: (info) => this.applyRevokedMessage(info),
+      c2cReadReceipts: (receipts) => this.applyC2CReadReceipts(receipts)
     });
     await this.restore();
   }
@@ -237,7 +265,7 @@ export class ConversationController {
       throw new Error("conversation is unavailable");
     }
     this.groupMemberRequest += 1;
-    this.update({ activeConversationID: conversationID, messages: [], uploadProgressByClientMsgID: {}, historyEnded: !loadExistingHistory, groupMembers: [], loadingGroupMembers: false, error: null });
+    this.update({ activeConversationID: conversationID, messages: [], uploadProgressByClientMsgID: {}, historyEnded: !loadExistingHistory, groupMembers: [], loadingGroupMembers: false, messageAction: null, error: null });
     if (loadExistingHistory) await this.loadHistory(conversationID, false);
     await this.markRead(conversationID);
     if (conversation.conversationType === SessionType.Group) await this.loadGroupMembers(conversation.groupID);
@@ -355,6 +383,54 @@ export class ConversationController {
     await this.sendDraft(conversation, draft, false);
   }
 
+  async sendQuote(text: string, sourceClientMsgID: string): Promise<void> {
+    const content = text.trim();
+    const conversation = this.activeConversation();
+    if (!conversation) this.reject("引用回复前请选择会话");
+    if (!content) this.reject("引用回复内容不能为空");
+    if (content.length > 6000) this.reject("引用回复不能超过 6000 个字符");
+    const source = this.activeMessage(sourceClientMsgID);
+    if (!source || !canQuoteMessage(source)) this.reject("该消息当前不能被引用回复");
+    await this.runMessageAction({ kind: "quote", clientMsgID: sourceClientMsgID }, async () => {
+      const draft = await this.port.createQuote(content, source);
+      await this.sendDraft(conversation, draft, false);
+    });
+  }
+
+  async forwardMessage(sourceClientMsgID: string, targetConversationID: string): Promise<void> {
+    const source = this.activeMessage(sourceClientMsgID);
+    if (!source || !canForwardMessage(source)) this.reject("该消息当前不能被转发");
+    const target = this.state.conversations.find((item) => item.conversationID === targetConversationID);
+    if (!target || (target.conversationType !== SessionType.Single && target.conversationType !== SessionType.Group)) this.reject("请选择有效的转发目标会话");
+    await this.runMessageAction({ kind: "forward", clientMsgID: sourceClientMsgID, targetConversationID }, async () => {
+      const draft = await this.port.createForward(source);
+      await this.sendDraft(target, draft, false, target.conversationID === this.state.activeConversationID);
+    });
+  }
+
+  async revokeMessage(clientMsgID: string): Promise<void> {
+    const conversation = this.activeConversation();
+    if (!conversation) this.reject("撤回消息前请选择会话");
+    const source = this.activeMessage(clientMsgID);
+    if (!source || !canRequestRevoke(source)) this.reject("该消息当前不能撤回");
+    await this.runMessageAction({ kind: "revoke", clientMsgID }, async () => {
+      await this.port.revokeMessage(conversation.conversationID, clientMsgID);
+      this.applyRevokedMessage({
+        clientMsgID,
+        revokerID: this.selfUserID,
+        revokerRole: 0,
+        revokerNickname: this.selfUserID,
+        revokeTime: Math.floor(Date.now() / 1000),
+        sourceMessageSendTime: source.sendTime,
+        sourceMessageSendID: source.sendID,
+        sourceMessageSenderNickname: source.senderNickname,
+        sessionType: source.sessionType,
+        seq: source.seq,
+        ex: source.ex || ""
+      });
+    });
+  }
+
   async sendImage(file: File): Promise<void> {
     const conversation = this.activeConversation();
     if (!conversation) throw new Error("发送图片前请选择会话");
@@ -458,6 +534,76 @@ export class ConversationController {
     return active?.conversationType === SessionType.Group ? active : null;
   }
 
+  private activeMessage(clientMsgID: string): MessageItem | null {
+    return this.state.messages.find((message) => message.clientMsgID === clientMsgID) ?? null;
+  }
+
+  private async runMessageAction(
+    action: { kind: "quote" | "forward" | "revoke"; clientMsgID: string; targetConversationID?: string },
+    operation: () => Promise<void>
+  ): Promise<void> {
+    if (this.state.messageAction) this.reject("消息操作正在执行");
+    this.update({ messageAction: action, error: null });
+    try {
+      await operation();
+    } catch (error) {
+      this.fail(error);
+      throw error;
+    } finally {
+      this.update({ messageAction: null });
+    }
+  }
+
+  private applyRevokedMessage(info: RevokedInfo): void {
+    const source = this.activeMessage(info.clientMsgID);
+    if (!source) return;
+    const revoked = this.toRevokedMessage(source, info);
+    this.update({
+      messages: this.state.messages.map((message) => {
+        if (message.clientMsgID === info.clientMsgID) return revoked;
+        if (message.contentType === MessageType.QuoteMessage && message.quoteElem?.quoteMessage.clientMsgID === info.clientMsgID) {
+          return { ...message, quoteElem: { ...message.quoteElem, quoteMessage: revoked } };
+        }
+        return message;
+      })
+    });
+  }
+
+  private toRevokedMessage(source: MessageItem, info: RevokedInfo): MessageItem {
+    return {
+      ...source,
+      contentType: MessageType.RevokeMessage,
+      content: JSON.stringify({ detail: JSON.stringify(info) }),
+      textElem: undefined,
+      pictureElem: undefined,
+      fileElem: undefined,
+      quoteElem: undefined,
+      notificationElem: { detail: JSON.stringify(info) },
+      status: MessageStatus.Succeed
+    };
+  }
+
+  private applyC2CReadReceipts(receipts: ReceiptInfo[]): void {
+    const active = this.activeConversation();
+    if (!active || active.conversationType !== SessionType.Single) return;
+    const matching = receipts.filter((receipt) => receipt.userID === active.userID && receipt.sessionType === SessionType.Single);
+    if (matching.length === 0) return;
+    const readByID = new Map<string, number>();
+    for (const receipt of matching) for (const clientMsgID of receipt.msgIDList) readByID.set(clientMsgID, receipt.readTime);
+    if (readByID.size === 0) return;
+    this.update({
+      messages: this.state.messages.map((message) => {
+        const readTime = readByID.get(message.clientMsgID);
+        if (readTime === undefined || message.sendID !== this.selfUserID || message.sessionType !== SessionType.Single || message.isRead) return message;
+        return {
+          ...message,
+          isRead: true,
+          attachedInfoElem: message.attachedInfoElem ? { ...message.attachedInfoElem, hasReadTime: readTime } : message.attachedInfoElem
+        };
+      })
+    });
+  }
+
   private async runGroupAction(
     action: { groupID: string; kind: "invite" | "remove" | "leave" | "dismiss"; userID?: string },
     operation: () => Promise<void>
@@ -541,23 +687,27 @@ export class ConversationController {
     }
   }
 
-  private async sendDraft(conversation: ConversationItem, message: MessageItem, tracksUpload: boolean): Promise<void> {
+  private async sendDraft(conversation: ConversationItem, message: MessageItem, tracksUpload: boolean, projectToActive = true): Promise<void> {
     const draft = { ...message, status: MessageStatus.Sending };
     const progress = tracksUpload
       ? { ...this.state.uploadProgressByClientMsgID, [draft.clientMsgID]: 0 }
       : this.state.uploadProgressByClientMsgID;
-    this.update({ messages: mergeMessages(this.state.messages, [draft]), uploadProgressByClientMsgID: progress, error: null });
+    this.update({
+      ...(projectToActive ? { messages: mergeMessages(this.state.messages, [draft]) } : {}),
+      uploadProgressByClientMsgID: progress,
+      error: null
+    });
     try {
       const sent = await this.port.send(conversation, draft);
       const nextProgress = { ...this.state.uploadProgressByClientMsgID };
       delete nextProgress[draft.clientMsgID];
       this.update({
-        messages: mergeMessages(this.state.messages, [{ ...sent, status: MessageStatus.Succeed }]),
+        ...(projectToActive ? { messages: mergeMessages(this.state.messages, [{ ...sent, status: MessageStatus.Succeed }]) } : {}),
         uploadProgressByClientMsgID: nextProgress
       });
     } catch (error) {
       this.update({
-        messages: mergeMessages(this.state.messages, [{ ...draft, status: MessageStatus.Failed }]),
+        ...(projectToActive ? { messages: mergeMessages(this.state.messages, [{ ...draft, status: MessageStatus.Failed }]) } : {}),
         error: `发送失败：${errorMessage(error)}`
       });
       throw error;
@@ -611,6 +761,8 @@ export function createOpenIMChatPort(): ChatPort {
       return data;
     },
     createText: async (text) => (await sdk.createTextMessage(text)).data,
+    createQuote: async (text, source) => (await sdk.createQuoteMessage({ text, message: JSON.stringify(source) })).data,
+    createForward: async (source) => (await sdk.createForwardMessage(source)).data,
     createImage: async (file) => {
       const { width, height } = await readImageDimensions(file);
       const previewURL = URL.createObjectURL(file);
@@ -705,6 +857,7 @@ export function createOpenIMChatPort(): ChatPort {
     removeGroupMember: async (groupID, userID) => { await sdk.kickGroupMember({ groupID, reason: "", userIDList: [userID] }); },
     leaveGroup: async (groupID) => { await sdk.quitGroup(groupID); },
     dismissGroup: async (groupID) => { await sdk.dismissGroup(groupID); },
+    revokeMessage: async (conversationID, clientMsgID) => { await sdk.revokeMessage({ conversationID, clientMsgID }); },
     markRead: async (conversationID) => { await sdk.markConversationMessageAsRead(conversationID); },
     subscribe: (events) => {
       const conversationsChanged = ({ data }: WSEvent<ConversationItem[]>) => events.conversationsChanged(data);
@@ -714,6 +867,8 @@ export function createOpenIMChatPort(): ChatPort {
       const uploadProgress = ({ data }: WSEvent<{ progress: number; clientMsgID: string }>) => events.uploadProgress(data.clientMsgID, data.progress);
       const groupMemberChanged = ({ data }: WSEvent<GroupMemberItem>) => events.groupMembersChanged(data.groupID);
       const groupUnavailable = ({ data }: WSEvent<GroupItem>) => events.groupUnavailable(data.groupID);
+      const messageRevoked = ({ data }: WSEvent<RevokedInfo>) => events.messageRevoked(data);
+      const c2cReadReceipts = ({ data }: WSEvent<ReceiptInfo[]>) => events.c2cReadReceipts(data);
       sdk.on(CbEvents.OnConversationChanged, conversationsChanged);
       sdk.on(CbEvents.OnNewConversation, newConversation);
       sdk.on(CbEvents.OnTotalUnreadMessageCountChanged, totalUnreadChanged);
@@ -724,6 +879,8 @@ export function createOpenIMChatPort(): ChatPort {
       sdk.on(CbEvents.OnGroupMemberInfoChanged, groupMemberChanged);
       sdk.on(CbEvents.OnJoinedGroupDeleted, groupUnavailable);
       sdk.on(CbEvents.OnGroupDismissed, groupUnavailable);
+      sdk.on(CbEvents.OnNewRecvMessageRevoked, messageRevoked);
+      sdk.on(CbEvents.OnRecvC2CReadReceipt, c2cReadReceipts);
       return () => {
         sdk.off(CbEvents.OnConversationChanged, conversationsChanged);
         sdk.off(CbEvents.OnNewConversation, newConversation);
@@ -735,6 +892,8 @@ export function createOpenIMChatPort(): ChatPort {
         sdk.off(CbEvents.OnGroupMemberInfoChanged, groupMemberChanged);
         sdk.off(CbEvents.OnJoinedGroupDeleted, groupUnavailable);
         sdk.off(CbEvents.OnGroupDismissed, groupUnavailable);
+        sdk.off(CbEvents.OnNewRecvMessageRevoked, messageRevoked);
+        sdk.off(CbEvents.OnRecvC2CReadReceipt, c2cReadReceipts);
         for (const previewURL of localPreviewURLs.values()) URL.revokeObjectURL(previewURL);
         localPreviewURLs.clear();
       };
