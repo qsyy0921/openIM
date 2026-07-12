@@ -1,8 +1,8 @@
-import { ArrowLeft, BellOff, ChevronUp, CircleAlert, Download, FileText, ImagePlus, LoaderCircle, LogOut, MessageSquarePlus, MoreHorizontal, Paperclip, Pin, Plus, RefreshCw, Search, Send, Trash2, UserMinus, UserPlus, Users, Wifi, WifiOff, X } from "lucide-react";
+import { ArrowLeft, BellOff, CheckCheck, ChevronUp, CircleAlert, Download, FileText, Forward, ImagePlus, LoaderCircle, LogOut, MessageSquarePlus, MoreHorizontal, Paperclip, Pin, Plus, RefreshCw, Reply, Search, Send, Trash2, Undo2, UserMinus, UserPlus, Users, Wifi, WifiOff, X } from "lucide-react";
 import { GroupMemberRole, MessageReceiveOptType, MessageStatus, MessageType, SessionType, type ConversationItem, type GroupMemberItem, type MessageItem } from "@openim/wasm-client-sdk";
 import { useEffect, useRef, useState } from "react";
 
-import { canInviteGroupMembers, canRemoveGroupMember, type ChatState, type ConversationController } from "./chat";
+import { canForwardMessage, canInviteGroupMembers, canQuoteMessage, canRemoveGroupMember, canRequestRevoke, type ChatState, type ConversationController } from "./chat";
 import type { ContactController, ContactState } from "./contact";
 import { MemberPicker } from "./MemberPicker";
 import type { ConnectionUpdate } from "./openim";
@@ -26,6 +26,8 @@ function latestText(conversation: ConversationItem): string {
     const message = JSON.parse(conversation.latestMsg) as MessageItem;
     if (message.contentType === MessageType.PictureMessage) return "[图片]";
     if (message.contentType === MessageType.FileMessage) return `[文件] ${message.fileElem?.fileName ?? ""}`.trim();
+    if (message.contentType === MessageType.QuoteMessage) return `[回复] ${message.quoteElem?.text ?? ""}`.trim();
+    if (message.contentType === MessageType.RevokeMessage) return "[消息已撤回]";
     return message.textElem?.content ?? "";
   } catch {
     return "";
@@ -40,7 +42,26 @@ function messageTime(message: MessageItem): string {
 function sendState(message: MessageItem): string {
   if (message.status === MessageStatus.Sending) return "发送中";
   if (message.status === MessageStatus.Failed) return "发送失败";
+  if (message.sessionType === SessionType.Single && message.isRead) return "已读";
   return "已发送";
+}
+
+function messageSummary(message: MessageItem): string {
+  if (message.contentType === MessageType.RevokeMessage) return "消息已撤回";
+  if (message.contentType === MessageType.PictureMessage) return "[图片]";
+  if (message.contentType === MessageType.FileMessage) return `[文件] ${message.fileElem?.fileName || "未命名文件"}`;
+  if (message.contentType === MessageType.QuoteMessage) return message.quoteElem?.text || "[引用消息]";
+  return message.textElem?.content || "[不支持的消息]";
+}
+
+function revokedText(message: MessageItem, selfUserID: string): string {
+  try {
+    const detail = JSON.parse(message.notificationElem?.detail || "{}") as { revokerID?: string; revokerNickname?: string };
+    if (detail.revokerID === selfUserID) return "你撤回了一条消息";
+    return `${detail.revokerNickname || message.senderNickname || "对方"} 撤回了一条消息`;
+  } catch {
+    return "一条消息已撤回";
+  }
 }
 
 export function ChatWorkspace({ controller, state, selfUserID, connection, contactController, contactState }: ChatWorkspaceProps) {
@@ -54,6 +75,11 @@ export function ChatWorkspace({ controller, state, selfUserID, connection, conta
   const [inviteMemberIDs, setInviteMemberIDs] = useState<string[]>([]);
   const [pendingGroupAction, setPendingGroupAction] = useState<{ kind: "remove"; member: GroupMemberItem } | { kind: "leave" | "dismiss" } | null>(null);
   const [conversationMenuID, setConversationMenuID] = useState<string | null>(null);
+  const [messageMenuID, setMessageMenuID] = useState<string | null>(null);
+  const [replyTo, setReplyTo] = useState<MessageItem | null>(null);
+  const [forwardSource, setForwardSource] = useState<MessageItem | null>(null);
+  const [forwardTargetID, setForwardTargetID] = useState("");
+  const [revokeSource, setRevokeSource] = useState<MessageItem | null>(null);
   const [groupName, setGroupName] = useState("");
   const [groupMemberIDs, setGroupMemberIDs] = useState<string[]>([]);
   const [previewImage, setPreviewImage] = useState<{ url: string; alt: string } | null>(null);
@@ -70,16 +96,28 @@ export function ChatWorkspace({ controller, state, selfUserID, connection, conta
   }, [state.messages.length, state.activeConversationID]);
 
   useEffect(() => {
-    const closeOnEscape = (event: KeyboardEvent) => { if (event.key === "Escape") setConversationMenuID(null); };
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key !== "Escape" || state.messageAction) return;
+      setConversationMenuID(null);
+      setMessageMenuID(null);
+      setForwardSource(null);
+      setForwardTargetID("");
+      setRevokeSource(null);
+    };
     window.addEventListener("keydown", closeOnEscape);
     return () => window.removeEventListener("keydown", closeOnEscape);
-  }, []);
+  }, [state.messageAction]);
 
   useEffect(() => {
     setShowInviteGroup(false);
     setInviteMemberIDs([]);
     setPendingGroupAction(null);
-  }, [active?.groupID]);
+    setMessageMenuID(null);
+    setReplyTo(null);
+    setForwardSource(null);
+    setForwardTargetID("");
+    setRevokeSource(null);
+  }, [active?.conversationID]);
 
   const openDirect = async () => {
     if (working) return;
@@ -135,10 +173,12 @@ export function ChatWorkspace({ controller, state, selfUserID, connection, conta
   const send = async () => {
     if (working || !draft.trim()) return;
     const content = draft;
-    setDraft("");
     setWorking(true);
     try {
-      await controller.sendText(content);
+      if (replyTo) await controller.sendQuote(content, replyTo.clientMsgID);
+      else await controller.sendText(content);
+      setDraft("");
+      setReplyTo(null);
     } catch {
       // The failed optimistic message and error remain visible in ChatState.
     } finally {
@@ -156,6 +196,38 @@ export function ChatWorkspace({ controller, state, selfUserID, connection, conta
       // The controller exposes validation, upload, and send failures in ChatState.
     } finally {
       setWorking(false);
+    }
+  };
+
+  const openReply = (message: MessageItem) => {
+    setReplyTo(message);
+    setMessageMenuID(null);
+  };
+
+  const openForward = (message: MessageItem) => {
+    setForwardSource(message);
+    setForwardTargetID("");
+    setMessageMenuID(null);
+  };
+
+  const forwardMessage = async () => {
+    if (!forwardSource || !forwardTargetID) return;
+    try {
+      await controller.forwardMessage(forwardSource.clientMsgID, forwardTargetID);
+      setForwardSource(null);
+      setForwardTargetID("");
+    } catch {
+      // The controller retains the dialog and exposes the SDK error.
+    }
+  };
+
+  const confirmRevoke = async () => {
+    if (!revokeSource) return;
+    try {
+      await controller.revokeMessage(revokeSource.clientMsgID);
+      setRevokeSource(null);
+    } catch {
+      // The controller retains the source and exposes the SDK error.
     }
   };
 
@@ -326,9 +398,24 @@ export function ChatWorkspace({ controller, state, selfUserID, connection, conta
                 const pictureURL = message.contentType === MessageType.PictureMessage ? imageURL(message) : null;
                 const fileURL = message.contentType === MessageType.FileMessage ? safeMediaURL(message.fileElem?.sourceUrl) : null;
                 return (
-                  <article key={message.clientMsgID} className={`message-row ${outgoing ? "outgoing" : "incoming"}`} data-message-id={message.clientMsgID}>
+                  <article key={message.clientMsgID} className={`message-row ${outgoing ? "outgoing" : "incoming"}`} data-message-id={message.clientMsgID} data-message-seq={message.seq}>
+                    {message.contentType !== MessageType.RevokeMessage && (
+                      <div className="message-actions">
+                        <button type="button" className="message-action-trigger" aria-label={`消息操作 ${message.clientMsgID}`} title="消息操作" disabled={Boolean(state.messageAction)} onClick={() => setMessageMenuID((value) => value === message.clientMsgID ? null : message.clientMsgID)}>
+                          <MoreHorizontal size={16} />
+                        </button>
+                        {messageMenuID === message.clientMsgID && (
+                          <div className="message-action-menu" role="menu" aria-label={`消息 ${message.clientMsgID} 操作`}>
+                            {canQuoteMessage(message) && <button role="menuitem" onClick={() => openReply(message)}><Reply size={15} />回复</button>}
+                            {canForwardMessage(message) && <button role="menuitem" onClick={() => openForward(message)}><Forward size={15} />转发</button>}
+                            {canRequestRevoke(message) && <button role="menuitem" className="danger-menu-item" onClick={() => { setRevokeSource(message); setMessageMenuID(null); }}><Undo2 size={15} />撤回</button>}
+                          </div>
+                        )}
+                      </div>
+                    )}
                     <div>
                       {!outgoing && active.conversationType === SessionType.Group && <div className="message-sender">{message.senderNickname || message.sendID}</div>}
+                      {message.contentType === MessageType.RevokeMessage && <div className="revoked-message">{revokedText(message, selfUserID)}</div>}
                       {message.contentType === MessageType.PictureMessage && (
                         <div className="media-message image-message" data-testid={`image-message-${message.clientMsgID}`}>
                           {pictureURL ? (
@@ -348,13 +435,19 @@ export function ChatWorkspace({ controller, state, selfUserID, connection, conta
                         </div>
                       )}
                       {message.contentType === MessageType.TextMessage && <div className="message-bubble">{message.textElem?.content}</div>}
+                      {message.contentType === MessageType.QuoteMessage && (
+                        <div className="message-bubble quote-message" data-testid={`quote-message-${message.clientMsgID}`}>
+                          <div className="quoted-source"><strong>{message.quoteElem?.quoteMessage.senderNickname || message.quoteElem?.quoteMessage.sendID || "消息"}</strong><span>{messageSummary(message.quoteElem?.quoteMessage || message)}</span></div>
+                          <span>{message.quoteElem?.text}</span>
+                        </div>
+                      )}
                       {progress !== undefined && message.status === MessageStatus.Sending && (
                         <div className="upload-progress" role="progressbar" aria-label={`上传进度 ${progress}%`} aria-valuemin={0} aria-valuemax={100} aria-valuenow={progress}>
                           <span style={{ width: `${progress}%` }} />
                         </div>
                       )}
                     </div>
-                    <div className="message-meta"><time>{messageTime(message)}</time>{outgoing && <span className={message.status === MessageStatus.Failed ? "failed" : ""}>{sendState(message)}</span>}</div>
+                    <div className="message-meta"><time>{messageTime(message)}</time>{outgoing && message.contentType !== MessageType.RevokeMessage && <span className={message.status === MessageStatus.Failed ? "failed" : message.isRead ? "read" : ""}>{message.isRead && message.sessionType === SessionType.Single ? <CheckCheck size={13} /> : null}{sendState(message)}</span>}</div>
                   </article>
                 );
               })}
@@ -362,6 +455,13 @@ export function ChatWorkspace({ controller, state, selfUserID, connection, conta
               <div ref={messageEnd} />
             </div>
             <footer className="composer">
+              {replyTo && (
+                <div className="reply-context" aria-label="引用回复">
+                  <Reply size={16} />
+                  <span><strong>{replyTo.senderNickname || replyTo.sendID}</strong><small>{messageSummary(replyTo)}</small></span>
+                  <button type="button" className="icon-button" aria-label="取消引用回复" title="取消回复" disabled={Boolean(state.messageAction)} onClick={() => setReplyTo(null)}><X size={16} /></button>
+                </div>
+              )}
               <div className="composer-main">
                 <div className="composer-tools" aria-label="消息附件">
                   <button type="button" className="composer-tool" title="发送图片" aria-label="发送图片" disabled={working || connection.state !== "connected"} onClick={() => imageInput.current?.click()}><ImagePlus size={19} /></button>
@@ -504,6 +604,46 @@ export function ChatWorkspace({ controller, state, selfUserID, connection, conta
               <button className="danger-button" disabled={Boolean(state.groupAction)} onClick={() => void confirmGroupAction()}>
                 {state.groupAction ? <LoaderCircle className="spin" size={17} /> : null}确认
               </button>
+            </footer>
+          </section>
+        </div>
+      )}
+
+      {forwardSource && (
+        <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !state.messageAction) { setForwardSource(null); setForwardTargetID(""); } }}>
+          <section className="message-forward-dialog" role="dialog" aria-modal="true" aria-label="转发消息">
+            <header>
+              <div><span className="dialog-icon"><Forward size={19} /></span><h2>转发消息</h2></div>
+              <button className="icon-button" aria-label="关闭转发消息" title="关闭" disabled={Boolean(state.messageAction)} onClick={() => { setForwardSource(null); setForwardTargetID(""); }}><X size={18} /></button>
+            </header>
+            <div className="forward-source"><span>消息内容</span><strong>{messageSummary(forwardSource)}</strong></div>
+            <div className="forward-target-list" role="radiogroup" aria-label="选择转发目标">
+              {state.conversations.map((conversation) => (
+                <button key={conversation.conversationID} type="button" role="radio" aria-checked={forwardTargetID === conversation.conversationID} className={forwardTargetID === conversation.conversationID ? "selected" : ""} data-testid={`forward-target-${conversation.conversationID}`} disabled={Boolean(state.messageAction)} onClick={() => setForwardTargetID(conversation.conversationID)}>
+                  <span className="avatar">{(conversation.showName || conversationSource(conversation)).slice(0, 1).toUpperCase()}</span>
+                  <span><strong>{conversation.showName || conversationSource(conversation)}</strong><small>{conversation.conversationType === SessionType.Group ? "群聊" : conversation.userID}</small></span>
+                  {forwardTargetID === conversation.conversationID && <CheckCheck size={17} />}
+                </button>
+              ))}
+            </div>
+            {state.error && <div className="inline-error" role="alert"><span>{state.error}</span><button type="button" onClick={() => controller.clearError()}>关闭</button></div>}
+            <footer>
+              <button className="secondary-button" disabled={Boolean(state.messageAction)} onClick={() => { setForwardSource(null); setForwardTargetID(""); }}>取消</button>
+              <button className="primary-button" disabled={Boolean(state.messageAction) || !forwardTargetID} onClick={() => void forwardMessage()}>{state.messageAction?.kind === "forward" ? <LoaderCircle className="spin" size={17} /> : <Forward size={17} />}转发</button>
+            </footer>
+          </section>
+        </div>
+      )}
+
+      {revokeSource && (
+        <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !state.messageAction) setRevokeSource(null); }}>
+          <section className="group-confirm-dialog" role="alertdialog" aria-modal="true" aria-label="确认撤回消息">
+            <span className="danger-dialog-icon"><Undo2 size={20} /></span>
+            <div><h2>撤回消息</h2><p>确认撤回“{messageSummary(revokeSource)}”？是否允许及时间窗口由 OpenIM 校验。</p></div>
+            {state.error && <div className="inline-error" role="alert"><span>{state.error}</span><button type="button" onClick={() => controller.clearError()}>关闭</button></div>}
+            <footer>
+              <button className="secondary-button" disabled={Boolean(state.messageAction)} onClick={() => setRevokeSource(null)}>取消</button>
+              <button className="danger-button" disabled={Boolean(state.messageAction)} onClick={() => void confirmRevoke()}>{state.messageAction?.kind === "revoke" ? <LoaderCircle className="spin" size={17} /> : null}确认撤回</button>
             </footer>
           </section>
         </div>

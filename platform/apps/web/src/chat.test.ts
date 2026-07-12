@@ -1,7 +1,7 @@
-import { GroupMemberRole, MessageReceiveOptType, MessageStatus, MessageType, SessionType, type ConversationItem, type GroupMemberItem, type MessageItem } from "@openim/wasm-client-sdk";
+import { GroupMemberRole, MessageReceiveOptType, MessageStatus, MessageType, SessionType, type ConversationItem, type GroupMemberItem, type MessageItem, type RevokedInfo } from "@openim/wasm-client-sdk";
 import { describe, expect, it } from "vitest";
 
-import { MAX_FILE_BYTES, MAX_IMAGE_BYTES, ConversationController, canInviteGroupMembers, canRemoveGroupMember, type ChatEvents, type ChatPort } from "./chat";
+import { MAX_FILE_BYTES, MAX_IMAGE_BYTES, ConversationController, canForwardMessage, canInviteGroupMembers, canQuoteMessage, canRemoveGroupMember, canRequestRevoke, type ChatEvents, type ChatPort } from "./chat";
 
 function conversation(id: string, userID: string, unreadCount = 0, type = SessionType.Single): ConversationItem {
   return {
@@ -100,6 +100,10 @@ class FakePort implements ChatPort {
   leftGroups: string[] = [];
   dismissedGroups: string[] = [];
   groupActionError: Error | null = null;
+  quoteCreates: Array<{ text: string; sourceID: string }> = [];
+  forwardCreates: string[] = [];
+  revokedMessages: Array<{ conversationID: string; clientMsgID: string }> = [];
+  messageActionError: Error | null = null;
 
   listConversations = async () => this.conversations;
   setConversation = async (conversationID: string, patch: { isPinned?: boolean; recvMsgOpt?: MessageReceiveOptType }) => {
@@ -118,6 +122,21 @@ class FakePort implements ChatPort {
     return { isEnd: this.historyEnd, messageList: this.historyMessages };
   };
   createText = async (text: string) => message("m100", "self", "peer", text, MessageStatus.Sending);
+  createQuote = async (text: string, source: MessageItem) => {
+    this.quoteCreates.push({ text, sourceID: source.clientMsgID });
+    if (this.messageActionError) throw this.messageActionError;
+    return {
+      ...message("quote-100", "self", "peer", text, MessageStatus.Sending),
+      contentType: MessageType.QuoteMessage,
+      textElem: undefined,
+      quoteElem: { text, quoteMessage: source }
+    } as MessageItem;
+  };
+  createForward = async (source: MessageItem) => {
+    this.forwardCreates.push(source.clientMsgID);
+    if (this.messageActionError) throw this.messageActionError;
+    return { ...source, clientMsgID: `forward-${source.clientMsgID}`, serverMsgID: "", status: MessageStatus.Sending };
+  };
   createImage = async (_file: File) => {
     this.imageCreates += 1;
     return mediaMessage("image-100", MessageType.PictureMessage);
@@ -153,6 +172,10 @@ class FakePort implements ChatPort {
   dismissGroup = async (groupID: string) => {
     this.dismissedGroups.push(groupID);
     if (this.groupActionError) throw this.groupActionError;
+  };
+  revokeMessage = async (conversationID: string, clientMsgID: string) => {
+    this.revokedMessages.push({ conversationID, clientMsgID });
+    if (this.messageActionError) throw this.messageActionError;
   };
   markRead = async (conversationID: string) => { this.markedRead.push(conversationID); };
   subscribe = (events: ChatEvents) => {
@@ -590,6 +613,138 @@ describe("ConversationController", () => {
 
     expect(controller.getState().messages[0].status).toBe(MessageStatus.Failed);
     expect(controller.getState().error).toContain("发送失败");
+  });
+
+  it("uses official quote and forward drafts with an explicit target conversation", async () => {
+    const port = new FakePort();
+    port.conversations = [conversation("single", "peer"), conversation("target", "other")];
+    port.historyMessages = [message("m1", "peer", "self", "source")];
+    const controller = new ConversationController(port);
+    await controller.start("self");
+    await controller.select("single");
+
+    await controller.sendQuote("official reply", "m1");
+    expect(port.quoteCreates).toEqual([{ text: "official reply", sourceID: "m1" }]);
+    expect(controller.getState().messages.at(-1)).toMatchObject({
+      contentType: MessageType.QuoteMessage,
+      quoteElem: { text: "official reply", quoteMessage: { clientMsgID: "m1" } },
+      status: MessageStatus.Succeed
+    });
+
+    const beforeForward = controller.getState().messages.map((item) => item.clientMsgID);
+    await controller.forwardMessage("m1", "target");
+    expect(port.forwardCreates).toEqual(["m1"]);
+    expect(port.sentConversations.at(-1)?.conversationID).toBe("target");
+    expect(controller.getState().messages.map((item) => item.clientMsgID)).toEqual(beforeForward);
+  });
+
+  it("rejects unsupported, stale, and concurrent message actions without fake success", async () => {
+    const port = new FakePort();
+    port.conversations = [conversation("single", "peer"), conversation("target", "other")];
+    port.historyMessages = [message("m1", "self", "peer", "source")];
+    let release!: () => void;
+    port.revokeMessage = async (conversationID, clientMsgID) => {
+      port.revokedMessages.push({ conversationID, clientMsgID });
+      await new Promise<void>((resolve) => { release = resolve; });
+    };
+    const controller = new ConversationController(port);
+    await controller.start("self");
+    await controller.select("single");
+
+    await expect(controller.forwardMessage("m1", "missing")).rejects.toThrow("有效的转发目标");
+    const revoking = controller.revokeMessage("m1");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await expect(controller.forwardMessage("m1", "target")).rejects.toThrow("消息操作正在执行");
+    release();
+    await revoking;
+    await expect(controller.sendQuote("reply", "missing")).rejects.toThrow("不能被引用");
+    expect(port.revokedMessages).toEqual([{ conversationID: "single", clientMsgID: "m1" }]);
+  });
+
+  it("keeps the source message when OpenIM rejects revoke", async () => {
+    const port = new FakePort();
+    port.conversations = [conversation("single", "peer")];
+    port.historyMessages = [message("m1", "peer", "self", "not mine")];
+    port.messageActionError = new Error("only send by yourself message can be revoked");
+    const controller = new ConversationController(port);
+    await controller.start("self");
+    await controller.select("single");
+
+    await expect(controller.revokeMessage("m1")).rejects.toThrow("only send by yourself");
+
+    expect(controller.getState().messages[0]).toMatchObject({ clientMsgID: "m1", contentType: MessageType.TextMessage });
+    expect(controller.getState().error).toContain("only send by yourself");
+  });
+
+  it("projects revoke only after the official SDK write succeeds", async () => {
+    const port = new FakePort();
+    port.conversations = [conversation("single", "peer")];
+    port.historyMessages = [message("m1", "self", "peer", "mine")];
+    const controller = new ConversationController(port);
+    await controller.start("self");
+    await controller.select("single");
+
+    await controller.revokeMessage("m1");
+
+    expect(port.revokedMessages).toEqual([{ conversationID: "single", clientMsgID: "m1" }]);
+    expect(controller.getState().messages[0]).toMatchObject({ clientMsgID: "m1", contentType: MessageType.RevokeMessage });
+  });
+
+  it("applies revoke and C2C receipt callbacks idempotently and within the active single-chat scope", async () => {
+    const port = new FakePort();
+    port.conversations = [conversation("single", "peer")];
+    const source = message("m1", "self", "peer", "source");
+    const outgoing = { ...message("m2", "self", "peer", "read me"), isRead: false };
+    const quote = {
+      ...message("m3", "peer", "self", "quoted"),
+      contentType: MessageType.QuoteMessage,
+      textElem: undefined,
+      quoteElem: { text: "quoted", quoteMessage: source }
+    } as MessageItem;
+    port.historyMessages = [source, outgoing, quote];
+    const controller = new ConversationController(port);
+    await controller.start("self");
+    await controller.select("single");
+    const revoked = {
+      clientMsgID: "m1",
+      revokerID: "self",
+      revokerNickname: "Self",
+      revokerRole: 0,
+      revokeTime: 10,
+      sourceMessageSendTime: 1,
+      sourceMessageSendID: "self",
+      sourceMessageSenderNickname: "Self",
+      sessionType: SessionType.Single,
+      seq: 1,
+      ex: ""
+    } as RevokedInfo;
+
+    port.handlers?.messageRevoked(revoked);
+    port.handlers?.messageRevoked(revoked);
+    expect(controller.getState().messages).toHaveLength(3);
+    expect(controller.getState().messages.find((item) => item.clientMsgID === "m1")?.contentType).toBe(MessageType.RevokeMessage);
+    expect(controller.getState().messages.find((item) => item.clientMsgID === "m3")?.quoteElem?.quoteMessage.contentType).toBe(MessageType.RevokeMessage);
+
+    port.handlers?.c2cReadReceipts([
+      { userID: "other", groupID: "", msgIDList: ["m2"], readTime: 20, sessionType: SessionType.Single, msgFrom: 0, contentType: MessageType.TextMessage },
+      { userID: "peer", groupID: "", msgIDList: ["m2", "unknown"], readTime: 30, sessionType: SessionType.Single, msgFrom: 0, contentType: MessageType.TextMessage }
+    ]);
+    port.handlers?.c2cReadReceipts([
+      { userID: "peer", groupID: "", msgIDList: ["m2"], readTime: 40, sessionType: SessionType.Single, msgFrom: 0, contentType: MessageType.TextMessage }
+    ]);
+    expect(controller.getState().messages.find((item) => item.clientMsgID === "m2")?.isRead).toBe(true);
+  });
+
+  it("exposes message action policy only for succeeded supported message types", () => {
+    const text = message("m1", "self", "peer");
+    const failed = { ...text, status: MessageStatus.Failed };
+    const revoked = { ...text, contentType: MessageType.RevokeMessage };
+    expect(canQuoteMessage(text)).toBe(true);
+    expect(canForwardMessage(text)).toBe(true);
+    expect(canRequestRevoke(text)).toBe(true);
+    expect(canQuoteMessage(failed)).toBe(false);
+    expect(canForwardMessage(revoked)).toBe(false);
+    expect(canRequestRevoke(revoked)).toBe(false);
   });
 
   it("deduplicates real-time text and marks the active conversation read", async () => {
