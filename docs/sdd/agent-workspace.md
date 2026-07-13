@@ -96,6 +96,7 @@ The projection exposes durable Run, Intent, Execution, and ticket identifiers fo
 - Real node2 action Run `1940b88c-2d75-42ee-9acc-0d67dd7a03cd`, Intent `c0dcba7c-5720-4779-89db-e31a0c87fdfd`, and Execution `bac0faa0-014b-4ce0-a0a6-8dc5d75ad789` converged to succeeded with exactly one ticket `dccc657d-62db-479e-bafc-4600abf26e74`.
 - The serial real Playwright suite passed both Agent and single-chat scenarios in 23.3 seconds. It verified cited answer, pre-approval UI, browser approval, ticket receipt, refresh restoration, no localStorage state, no failed HTTP responses/console errors, and desktop/mobile horizontal-overflow checks.
 - Desktop `1280x720` and mobile `390x844` Agent screenshots passed visual inspection with readable citations, stable composer dimensions, and no incoherent overlap.
+- Agent Catalog release `9a6ffee` changed prompt composition from a hard-coded marker to the authenticated `@agent` trigger, displayed exact `Enterprise Agent · v1` Run provenance, and passed the real Agent E2E plus the complete seven-scenario Node2 suite in 106.5 seconds.
 
 ## Open questions
 

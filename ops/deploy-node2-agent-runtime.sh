@@ -170,11 +170,34 @@ systemctl enable openim-action-executor.service
 systemctl restart openim-action-executor.service
 systemctl is-active openim-action-executor.service
 
+assert_running_binary() {
+  local service="$1"
+  local expected="$2"
+  local pid actual
+  expected="$(readlink -f "$expected")"
+  actual=""
+  for _ in $(seq 1 30); do
+    pid="$(systemctl show -p MainPID --value "$service")"
+    if [[ "$pid" =~ ^[1-9][0-9]*$ ]]; then
+      actual="$(readlink -f "/proc/$pid/exe" 2>/dev/null || true)"
+      [[ "$actual" == "$expected" ]] && return 0
+    fi
+    sleep 1
+  done
+  echo "$service executable mismatch: expected $expected, running ${actual:-unavailable}" >&2
+  exit 1
+}
+
+assert_running_binary openim-action-executor.service "$bin_dir/action-executor"
+
 if [[ -f "$credential_file" ]]; then
   systemctl enable openim-intelligence-worker.service openim-agent-runtime.service
   systemctl restart openim-intelligence-worker.service openim-agent-runtime.service
+  systemctl is-active openim-intelligence-worker.service openim-agent-runtime.service
+  assert_running_binary openim-agent-runtime.service "$bin_dir/agent-runtime"
   echo "deepseek_credential=present"
 else
   echo "deepseek_credential=required"
 fi
+echo "agent_runtime_binaries=verified"
 echo "node2_agent_runtime=installed"

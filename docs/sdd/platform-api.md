@@ -87,7 +87,7 @@ The service emits structured process lifecycle logs and request logs with correl
 - `go build -o platform-api.exe ./cmd/platform-api`: passed on Windows.
 - Process smoke test: a configured binary returned `{"status":"ready","service":"platform-api","version":"dev-smoke"}` from `/healthz` and was then stopped.
 - The real approval route authenticated a local Keycloak ID Token, resolved the seeded active device, and queued one digest-bound execution; duplicate approval returned the same execution.
-- Migrations `0001` through `0007` applied successfully to a newly created empty PostgreSQL database; verification found 7 migration records, 20 owned tables, and all three sampled tenant/state constraints before the temporary database was dropped.
+- Migrations `0001` through `0008` applied successfully; Node2 Catalog migration backfilled every historical Run with non-null version provenance, and the authenticated `GET /v1/agents` returned the active tenant v1 projection.
 - `go test -race ./...`: not executed because the current Windows Go environment has `CGO_ENABLED=0`; this is a recorded validation gap, not a passing check.
 
 ## Open questions

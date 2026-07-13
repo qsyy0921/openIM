@@ -45,3 +45,5 @@ Activation affects only Runs inserted after its transaction commits. Existing qu
 `ops/accept-node2-agent-catalog.sh` publishes the controlled v2 acceptance version if absent, activates it, sends and completes one real OpenIM/ACL-RAG/DeepSeek Run, rolls production back to v1, and completes a second real Run. It verifies the old Run still reports v2 and leaves v2 as inactive immutable release history. A failure after v2 activation triggers a best-effort automatic rollback to v1.
 
 Before a production operation, retain a PostgreSQL backup and verify the exact release `SHA256SUMS`. Do not expose `PLATFORM_DATABASE_URL` to the browser or place it in shell history.
+
+After deployment, verify the running executable through `/proc/<MainPID>/exe`; health metadata alone is insufficient because a systemd drop-in can override `ExecStart` while the environment reports the new release version. The Node2 deployment scripts fail when the live Platform API, Ingress, Agent Runtime, or Action Executor binary does not resolve to the requested release directory.

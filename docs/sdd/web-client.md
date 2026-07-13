@@ -121,6 +121,7 @@ The UI exposes coarse connection phase and endpoint readiness. Platform and Open
 - The verified conversation-management extension adds projection-only search, real OpenIM pinning, and real `NotNotify` do-not-disturb with per-conversation concurrency protection. The final Agent plus conversation-management plus IM/contact/media suite passed serially in 48.4 seconds.
 - The verified message-search extension repairs the pinned SDK Worker/WASM keyword-search ABI at install time, queries only the official synchronized local database, and navigates through official forward/reverse history APIs because the locked runtime does not register its declared `fetchSurroundingMessages` global. The complete six-scenario Node2 suite passed serially in 91.7 seconds.
 - The verified device extension adds a member-scoped Platform API projection, exact current-device authorization, server-side OpenIM Admin calls, other-platform confirmation, request-order and duplicate-action protection, and distinct kicked/expired terminal states. A real Web plus Windows-platform run observed `OnKickedOffline`, then the full seven-scenario Node2 suite passed serially in 107.3 seconds.
+- The verified Agent Catalog extension removes the hard-coded trigger, requires one authenticated active Agent with matching Bot identity, and displays immutable Run version provenance. Web tests passed 75 cases, and the full seven-scenario Node2 suite passed serially in 106.5 seconds with desktop/mobile Agent screenshot inspection.
 
 ## Open questions
 

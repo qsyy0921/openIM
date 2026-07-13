@@ -137,3 +137,25 @@ assert payload.get("version") == sys.argv[2], payload
 print("platform_api=ready")
 PY
 systemctl is-active openim-platform-api.service openim-platform-ingress.service
+
+assert_running_binary() {
+  local service="$1"
+  local expected="$2"
+  local pid actual
+  expected="$(readlink -f "$expected")"
+  actual=""
+  for _ in $(seq 1 30); do
+    pid="$(systemctl show -p MainPID --value "$service")"
+    if [[ "$pid" =~ ^[1-9][0-9]*$ ]]; then
+      actual="$(readlink -f "/proc/$pid/exe" 2>/dev/null || true)"
+      [[ "$actual" == "$expected" ]] && return 0
+    fi
+    sleep 1
+  done
+  echo "$service executable mismatch: expected $expected, running ${actual:-unavailable}" >&2
+  exit 1
+}
+
+assert_running_binary openim-platform-api.service "$bin_dir/platform-api"
+assert_running_binary openim-platform-ingress.service "$bin_dir/platform-ingress"
+echo "platform_runtime_binaries=verified"

@@ -81,6 +81,7 @@ Record request outcome, provider latency, model name, provider response ID, and 
 - Real OpenIM Run `7a68255b-395e-4cb2-a0aa-6f993f317442` completed Kafka ingress, ACL-RAG, DeepSeek generation, citation persistence, and OpenIM reply `72e0612b54bf873a854d01430e5310d4`.
 - Real explicit-prefix action Run `99216135-a79a-406f-b0c2-ca51b8baa55b` produced a digest-bound Intent, stayed at zero tickets before approval, then completed one verified ticket through the separate Executor.
 - Node2 release `d663256` loaded the DeepSeek credential through systemd `LoadCredential` and completed a real `deepseek-v4-pro` request with a validated `C1` citation. The credential remained absent from tracked files, unit command lines, and environment files.
+- Node2 release `9a6ffee` force-reinstalled the same-version wheel, verified the new Agent/version/checksum/instructions/model-route/action-policy request contract in the installed environment, and completed real v2 then rollback-v1 DeepSeek Runs without alternate-provider behavior.
 
 ## Open questions
 

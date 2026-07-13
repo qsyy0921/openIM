@@ -1,6 +1,6 @@
 ---
 unit: agent-catalog
-status: implemented
+status: verified
 depends_on:
   - agent-runtime
   - identity-session
@@ -253,7 +253,11 @@ Each slice updates this SDD and stops after its acceptance criteria. Administrat
 - Go package tests passed with the real PostgreSQL integration URL; the complete Go suite also passed without the integration environment.
 - Intelligence Worker tests passed 9 cases, including unconfigured model-route and disallowed-action failure without a provider call.
 - Web tests passed 75 cases; typecheck and production build passed with Catalog-derived trigger text, strict response validation, bot-identity matching, and visible Run version provenance.
-- Node2 deployment, real version switch/rollback, and browser/OpenIM regression remain the only evidence required before changing this SDD from `implemented` to `verified`.
+- Clean release `9a6ffee` was verified by `SHA256SUMS`, deployed on Node2, and checked against the live `/proc/<MainPID>/exe` paths. An obsolete `90-device-e2e.conf` systemd override that had kept the old Platform API binary while reporting the new environment version was removed; deployment scripts now fail on any live executable mismatch.
+- Host-only publication created immutable v2 checksum `sha256:63f9ec43df6dc1b6a8478b79df697737aaaaa919750f6f20f6feb0adff8bea5e`. Real Run `5b2af0bc-0dd5-413a-8818-83529102b02b` pinned v2 and completed ACL-RAG, DeepSeek, citation persistence, and OpenIM reply. After revision-fenced rollback, Run `e888682e-a44b-425f-88ef-b86c1e1909c8` pinned v1, while the earlier Run remained v2 and production returned to v1.
+- Node2 ACL regression produced authorized cited Run `b3c3fef2-6eec-4190-915c-371b54613fd9`, revoked no-evidence Run `cf841794-4884-4a99-b2c3-13bf8170a6d7`, and no-match abstention Run `300d63e2-016a-4649-acee-55691e4bc180`.
+- Approved-action regression kept zero effects before approval, rejected a wrong digest, and converged duplicate approval on Execution `5b600ed2-5e28-4c76-99bf-1563a5c5bac2` with one idempotent ticket effect.
+- The Agent workspace E2E displayed `Enterprise Agent · v1`, citation and ticket state on desktop/mobile with no overflow, failed HTTP response, console error, Token persistence, or malformed Catalog acceptance. The complete seven-scenario Node2 browser suite passed serially in 106.5 seconds.
 
 ## Open questions deferred from v1
 
