@@ -44,15 +44,23 @@ func NewCandidateClient(baseURL string, timeout time.Duration) *CandidateClient 
 	return &CandidateClient{baseURL: baseURL, http: &http.Client{Timeout: timeout}}
 }
 
-func (c *CandidateClient) Generate(ctx context.Context, run Run, evidence []Evidence) (Candidate, error) {
+func (c *CandidateClient) Generate(ctx context.Context, run Run, version CatalogVersion, evidence []Evidence) (Candidate, error) {
 	body, err := json.Marshal(struct {
-		RunID          string     `json:"run_id"`
-		TenantID       string     `json:"tenant_id"`
-		ConversationID string     `json:"conversation_id"`
-		SenderID       string     `json:"sender_id"`
-		Content        string     `json:"content"`
-		Evidence       []Evidence `json:"evidence"`
-	}{run.ID, run.TenantID, run.ConversationID, run.SenderID, run.Prompt, evidence})
+		RunID             string     `json:"run_id"`
+		TenantID          string     `json:"tenant_id"`
+		ConversationID    string     `json:"conversation_id"`
+		SenderID          string     `json:"sender_id"`
+		AgentID           string     `json:"agent_id"`
+		AgentVersionID    string     `json:"agent_version_id"`
+		AgentSpecChecksum string     `json:"agent_spec_checksum"`
+		Instructions      string     `json:"instructions"`
+		ModelRoute        string     `json:"model_route"`
+		AllowedActions    []string   `json:"allowed_action_types"`
+		Content           string     `json:"content"`
+		Evidence          []Evidence `json:"evidence"`
+	}{run.ID, run.TenantID, run.ConversationID, run.SenderID, run.AgentID, run.AgentVersionID,
+		run.AgentSpecChecksum, version.Spec.Instructions, version.Spec.ModelRoute,
+		version.Spec.AllowedActionTypes, run.Prompt, evidence})
 	if err != nil {
 		return Candidate{}, err
 	}

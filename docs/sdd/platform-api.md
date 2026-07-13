@@ -15,7 +15,7 @@ Own the first public HTTP boundary and host the initial modular Go implementatio
 
 ## Responsibilities and non-goals
 
-The unit owns HTTP routing, request identity propagation, typed errors, service health, module composition, and authenticated intent approval. It does not own OpenIM message delivery, model inference, write execution, or a generic plugin framework.
+The unit owns HTTP routing, request identity propagation, typed errors, service health, module composition, authenticated intent approval, and the read-only tenant Agent Catalog projection. It does not own OpenIM message delivery, model inference, write execution, Catalog mutation, or a generic plugin framework.
 
 ## Contracts and dependencies
 
@@ -23,6 +23,7 @@ The unit owns HTTP routing, request identity propagation, typed errors, service 
 - ADR-0001 through ADR-0003
 - PostgreSQL for authoritative platform state once stateful modules are enabled
 - OpenIM only through the `openim-adapter` module
+- Authenticated `GET /v1/agents` returning only active tenant definitions and their current production version
 
 ## Invariants
 
@@ -31,6 +32,7 @@ The unit owns HTTP routing, request identity propagation, typed errors, service 
 - Missing required configuration prevents startup.
 - Internal modules do not access another module's tables directly.
 - Intent approval resolves the active member/device from the bearer identity and binds the exact payload digest; request bodies cannot choose an approver or tenant.
+- Catalog reads resolve tenant/member/device from the bearer identity and expose no mutation endpoint.
 
 ## Runtime flow
 
@@ -74,6 +76,8 @@ The service emits structured process lifecycle logs and request logs with correl
 - `platform/services/platform-api/internal/httpserver/handler_test.go`
 - `contracts/openapi/platform-v1.yaml`
 - `platform/services/platform-api/internal/action/service.go`
+- `platform/services/platform-api/internal/agent/catalog_service.go`
+- `platform/services/platform-api/internal/agent/catalog_store.go`
 - `docs/architecture/openim-intelligent-collaboration-platform-architecture.md`
 
 ## Verification evidence
@@ -83,7 +87,7 @@ The service emits structured process lifecycle logs and request logs with correl
 - `go build -o platform-api.exe ./cmd/platform-api`: passed on Windows.
 - Process smoke test: a configured binary returned `{"status":"ready","service":"platform-api","version":"dev-smoke"}` from `/healthz` and was then stopped.
 - The real approval route authenticated a local Keycloak ID Token, resolved the seeded active device, and queued one digest-bound execution; duplicate approval returned the same execution.
-- Migrations `0001` through `0007` applied successfully to a newly created empty PostgreSQL database; verification found 7 migration records, 20 owned tables, and all three sampled tenant/state constraints before the temporary database was dropped.
+- Migrations `0001` through `0008` applied successfully; Node2 Catalog migration backfilled every historical Run with non-null version provenance, and the authenticated `GET /v1/agents` returned the active tenant v1 projection.
 - `go test -race ./...`: not executed because the current Windows Go environment has `CGO_ENABLED=0`; this is a recorded validation gap, not a passing check.
 
 ## Open questions

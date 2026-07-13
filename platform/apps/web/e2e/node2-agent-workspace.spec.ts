@@ -33,6 +33,7 @@ test("real node2 Agent workspace completes cited answer and approved idempotent 
   await page.getByRole("button", { name: "发送给 Agent" }).click();
   const citedRun = page.locator("article.agent-run", { hasText: question });
   await expect(citedRun).toContainText("已完成", { timeout: 120_000 });
+  await expect(citedRun).toContainText("Enterprise Agent · v1");
   await expect(citedRun.getByRole("region", { name: "引用来源" })).toBeVisible();
   await expect(citedRun.getByText("[C1]", { exact: true })).toBeVisible();
 

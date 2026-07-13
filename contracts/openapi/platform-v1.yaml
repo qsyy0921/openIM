@@ -173,6 +173,40 @@ paths:
         "401": { "$ref": "#/components/responses/ErrorResponse" }
         "403": { "$ref": "#/components/responses/ErrorResponse" }
         "502": { "$ref": "#/components/responses/ErrorResponse" }
+  /v1/agents:
+    get:
+      operationId: listAgents
+      security:
+        - oidcBearer: []
+      parameters:
+        - in: query
+          name: platform_id
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 11
+            not: { const: 10 }
+        - in: query
+          name: device_id
+          required: true
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 128
+      responses:
+        "200":
+          description: Active tenant Agent definitions and their pinned production release metadata.
+          content:
+            application/json:
+              schema:
+                type: array
+                maxItems: 50
+                items: { "$ref": "#/components/schemas/AgentSummary" }
+        "400": { "$ref": "#/components/responses/ErrorResponse" }
+        "401": { "$ref": "#/components/responses/ErrorResponse" }
+        "403": { "$ref": "#/components/responses/ErrorResponse" }
+        "502": { "$ref": "#/components/responses/ErrorResponse" }
 components:
   securitySchemes:
     oidcBearer:
@@ -325,12 +359,30 @@ components:
           type: array
           maxItems: 30
           items: { "$ref": "#/components/schemas/AgentRun" }
+    AgentSummary:
+      type: object
+      additionalProperties: false
+      required: [agent_id, slug, display_name, description, trigger_alias, production_version_number, production_version_id, spec_checksum, bot_user_id]
+      properties:
+        agent_id: { type: string, minLength: 1 }
+        slug: { type: string, pattern: "^[a-z][a-z0-9-]{0,62}$" }
+        display_name: { type: string, minLength: 1, maxLength: 120 }
+        description: { type: string, maxLength: 500 }
+        trigger_alias: { type: string, pattern: "^@[a-z][a-z0-9_-]{0,62}$" }
+        production_version_number: { type: integer, minimum: 1 }
+        production_version_id: { type: string, minLength: 1 }
+        spec_checksum: { type: string, pattern: "^sha256:[0-9a-f]{64}$" }
+        bot_user_id: { type: string, minLength: 1 }
     AgentRun:
       type: object
       additionalProperties: false
-      required: [run_id, conversation_id, prompt, state, created_at, updated_at, citations]
+      required: [run_id, agent_id, agent_display_name, agent_version_number, agent_spec_checksum, conversation_id, prompt, state, created_at, updated_at, citations]
       properties:
         run_id: { type: string, minLength: 1 }
+        agent_id: { type: string, minLength: 1 }
+        agent_display_name: { type: string, minLength: 1, maxLength: 120 }
+        agent_version_number: { type: integer, minimum: 1 }
+        agent_spec_checksum: { type: string, pattern: "^sha256:[0-9a-f]{64}$" }
         conversation_id: { type: string, minLength: 1 }
         prompt: { type: string }
         state: { type: string, enum: [queued, running, reply_pending, waiting_approval, succeeded, failed] }

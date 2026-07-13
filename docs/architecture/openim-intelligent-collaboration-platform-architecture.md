@@ -664,6 +664,10 @@ EvalReport       -- 任务、安全、质量、成本评测
 ReplayBundle     -- 可重放的版本和脱敏输入引用集合
 ```
 
+**PROPOSAL（Agent Catalog v1）**：先把当前隐含的单一 Agent 建模为 `AgentDefinition + AgentVersion + AgentDeployment + AgentTrigger`。Definition 是稳定业务身份；Version 是完整且不可变的执行快照；Deployment 是可回滚的 `production` 指针；Trigger 将租户内 `@agent` 映射到 Definition。Run 必须在入队事务中记录准确的 Agent、Version、Deployment、Trigger 和 spec checksum，Worker 不能在执行时重新读取“当前版本”。详细契约见 `docs/sdd/agent-catalog.md`，外部项目取舍见 `docs/research/agent-platform-reference-analysis.md`。
+
+首个 `AgentVersion` 只允许 `runtime_kind=knowledge_ticket_v1`，把已验证的 DeepSeek、ACL-RAG、引用回答、审批和 `create_ticket` 能力原样封装。它不开放任意代码、任意工具或任意外部地址；Skill/Tool Registry、MCP Gateway、Memory 和多 Agent 编排继续作为独立有限切片。
+
 Run 状态机：
 
 ```mermaid
@@ -1567,7 +1571,8 @@ docs/
 | M2 知识+工单 Agent | ACL-RAG、Run、引用回答、ActionIntent、确认、创建工单、回传卡片 | M1 | 真实端到端 demo；无越权/重复副作用；可回放 | 关闭写工具或全部 Agent trigger |
 | M3 协作核心 | Project/Task/Approval/Todo + Outbox + IM 卡片 | M2 | 并发版本、审批不变量、事件重放通过 | feature flag 按租户关闭 |
 | M4 文档知识 | 文档/文件、选定协同引擎、摄取/索引/删除 | M3 | PoC 指标达标；ACL 撤权和快照恢复通过 | 回到只读文件/非实时文档 |
-| M5 Agent 平台化 | AgentVersion、Skill/Tool registry、Memory、Eval、成本治理 | M2-M4 数据 | 发布门禁、红队集、预算和事故开关可用 | 固定到上一 AgentVersion |
+| M2.1 Agent Catalog 基础 | AgentDefinition、不可变 AgentVersion、production Deployment、Trigger、Run 版本绑定 | M2 闭环已验证 | 双版本切换/回滚不改变历史 Run；无默认回退 | production 指针回到上一版本 |
+| M5 Agent 平台化 | Skill/Tool registry、Memory、Eval、成本治理、多 Agent 编排 | M2.1 与 M2-M4 数据 | 发布门禁、红队集、预算和事故开关可用 | 固定到上一 AgentVersion |
 | M6 生产化 | 多 AZ、备份恢复、SLO、容量、灰度、runbook | 各域功能完成 | 30 天 canary、恢复和故障演练通过 | tenant cohort 回退/流量切换 |
 
 ### 16.3 有限垂直切片验收

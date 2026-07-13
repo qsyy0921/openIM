@@ -21,7 +21,7 @@ if (Test-Path $output) {
 $windows = New-Item -ItemType Directory -Force (Join-Path $output "windows-amd64")
 $linux = New-Item -ItemType Directory -Force (Join-Path $output "linux-amd64")
 $python = New-Item -ItemType Directory -Force (Join-Path $output "python")
-$commands = @("platform-api", "platform-ingress", "platform-migrate", "agent-runtime", "action-executor")
+$commands = @("platform-api", "platform-ingress", "platform-migrate", "agent-runtime", "action-executor", "agent-catalog-admin")
 
 Push-Location $api
 try {

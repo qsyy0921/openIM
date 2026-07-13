@@ -16,8 +16,8 @@ func TestClassifyAgentText(t *testing.T) {
 	if err != nil || !matched {
 		t.Fatalf("Classify() = %#v, %v, %v", trigger, matched, err)
 	}
-	if trigger.Prompt != "请  总结这段内容" {
-		t.Fatalf("prompt = %q", trigger.Prompt)
+	if len(trigger.Mentions) != 1 || trigger.Mentions[0].Alias != "@agent" || trigger.Mentions[0].Prompt != "请  总结这段内容" {
+		t.Fatalf("mentions = %#v", trigger.Mentions)
 	}
 }
 
@@ -33,14 +33,30 @@ func TestClassifyIgnoresOrdinaryText(t *testing.T) {
 	}
 }
 
-func TestClassifyRejectsEmptyPrompt(t *testing.T) {
+func TestClassifyDefersKnownAliasAndEmptyPromptToCatalog(t *testing.T) {
 	event := ingress.Event{
 		EventID: "event-1", EventType: ingress.EventType, TenantID: "tenant-1",
 		ConversationID: "si_a_b", SenderID: "a", SessionType: 1, ContentType: 101,
 		Content: `{"content":"@agent"}`,
 	}
-	if _, _, err := Classify(event); err == nil {
-		t.Fatal("empty Agent prompt was accepted")
+	trigger, matched, err := Classify(event)
+	if err != nil || !matched || len(trigger.Mentions) != 1 || trigger.Mentions[0].Prompt != "" {
+		t.Fatalf("Classify() = %#v, %v, %v", trigger, matched, err)
+	}
+}
+
+func TestClassifyExtractsExactMentionCandidatesWithoutSubstringMatch(t *testing.T) {
+	event := ingress.Event{
+		EventID: "event-1", EventType: ingress.EventType, TenantID: "tenant-1",
+		ConversationID: "si_a_b", SenderID: "a", SessionType: 1, ContentType: 101,
+		Content: `{"content":"mail@example.com @Unknown 请 @Agent 回答"}`,
+	}
+	trigger, matched, err := Classify(event)
+	if err != nil || !matched || len(trigger.Mentions) != 2 {
+		t.Fatalf("Classify() = %#v, %v, %v", trigger, matched, err)
+	}
+	if trigger.Mentions[0].Alias != "@unknown" || trigger.Mentions[1].Alias != "@agent" {
+		t.Fatalf("mentions = %#v", trigger.Mentions)
 	}
 }
 
@@ -66,11 +82,15 @@ func TestValidateCitationsRejectsUnknownEvidence(t *testing.T) {
 }
 
 func TestValidateActionCandidateAllowsOnlyBoundedTicket(t *testing.T) {
-	if err := validateActionCandidate(&ActionIntentCandidate{Type: "delete_user", Title: "x"}); err == nil {
+	spec := AgentSpec{AllowedActionTypes: []string{"create_ticket"}}
+	if err := validateActionCandidate(&ActionIntentCandidate{Type: "delete_user", Title: "x"}, spec); err == nil {
 		t.Fatal("unsupported action accepted")
 	}
 	intent := &ActionIntentCandidate{Type: "create_ticket", Title: "  incident  "}
-	if err := validateActionCandidate(intent); err != nil || intent.Title != "incident" {
+	if err := validateActionCandidate(intent, spec); err != nil || intent.Title != "incident" {
 		t.Fatalf("valid action = %#v, %v", intent, err)
+	}
+	if err := validateActionCandidate(&ActionIntentCandidate{Type: "create_ticket", Title: "x"}, AgentSpec{}); err == nil {
+		t.Fatal("action disabled by pinned Agent version was accepted")
 	}
 }

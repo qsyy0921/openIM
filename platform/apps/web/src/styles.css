@@ -400,6 +400,7 @@ h2 { margin: 0; font-size: 17px; }
 .run-state { display: inline-flex; align-items: center; gap: 5px; color: #737b87; font-size: 11px; }
 .run-state.succeeded { color: #16794f; }
 .run-state.failed, .agent-run-error { color: #b42318; }
+.agent-version { display: block; margin-top: 4px; overflow: hidden; color: #8a919c; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
 .citation-section { margin-top: 14px; padding-top: 12px; border-top: 1px solid #dce1e7; }
 .citation-section h3 { display: flex; align-items: center; gap: 6px; margin: 0 0 8px; color: #59616d; font-size: 12px; }
 .citation-row { display: grid; grid-template-columns: auto minmax(120px, 1fr) minmax(120px, 1fr); gap: 8px; align-items: center; min-height: 30px; color: #68717d; font-size: 11px; }
