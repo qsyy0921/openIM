@@ -21,7 +21,8 @@ The backend projection owns member/device-scoped reads of up to 30 recent Runs, 
 
 ## Contracts and dependencies
 
-- Official `@openim/wasm-client-sdk` text send to the deterministic tenant Bot using `<prompt> @Agent`.
+- Authenticated `GET /v1/agents` for the single active v1 Agent, trigger alias, production version, checksum, and deterministic tenant Bot.
+- Official `@openim/wasm-client-sdk` text send to the Catalog Bot using `<prompt> <trigger_alias>`.
 - Authenticated `GET /v1/agent/workspace?platform_id=5&device_id=...`.
 - Existing authenticated `POST /v1/agent/intents/{intent_id}/approve` with the exact `payload_digest`.
 - PostgreSQL `agent.runs`, `agent.run_citations`, `action.intents`, `action.executions`, and `collaboration.tickets` as authoritative state.
@@ -32,7 +33,8 @@ The backend projection owns member/device-scoped reads of up to 30 recent Runs, 
 - The browser cannot provide tenant/member identity; OIDC subject, tenant claim, and active device resolve the authoritative member.
 - Workspace reads include only Runs where both `tenant_id` and `principal_member_id` match that member.
 - The workspace returns citation provenance but never chunk content, model credentials, OpenIM Admin Token, or another member's Runs.
-- Prompt submission uses the official OpenIM SDK and the existing `@Agent` event contract; there is no direct model or alternate Run-creation endpoint.
+- Prompt submission uses the official OpenIM SDK and Catalog trigger; there is no direct model or alternate Run-creation endpoint.
+- Catalog v1 requires exactly one active Agent and exact Catalog/workspace Bot identity agreement; zero, multiple, or mismatched results fail closed.
 - The explicit `创建工单：<title>` prefix remains before the appended trigger so the Intelligence Worker action protocol is unchanged.
 - Approval sends the exact server-returned Intent ID and digest. The client does not calculate, edit, or infer either value from Bot text.
 - Polling is bounded to two minutes and fails visibly; it does not synthesize completion or switch providers.
@@ -41,8 +43,8 @@ The backend projection owns member/device-scoped reads of up to 30 recent Runs, 
 ## Runtime flow
 
 1. The signed-in browser selects the registered `agent` workspace module.
-2. Platform API verifies the ID Token, resolves the active member/device, derives the tenant Bot ID, ensures its mapping and OpenIM account, and returns the member-scoped projection.
-3. The Web controller creates a text message and sends `<prompt> @Agent` to that Bot through the official SDK.
+2. Platform API verifies the ID Token and active member/device, returns the tenant Agent Catalog, ensures the tenant Bot mapping/account, and returns the member-scoped workspace projection.
+3. The Web controller requires one active Agent with the same Bot identity, then sends `<prompt> <trigger_alias>` through the official SDK.
 4. Existing OpenIM ingress, Kafka, Agent Runtime, ACL retrieval, and Intelligence Worker create and process the durable Run.
 5. The Web controller polls the projection while a prompt or Run is active and renders answer state and citation provenance.
 6. For `waiting_approval`, the UI displays the immutable ticket title and submits the returned ID/digest only after the member clicks approve.

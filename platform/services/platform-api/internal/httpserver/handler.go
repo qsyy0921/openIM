@@ -37,10 +37,13 @@ type ApprovalService interface {
 type AgentWorkspaceService interface {
 	Get(context.Context, string, string, int32) (agent.Workspace, error)
 }
+type AgentCatalogService interface {
+	List(context.Context, string, string, int32) ([]agent.AgentSummary, error)
+}
 
-func NewHandler(version string, sessions SessionService, devices DeviceService, approvals ApprovalService, workspace AgentWorkspaceService) http.Handler {
-	if sessions == nil || devices == nil || approvals == nil || workspace == nil {
-		panic("session, device, approval, and Agent workspace services are required")
+func NewHandler(version string, sessions SessionService, devices DeviceService, approvals ApprovalService, workspace AgentWorkspaceService, catalog AgentCatalogService) http.Handler {
+	if sessions == nil || devices == nil || approvals == nil || workspace == nil || catalog == nil {
+		panic("session, device, approval, Agent workspace, and Agent catalog services are required")
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
@@ -56,8 +59,40 @@ func NewHandler(version string, sessions SessionService, devices DeviceService, 
 	mux.Handle("GET /v1/im/devices", &deviceListHandler{service: devices})
 	mux.Handle("POST /v1/im/platforms/{platform_id}/logout", &platformLogoutHandler{service: devices})
 	mux.Handle("GET /v1/agent/workspace", &agentWorkspaceHandler{service: workspace})
+	mux.Handle("GET /v1/agents", &agentCatalogHandler{service: catalog})
 	mux.Handle("POST /v1/agent/intents/{intent_id}/approve", &approvalHandler{service: approvals})
 	return requestLogger(mux)
+}
+
+type agentCatalogHandler struct{ service AgentCatalogService }
+
+func (h *agentCatalogHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	correlationID := correlationID(r)
+	w.Header().Set("X-Correlation-ID", correlationID)
+	token, ok := bearerToken(r.Header.Get("Authorization"))
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "AUTHENTICATION_REQUIRED", "a valid bearer token is required", false, correlationID)
+		return
+	}
+	deviceID, platformID, ok := requestDeviceContext(r)
+	if !ok {
+		writeError(w, http.StatusBadRequest, "INVALID_REQUEST", "platform_id or device_id is invalid", false, correlationID)
+		return
+	}
+	agents, err := h.service.List(r.Context(), token, deviceID, platformID)
+	if err != nil {
+		slog.Warn("read Agent catalog failed", "correlation_id", correlationID, "error", err)
+		switch {
+		case errors.Is(err, identity.ErrUnauthenticated):
+			writeError(w, http.StatusUnauthorized, "AUTHENTICATION_REQUIRED", "enterprise identity is invalid or expired", false, correlationID)
+		case errors.Is(err, identity.ErrForbidden):
+			writeError(w, http.StatusForbidden, "MEMBER_OR_DEVICE_FORBIDDEN", "member or device is not active", false, correlationID)
+		default:
+			writeError(w, http.StatusBadGateway, "AGENT_CATALOG_UNAVAILABLE", "Agent catalog dependencies are unavailable", true, correlationID)
+		}
+		return
+	}
+	writeJSON(w, http.StatusOK, agents)
 }
 
 type deviceListHandler struct{ service DeviceService }

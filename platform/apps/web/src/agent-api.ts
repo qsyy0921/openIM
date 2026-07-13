@@ -21,6 +21,10 @@ export type AgentIntent = {
 
 export type AgentRun = {
   run_id: string;
+  agent_id: string;
+  agent_display_name: string;
+  agent_version_number: number;
+  agent_spec_checksum: string;
   conversation_id: string;
   prompt: string;
   state: "queued" | "running" | "reply_pending" | "waiting_approval" | "succeeded" | "failed";
@@ -31,6 +35,18 @@ export type AgentRun = {
   updated_at: string;
   citations: AgentCitation[];
   intent?: AgentIntent;
+};
+
+export type AgentSummary = {
+  agent_id: string;
+  slug: string;
+  display_name: string;
+  description: string;
+  trigger_alias: string;
+  production_version_number: number;
+  production_version_id: string;
+  spec_checksum: string;
+  bot_user_id: string;
 };
 
 export type AgentWorkspaceSnapshot = {
@@ -79,6 +95,41 @@ async function checkedPayload(response: Response): Promise<Record<string, unknow
 
 function validWorkspace(body: Record<string, unknown>): body is AgentWorkspaceSnapshot & Record<string, unknown> {
   return typeof body.agent_user_id === "string" && body.agent_user_id.length > 0 && Array.isArray(body.runs);
+}
+
+function validAgent(value: unknown): value is AgentSummary {
+  const body = record(value);
+  return body !== null && typeof body.agent_id === "string" && typeof body.slug === "string" &&
+    typeof body.display_name === "string" && typeof body.description === "string" &&
+    typeof body.trigger_alias === "string" && /^@[a-z][a-z0-9_-]{0,62}$/.test(body.trigger_alias) &&
+    typeof body.production_version_number === "number" && body.production_version_number >= 1 &&
+    typeof body.production_version_id === "string" && typeof body.spec_checksum === "string" &&
+    /^sha256:[0-9a-f]{64}$/.test(body.spec_checksum) && typeof body.bot_user_id === "string";
+}
+
+export async function getAgentCatalog(
+  baseURL: string,
+  idToken: string,
+  deviceID: string,
+  request: typeof fetch = fetch
+): Promise<AgentSummary[]> {
+  const query = new URLSearchParams({ platform_id: "5", device_id: deviceID });
+  const response = await request(`${baseURL}/v1/agents?${query}`, {
+    headers: { Authorization: `Bearer ${idToken}` }
+  });
+  const payload = await responsePayload(response);
+  if (!response.ok) {
+    const body = record(payload);
+    const error = (body ?? {}) as ErrorPayload;
+    throw new PlatformAPIError(
+      typeof error.message === "string" ? error.message : "Agent catalog request failed",
+      typeof error.code === "string" ? error.code : "UNKNOWN_ERROR",
+      typeof error.correlation_id === "string" ? error.correlation_id : "unavailable",
+      response.status
+    );
+  }
+  if (!Array.isArray(payload) || !payload.every(validAgent)) throw new Error("Agent catalog response is malformed");
+  return payload;
 }
 
 export async function getAgentWorkspace(

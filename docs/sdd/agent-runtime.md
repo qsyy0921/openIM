@@ -12,7 +12,7 @@ depends_on:
 
 ## Scope
 
-Own durable execution of the read-only `@Agent` message flow with authoritative ACL retrieval and verifiable citations, but without tools, approval, or business writes.
+Own durable execution of catalog-selected OpenIM Agent messages with authoritative ACL retrieval, verifiable citations, and the existing bounded approval handoff. It does not own Agent publication, deployment activation, or business writes.
 
 ## Responsibilities and non-goals
 
@@ -22,6 +22,7 @@ The unit consumes accepted IM events, recognizes an explicit text trigger, creat
 
 - Kafka event `im.message.accepted.v1`
 - PostgreSQL `agent.runs`, `agent.event_rejections`, and `agent.bot_identities`
+- PostgreSQL Agent Catalog exact-version contract from `agent-catalog.md`
 - PostgreSQL `agent.run_citations` and the `acl-retrieval` contract
 - `POST /v1/candidates` on `intelligence-worker`
 - OpenIM `/user/user_register`, `/user/get_users_info`, and `/msg/send_msg`
@@ -30,7 +31,9 @@ The unit consumes accepted IM events, recognizes an explicit text trigger, creat
 
 - `source_event_id` is unique; Kafka redelivery cannot create another Run.
 - A source offset is committed only after a matching Run or malformed-event rejection is durable.
-- Only content type 101 containing a case-insensitive `@agent` marker creates a Run.
+- Only content type 101 containing a tenant-mapped mention trigger creates a Run; unknown mentions create no Run.
+- Run insertion atomically pins Agent, version, deployment, trigger, and spec checksum.
+- A claimed Run loads only its pinned immutable version; unsupported schema or checksum mismatch fails before retrieval or model invocation.
 - The Run reaches `succeeded` only after OpenIM returns a non-empty reply `serverMsgID`.
 - Candidate generation and reply submission are separate recoverable states.
 - The triggering human member is resolved from the ready IdentityLink when the Run is inserted.
@@ -43,12 +46,13 @@ The unit consumes accepted IM events, recognizes an explicit text trigger, creat
 
 1. Consume `im.message.accepted.v1` with consumer group `agent-runtime-v1`.
 2. Validate and classify the event; commit non-trigger events and durably reject malformed events.
-3. Insert `Run=queued` using unique `source_event_id`, then commit the Kafka offset.
-4. Claim the Run with `FOR UPDATE SKIP LOCKED`, a deadline, and a fencing token.
-5. Retrieve current authorized evidence using tenant, member, purpose, and query.
-6. For evidence, call Python and atomically persist the validated citation provenance with the candidate; for zero results, persist an explicit abstention without calling Python.
-7. Reclaim the reply phase, ensure the tenant Bot mapping and OpenIM Bot account, then submit a text reply.
-8. Persist the returned `serverMsgID`; ordinary answers succeed, while action candidates enter `waiting_approval`.
+3. Resolve the tenant trigger and production deployment, then atomically insert `Run=queued` with the exact Agent version using unique `source_event_id`.
+4. Commit the Kafka offset only after the Run or typed rejection commits.
+5. Claim the Run with `FOR UPDATE SKIP LOCKED`, a deadline, and a fencing token, then validate its exact immutable version and checksum.
+6. Retrieve authorized evidence using the pinned purpose and limit; call Python with the pinned instructions, model route, retry bound, and allowed actions.
+7. Atomically persist validated citation provenance with the candidate; for zero results, persist an explicit abstention without calling Python.
+8. Reclaim the reply phase, ensure the tenant Bot mapping and OpenIM Bot account, then submit a text reply.
+9. Persist the returned `serverMsgID`; ordinary answers succeed, while permitted action candidates enter `waiting_approval`.
 
 ## Data ownership and state
 

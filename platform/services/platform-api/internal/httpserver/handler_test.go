@@ -19,7 +19,7 @@ func TestHealth(t *testing.T) {
 	recorder := httptest.NewRecorder()
 	request := httptest.NewRequest(http.MethodGet, "/healthz", nil)
 
-	NewHandler("test-version", stubSessionService{}, stubDeviceService{}, stubApprovalService{}, stubAgentWorkspaceService{}).ServeHTTP(recorder, request)
+	NewHandler("test-version", stubSessionService{}, stubDeviceService{}, stubApprovalService{}, stubAgentWorkspaceService{}, stubAgentCatalogService{}).ServeHTTP(recorder, request)
 
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusOK)
@@ -42,7 +42,7 @@ func TestHealthRejectsOtherMethods(t *testing.T) {
 	recorder := httptest.NewRecorder()
 	request := httptest.NewRequest(http.MethodPost, "/healthz", nil)
 
-	NewHandler("test-version", stubSessionService{}, stubDeviceService{}, stubApprovalService{}, stubAgentWorkspaceService{}).ServeHTTP(recorder, request)
+	NewHandler("test-version", stubSessionService{}, stubDeviceService{}, stubApprovalService{}, stubAgentWorkspaceService{}, stubAgentCatalogService{}).ServeHTTP(recorder, request)
 
 	if recorder.Code != http.StatusMethodNotAllowed {
 		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusMethodNotAllowed)
@@ -53,9 +53,14 @@ type stubSessionService struct{}
 type stubDeviceService struct{}
 type stubApprovalService struct{}
 type stubAgentWorkspaceService struct{}
+type stubAgentCatalogService struct{}
 
 func (stubAgentWorkspaceService) Get(context.Context, string, string, int32) (agent.Workspace, error) {
 	return agent.Workspace{}, nil
+}
+
+func (stubAgentCatalogService) List(context.Context, string, string, int32) ([]agent.AgentSummary, error) {
+	return nil, nil
 }
 
 func (stubApprovalService) Approve(context.Context, string, string, int32, string, string) (action.ApprovalResult, error) {
@@ -88,7 +93,7 @@ func TestCreateSession(t *testing.T) {
 	request.Header.Set("Authorization", "Bearer enterprise-token")
 	request.Header.Set("X-Correlation-ID", "test-correlation")
 
-	NewHandler("test-version", service, stubDeviceService{}, stubApprovalService{}, stubAgentWorkspaceService{}).ServeHTTP(recorder, request)
+	NewHandler("test-version", service, stubDeviceService{}, stubApprovalService{}, stubAgentWorkspaceService{}, stubAgentCatalogService{}).ServeHTTP(recorder, request)
 
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("status = %d, body = %s", recorder.Code, recorder.Body.String())
@@ -121,7 +126,7 @@ func TestCreateSessionRejectsInvalidRequests(t *testing.T) {
 			recorder := httptest.NewRecorder()
 			request := httptest.NewRequest(http.MethodPost, "/v1/im/session", bytes.NewBufferString(tt.body))
 			request.Header.Set("Authorization", tt.authorization)
-			NewHandler("test-version", &recordingSessionService{}, stubDeviceService{}, stubApprovalService{}, stubAgentWorkspaceService{}).ServeHTTP(recorder, request)
+			NewHandler("test-version", &recordingSessionService{}, stubDeviceService{}, stubApprovalService{}, stubAgentWorkspaceService{}, stubAgentCatalogService{}).ServeHTTP(recorder, request)
 			if recorder.Code != tt.wantStatus {
 				t.Fatalf("status = %d, want %d", recorder.Code, tt.wantStatus)
 			}
@@ -135,7 +140,7 @@ func TestCreateSessionMapsDependencyError(t *testing.T) {
 	request.Header.Set("Authorization", "Bearer token")
 	service := &recordingSessionService{err: identity.ErrDependencyUnavailable}
 
-	NewHandler("test-version", service, stubDeviceService{}, stubApprovalService{}, stubAgentWorkspaceService{}).ServeHTTP(recorder, request)
+	NewHandler("test-version", service, stubDeviceService{}, stubApprovalService{}, stubAgentWorkspaceService{}, stubAgentCatalogService{}).ServeHTTP(recorder, request)
 
 	if recorder.Code != http.StatusBadGateway {
 		t.Fatalf("status = %d", recorder.Code)
@@ -155,7 +160,7 @@ func TestApproveAction(t *testing.T) {
 	digest := "sha256:" + strings.Repeat("a", 64)
 	request := httptest.NewRequest(http.MethodPost, "/v1/agent/intents/intent-1/approve", bytes.NewBufferString(`{"platform_id":5,"device_id":"browser-1","payload_digest":"`+digest+`"}`))
 	request.Header.Set("Authorization", "Bearer enterprise-token")
-	NewHandler("test-version", stubSessionService{}, stubDeviceService{}, approvals, stubAgentWorkspaceService{}).ServeHTTP(recorder, request)
+	NewHandler("test-version", stubSessionService{}, stubDeviceService{}, approvals, stubAgentWorkspaceService{}, stubAgentCatalogService{}).ServeHTTP(recorder, request)
 	if recorder.Code != http.StatusAccepted {
 		t.Fatalf("status=%d body=%s", recorder.Code, recorder.Body.String())
 	}
@@ -172,7 +177,7 @@ func TestGetAgentWorkspace(t *testing.T) {
 	recorder := httptest.NewRecorder()
 	request := httptest.NewRequest(http.MethodGet, "/v1/agent/workspace?platform_id=5&device_id=browser-1", nil)
 	request.Header.Set("Authorization", "Bearer enterprise-token")
-	NewHandler("test-version", stubSessionService{}, stubDeviceService{}, stubApprovalService{}, service).ServeHTTP(recorder, request)
+	NewHandler("test-version", stubSessionService{}, stubDeviceService{}, stubApprovalService{}, service, stubAgentCatalogService{}).ServeHTTP(recorder, request)
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("status=%d body=%s", recorder.Code, recorder.Body.String())
 	}
@@ -196,10 +201,35 @@ func TestGetAgentWorkspaceRejectsInvalidDeviceContext(t *testing.T) {
 		recorder := httptest.NewRecorder()
 		request := httptest.NewRequest(http.MethodGet, target, nil)
 		request.Header.Set("Authorization", "Bearer enterprise-token")
-		NewHandler("test-version", stubSessionService{}, stubDeviceService{}, stubApprovalService{}, stubAgentWorkspaceService{}).ServeHTTP(recorder, request)
+		NewHandler("test-version", stubSessionService{}, stubDeviceService{}, stubApprovalService{}, stubAgentWorkspaceService{}, stubAgentCatalogService{}).ServeHTTP(recorder, request)
 		if recorder.Code != http.StatusBadRequest {
 			t.Fatalf("target=%s status=%d", target, recorder.Code)
 		}
+	}
+}
+
+func TestListAgents(t *testing.T) {
+	service := &recordingAgentCatalogService{agents: []agent.AgentSummary{{
+		ID: "agent-1", Slug: "knowledge-agent", DisplayName: "Enterprise Agent",
+		TriggerAlias: "@agent", VersionNumber: 1, VersionID: "version-1",
+		SpecChecksum: "sha256:" + strings.Repeat("a", 64), BotUserID: "bot-1",
+	}}}
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodGet, "/v1/agents?platform_id=5&device_id=browser-1", nil)
+	request.Header.Set("Authorization", "Bearer enterprise-token")
+	NewHandler("test-version", stubSessionService{}, stubDeviceService{}, stubApprovalService{}, stubAgentWorkspaceService{}, service).ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+	if service.token != "enterprise-token" || service.deviceID != "browser-1" || service.platformID != 5 {
+		t.Fatalf("catalog service input=%#v", service)
+	}
+	var response []agent.AgentSummary
+	if err := json.NewDecoder(recorder.Body).Decode(&response); err != nil {
+		t.Fatal(err)
+	}
+	if len(response) != 1 || response[0].TriggerAlias != "@agent" || response[0].VersionNumber != 1 {
+		t.Fatalf("catalog response=%#v", response)
 	}
 }
 
@@ -214,7 +244,7 @@ func TestListDevices(t *testing.T) {
 	request.Header.Set("Authorization", "Bearer enterprise-token")
 	request.Header.Set("X-Correlation-ID", "device-list-correlation")
 
-	NewHandler("test-version", stubSessionService{}, service, stubApprovalService{}, stubAgentWorkspaceService{}).ServeHTTP(recorder, request)
+	NewHandler("test-version", stubSessionService{}, service, stubApprovalService{}, stubAgentWorkspaceService{}, stubAgentCatalogService{}).ServeHTTP(recorder, request)
 
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("status=%d body=%s", recorder.Code, recorder.Body.String())
@@ -254,7 +284,7 @@ func TestListDevicesRejectsInvalidContextAndMapsErrors(t *testing.T) {
 			request := httptest.NewRequest(http.MethodGet, tt.target, nil)
 			request.Header.Set("Authorization", tt.authorization)
 			service := &recordingDeviceService{err: tt.err}
-			NewHandler("test-version", stubSessionService{}, service, stubApprovalService{}, stubAgentWorkspaceService{}).ServeHTTP(recorder, request)
+			NewHandler("test-version", stubSessionService{}, service, stubApprovalService{}, stubAgentWorkspaceService{}, stubAgentCatalogService{}).ServeHTTP(recorder, request)
 			if recorder.Code != tt.wantStatus {
 				t.Fatalf("status=%d body=%s", recorder.Code, recorder.Body.String())
 			}
@@ -276,7 +306,7 @@ func TestLogoutPlatform(t *testing.T) {
 	request.Header.Set("Authorization", "Bearer enterprise-token")
 	request.Header.Set("X-Correlation-ID", "logout-correlation")
 
-	NewHandler("test-version", stubSessionService{}, service, stubApprovalService{}, stubAgentWorkspaceService{}).ServeHTTP(recorder, request)
+	NewHandler("test-version", stubSessionService{}, service, stubApprovalService{}, stubAgentWorkspaceService{}, stubAgentCatalogService{}).ServeHTTP(recorder, request)
 
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("status=%d body=%s", recorder.Code, recorder.Body.String())
@@ -313,7 +343,7 @@ func TestLogoutPlatformRejectsUnknownFieldsAndMapsConflicts(t *testing.T) {
 			request := httptest.NewRequest(http.MethodPost, tt.target, bytes.NewBufferString(tt.body))
 			request.Header.Set("Authorization", "Bearer token")
 			service := &recordingDeviceService{err: tt.err}
-			NewHandler("test-version", stubSessionService{}, service, stubApprovalService{}, stubAgentWorkspaceService{}).ServeHTTP(recorder, request)
+			NewHandler("test-version", stubSessionService{}, service, stubApprovalService{}, stubAgentWorkspaceService{}, stubAgentCatalogService{}).ServeHTTP(recorder, request)
 			if recorder.Code != tt.wantStatus {
 				t.Fatalf("status=%d body=%s", recorder.Code, recorder.Body.String())
 			}
@@ -349,6 +379,13 @@ type recordingAgentWorkspaceService struct {
 	platformID      int32
 }
 
+type recordingAgentCatalogService struct {
+	agents          []agent.AgentSummary
+	err             error
+	token, deviceID string
+	platformID      int32
+}
+
 type recordingDeviceService struct {
 	snapshot                        identity.DeviceSnapshot
 	err                             error
@@ -369,6 +406,11 @@ func (s *recordingDeviceService) LogoutPlatform(_ context.Context, token, device
 func (s *recordingAgentWorkspaceService) Get(_ context.Context, token, deviceID string, platformID int32) (agent.Workspace, error) {
 	s.token, s.deviceID, s.platformID = token, deviceID, platformID
 	return s.workspace, s.err
+}
+
+func (s *recordingAgentCatalogService) List(_ context.Context, token, deviceID string, platformID int32) ([]agent.AgentSummary, error) {
+	s.token, s.deviceID, s.platformID = token, deviceID, platformID
+	return s.agents, s.err
 }
 
 func (s *recordingApprovalService) Approve(_ context.Context, token, device string, platform int32, intentID, digest string) (action.ApprovalResult, error) {

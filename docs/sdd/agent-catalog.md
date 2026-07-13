@@ -1,6 +1,6 @@
 ---
 unit: agent-catalog
-status: proposed
+status: implemented
 depends_on:
   - agent-runtime
   - identity-session
@@ -16,11 +16,25 @@ Add a tenant-scoped Agent control-plane foundation that represents the current i
 
 It does not add Agent creation UI, arbitrary prompts, generic workflows, another model provider, Tool/Skill Registry, MCP Gateway, memory, multi-Agent orchestration, per-channel policy, per-Agent OpenIM users, canary traffic, or production fallback.
 
-## Current gap
+## Responsibilities and non-goals
 
-- `event.go` recognizes a literal `@agent` marker.
-- `worker.go` fixes retrieval to purpose `agent_answer`, limit `5`, and permits only `create_ticket`.
-- `agent.runs` does not record an Agent or configuration version.
+The Catalog owns stable tenant Agent identity, immutable execution versions, the single production deployment pointer, mention-trigger mapping, activation audit, and the catalog references pinned to a Run. Agent Runtime still owns execution, Identity owns tenant/member/device authorization, OpenIM owns message delivery, ACL retrieval owns evidence authorization, and Action Executor owns approved business effects.
+
+This v1 slice exposes no mutation API or administration UI. It does not introduce a generic execution engine, arbitrary provider routes, dynamic tools, Skill/MCP registration, memory, multi-Agent orchestration, per-Agent Bot provisioning, or a fallback Agent.
+
+## Contracts and dependencies
+
+- PostgreSQL migration `0008_agent_catalog.sql` and tenant-constrained catalog foreign keys.
+- Durable OpenIM event ingestion and `agent.runs.source_event_id` deduplication.
+- `GET /v1/agents` in `contracts/openapi/platform-v1.yaml`.
+- Existing member/device OIDC authentication and deterministic tenant Bot identity.
+- Agent Runtime's exact-version `RuntimeStore` contract and Intelligence Worker candidate request.
+
+## Baseline replaced by this slice
+
+- `event.go` previously recognized a literal `@agent` marker.
+- `worker.go` previously fixed retrieval to purpose `agent_answer`, limit `5`, and permitted only `create_ticket`.
+- `agent.runs` previously recorded no Agent or configuration version.
 - `agent.bot_identities` intentionally maps one platform Agent Bot per tenant.
 
 This prevents exact replay and makes future configuration edits unsafe because a queued Run could otherwise observe a different configuration from the one active when it was accepted.
@@ -137,9 +151,13 @@ There is no public create, update, publish, delete, or arbitrary execute API in 
 
 Keep one deterministic platform Agent Bot per tenant for v1. Logical Agent selection occurs through the catalog and is shown in the Run projection; OpenIM sender identity remains the tenant Bot. This avoids Bot provisioning, group membership, contact-list, and credential growth while the control-plane semantics are established. Per-Agent OpenIM Bot identities require a later product and migration decision.
 
+## Data ownership and state
+
+The `agent` schema owns definitions, versions, deployments, triggers, Runs, and typed trigger rejections. The `audit` schema owns immutable deployment-activation events. A Run copies only the selected IDs and checksum; the immutable version row remains authoritative execution data. The Web client owns no Catalog state and reads the current projection on each workspace refresh.
+
 ## Migration
 
-Migration `0008_agent_catalog.sql` must execute in this order. Proposed table names are `agent.definitions`, `agent.versions`, `agent.deployments`, and `agent.triggers`:
+Migration `0008_agent_catalog.sql` executes in this order using `agent.definitions`, `agent.versions`, `agent.deployments`, and `agent.triggers`:
 
 1. Create definitions, versions, deployments, and triggers with tenant foreign keys and constraints.
 2. For every `identity.tenants` row, seed one `knowledge-agent` definition; mirror a disabled tenant as a disabled definition and disabled trigger.
@@ -186,7 +204,7 @@ Disabling an Agent blocks new Runs. Already pinned Runs continue under their imm
 
 ## Observability
 
-Add `agent_id`, `agent_version_id`, `agent_version_number`, `runtime_kind`, and checksum prefix to Run logs, metrics labels with bounded cardinality, traces, and support projection. Deployment activation produces an immutable audit event containing old/new version IDs and actor. Prompt content and credentials remain excluded from logs.
+Run logs and support projection include Agent/version identity and checksum provenance. Deployment activation produces an immutable audit event containing old/new version IDs and actor. Metrics and traces remain a separately admitted observability slice; prompt content and credentials remain excluded from logs.
 
 ## Acceptance criteria
 
@@ -211,14 +229,28 @@ Each slice updates this SDD and stops after its acceptance criteria. Administrat
 ## Source evidence
 
 - `platform/services/platform-api/internal/agent/event.go`
+- `platform/services/platform-api/internal/agent/catalog.go`
+- `platform/services/platform-api/internal/agent/catalog_store.go`
+- `platform/services/platform-api/internal/agent/catalog_service.go`
 - `platform/services/platform-api/internal/agent/store.go`
 - `platform/services/platform-api/internal/agent/worker.go`
+- `platform/services/platform-api/internal/agent/catalog_integration_test.go`
+- `platform/services/platform-api/internal/migrations/sql/0008_agent_catalog.sql`
 - `platform/services/platform-api/internal/migrations/sql/0003_agent.sql`
 - `platform/services/platform-api/internal/migrations/sql/0004_agent_bot_identity.sql`
 - `platform/services/platform-api/internal/migrations/sql/0005_acl_retrieval.sql`
 - `platform/services/platform-api/internal/migrations/sql/0007_approved_ticket_action.sql`
 - `contracts/openapi/platform-v1.yaml`
 - `docs/research/agent-platform-reference-analysis.md`
+
+## Verification evidence
+
+- Migration `0008` applied to the real local PostgreSQL database; all existing Runs were backfilled, the built-in v1 deployment remained active, and no unresolved row was accepted.
+- A rollback-only PostgreSQL integration test verified v1 pinning, duplicate source-event deduplication, unknown-trigger ignore, disabled-trigger durable rejection, v1-to-v2 activation, old-Run stability, v2-to-v1 rollback, two activation audit events, tenant-bound Run lookup, and update/delete rejection for published versions. The transaction left no v2 row behind.
+- Go package tests passed with the real PostgreSQL integration URL; the complete Go suite also passed without the integration environment.
+- Intelligence Worker tests passed 9 cases, including unconfigured model-route and disallowed-action failure without a provider call.
+- Web tests passed 75 cases; typecheck and production build passed with Catalog-derived trigger text, strict response validation, bot-identity matching, and visible Run version provenance.
+- Node2 deployment, real version switch/rollback, and browser/OpenIM regression remain the only evidence required before changing this SDD from `implemented` to `verified`.
 
 ## Open questions deferred from v1
 

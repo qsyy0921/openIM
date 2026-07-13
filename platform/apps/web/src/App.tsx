@@ -6,7 +6,7 @@ import { ApplicationHandleResult } from "@openim/wasm-client-sdk";
 import type { WebConfig } from "./config";
 import { AgentWorkspace } from "./AgentWorkspace";
 import { AgentController, createOpenIMAgentTransport, initialAgentState, type AgentState } from "./agent";
-import { approveAgentIntent, getAgentWorkspace } from "./agent-api";
+import { approveAgentIntent, getAgentCatalog, getAgentWorkspace } from "./agent-api";
 import { ChatWorkspace } from "./ChatWorkspace";
 import { ConversationController, createOpenIMChatPort, initialChatState, type ChatState } from "./chat";
 import { ContactController, createOpenIMContactPort, initialContactState, type ContactState } from "./contact";
@@ -134,6 +134,7 @@ export function App({ config, userManager }: AppProps) {
         agentControllerRef.current?.stop();
         unsubscribeAgentRef.current?.();
         const agentController = new AgentController({
+          catalog: () => getAgentCatalog(config.platformAPIBaseURL, identity.id_token!, config.deviceID),
           workspace: () => getAgentWorkspace(config.platformAPIBaseURL, identity.id_token!, config.deviceID),
           approve: (intentID, digest) => approveAgentIntent(config.platformAPIBaseURL, identity.id_token!, config.deviceID, intentID, digest)
         }, createOpenIMAgentTransport());

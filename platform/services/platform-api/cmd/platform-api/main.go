@@ -62,7 +62,8 @@ func main() {
 	approvals := action.NewService(verifier, identityStore, actionStore)
 	agentStore := agent.NewStore(pool)
 	workspace := agent.NewWorkspaceService(verifier, identityStore, agentStore, openIM)
-	handler := httpserver.NewHandler(cfg.Version, sessions, devices, approvals, workspace)
+	catalog := agent.NewCatalogService(verifier, identityStore, agentStore)
+	handler := httpserver.NewHandler(cfg.Version, sessions, devices, approvals, workspace, catalog)
 
 	listener, err := net.Listen("tcp", cfg.HTTPAddr)
 	if err != nil {

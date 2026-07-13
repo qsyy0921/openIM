@@ -28,16 +28,18 @@ func TestStoreDeduplicatesAndFencesRun(t *testing.T) {
 	trigger := Trigger{
 		EventID:  "agent-integration-" + time.Now().Format("20060102150405.000000000"),
 		TenantID: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", ConversationID: "si_a_b",
-		SenderID: senderID, SessionType: 1, Prompt: "question",
+		SenderID: senderID, SessionType: 1, Mentions: []Mention{{Alias: "@agent", Prompt: "question"}},
 	}
 	store := NewStore(pool)
-	runID, err := store.Enqueue(ctx, trigger)
+	source := Source{Topic: "integration", Partition: 0, Offset: time.Now().UnixNano()}
+	result, err := store.Enqueue(ctx, source, trigger)
 	if err != nil {
 		t.Fatal(err)
 	}
-	duplicateID, err := store.Enqueue(ctx, trigger)
-	if err != nil || duplicateID != runID {
-		t.Fatalf("duplicate Enqueue() = %q, %v", duplicateID, err)
+	runID := result.RunID
+	duplicate, err := store.Enqueue(ctx, source, trigger)
+	if err != nil || duplicate.RunID != runID {
+		t.Fatalf("duplicate Enqueue() = %#v, %v", duplicate, err)
 	}
 	t.Cleanup(func() { _, _ = pool.Exec(context.Background(), "DELETE FROM agent.runs WHERE id = $1::uuid", runID) })
 

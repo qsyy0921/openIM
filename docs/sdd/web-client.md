@@ -48,8 +48,9 @@ The unit owns interactive sign-in/out, the extensible workspace shell, use of an
 7. Load supported single/group conversations and total unread state, then load bounded history and group members for the selected conversation.
 8. Load the SDK-synchronized friend/application projection, subscribe to relationship callbacks, and provide exact user-ID lookup plus authoritative friend mutations.
 9. Create and optimistically render a text message; replace it with the SDK result or mark it failed.
-10. Merge real-time message, conversation, friend, and application events by stable IDs and mark the visible conversation read.
-11. On successful reconnection, reload conversations, contacts, unread state, and active history before declaring the client state restored.
+10. Resolve the active Agent and trigger from the authenticated Catalog, require Bot identity agreement, and display exact Run version provenance in the Agent workspace.
+11. Merge real-time message, conversation, friend, and application events by stable IDs and mark the visible conversation read.
+12. On successful reconnection, reload conversations, contacts, unread state, and active history before declaring the client state restored.
 
 ## Data ownership and state
 
@@ -93,6 +94,8 @@ The UI exposes coarse connection phase and endpoint readiness. Platform and Open
 - `platform/apps/web/src/ContactsWorkspace.tsx`
 - `platform/apps/web/src/MemberPicker.tsx`
 - `platform/apps/web/src/AgentWorkspace.tsx`
+- `platform/apps/web/src/agent.ts`
+- `platform/apps/web/src/agent-api.ts`
 - `platform/apps/web/src/device.ts`
 - `platform/apps/web/src/device-api.ts`
 - `platform/apps/web/src/DeviceWorkspace.tsx`
