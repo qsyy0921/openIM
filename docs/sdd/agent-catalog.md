@@ -20,7 +20,7 @@ It does not add Agent creation UI, arbitrary prompts, generic workflows, another
 
 The Catalog owns stable tenant Agent identity, immutable execution versions, the single production deployment pointer, mention-trigger mapping, activation audit, and the catalog references pinned to a Run. Agent Runtime still owns execution, Identity owns tenant/member/device authorization, OpenIM owns message delivery, ACL retrieval owns evidence authorization, and Action Executor owns approved business effects.
 
-This v1 slice exposes no mutation API or administration UI. It does not introduce a generic execution engine, arbitrary provider routes, dynamic tools, Skill/MCP registration, memory, multi-Agent orchestration, per-Agent Bot provisioning, or a fallback Agent.
+This v1 slice exposes no mutation API or administration UI. A host-only operator CLI performs validated publication and revision-fenced activation; it is not a network service. The slice does not introduce a generic execution engine, arbitrary provider routes, dynamic tools, Skill/MCP registration, memory, multi-Agent orchestration, per-Agent Bot provisioning, or a fallback Agent.
 
 ## Contracts and dependencies
 
@@ -29,6 +29,7 @@ This v1 slice exposes no mutation API or administration UI. It does not introduc
 - `GET /v1/agents` in `contracts/openapi/platform-v1.yaml`.
 - Existing member/device OIDC authentication and deterministic tenant Bot identity.
 - Agent Runtime's exact-version `RuntimeStore` contract and Intelligence Worker candidate request.
+- Host-only `agent-catalog-admin` publication and activation operations described in `docs/runbooks/agent-catalog-operations.md`.
 
 ## Baseline replaced by this slice
 
@@ -235,6 +236,7 @@ Each slice updates this SDD and stops after its acceptance criteria. Administrat
 - `platform/services/platform-api/internal/agent/store.go`
 - `platform/services/platform-api/internal/agent/worker.go`
 - `platform/services/platform-api/internal/agent/catalog_integration_test.go`
+- `platform/services/platform-api/cmd/agent-catalog-admin/main.go`
 - `platform/services/platform-api/internal/migrations/sql/0008_agent_catalog.sql`
 - `platform/services/platform-api/internal/migrations/sql/0003_agent.sql`
 - `platform/services/platform-api/internal/migrations/sql/0004_agent_bot_identity.sql`
@@ -242,6 +244,7 @@ Each slice updates this SDD and stops after its acceptance criteria. Administrat
 - `platform/services/platform-api/internal/migrations/sql/0007_approved_ticket_action.sql`
 - `contracts/openapi/platform-v1.yaml`
 - `docs/research/agent-platform-reference-analysis.md`
+- `docs/runbooks/agent-catalog-operations.md`
 
 ## Verification evidence
 

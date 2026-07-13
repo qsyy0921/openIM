@@ -2,7 +2,6 @@ package agent
 
 import (
 	"context"
-	"encoding/json"
 	"os"
 	"testing"
 	"time"
@@ -53,10 +52,6 @@ WHERE d.tenant_id = $1::uuid AND d.slug = 'knowledge-agent'`, catalogTestTenant,
 		t.Fatal(err)
 	}
 
-	versionTwoID, err := newUUID()
-	if err != nil {
-		t.Fatal(err)
-	}
 	versionTwoSpec := AgentSpec{
 		RuntimeKind:        KnowledgeTicketRuntime,
 		Instructions:       "Answer only from authorized evidence and identify this as catalog version two.",
@@ -65,21 +60,8 @@ WHERE d.tenant_id = $1::uuid AND d.slug = 'knowledge-agent'`, catalogTestTenant,
 		AllowedActionTypes: []string{"create_ticket"},
 		MaxModelAttempts:   3,
 	}
-	versionTwoRaw, err := json.Marshal(versionTwoSpec)
+	versionTwo, err := publishVersionTx(ctx, tx, catalogTestTenant, agentID, catalogTestMember, 2, versionTwoSpec)
 	if err != nil {
-		t.Fatal(err)
-	}
-	versionTwoChecksum, err := AgentSpecChecksum(versionTwoSpec)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := tx.Exec(ctx, `
-INSERT INTO agent.versions (
-    id, tenant_id, agent_id, version_number, spec_schema_version, spec,
-    spec_checksum, created_by_member_id
-) VALUES ($1::uuid, $2::uuid, $3::uuid, 2, 1, $4::jsonb, $5, $6::uuid)`,
-		versionTwoID, catalogTestTenant, agentID, string(versionTwoRaw), versionTwoChecksum, catalogTestMember,
-	); err != nil {
 		t.Fatal(err)
 	}
 
@@ -110,14 +92,14 @@ INSERT INTO agent.versions (
 		t.Fatalf("unknown mention = %#v, %v", unknown, err)
 	}
 
-	if err := activateVersionTx(ctx, tx, catalogTestTenant, agentID, versionTwoID, catalogTestMember, revision); err != nil {
+	if err := activateVersionTx(ctx, tx, catalogTestTenant, agentID, versionTwo.VersionID, catalogTestMember, revision); err != nil {
 		t.Fatal(err)
 	}
 	versionTwoRun, err := enqueueTx(ctx, tx, newSource(4), newTrigger("v2", "@agent", "version two"))
 	if err != nil || versionTwoRun.RunID == "" {
 		t.Fatalf("enqueue v2 = %#v, %v", versionTwoRun, err)
 	}
-	assertPinnedVersion(t, ctx, tx, versionTwoRun.RunID, agentID, versionTwoID, deploymentID, triggerID, versionTwoChecksum)
+	assertPinnedVersion(t, ctx, tx, versionTwoRun.RunID, agentID, versionTwo.VersionID, deploymentID, triggerID, versionTwo.Checksum)
 	assertPinnedVersion(t, ctx, tx, versionOneRun.RunID, agentID, versionOneID, deploymentID, triggerID, seedAgentSpecChecksum)
 
 	if err := activateVersionTx(ctx, tx, catalogTestTenant, agentID, versionOneID, catalogTestMember, revision+1); err != nil {
@@ -154,7 +136,7 @@ INSERT INTO agent.versions (
 		t.Fatalf("deduplicated runs = %d, want 1", runCount)
 	}
 
-	assertVersionImmutable(t, ctx, tx, versionTwoID)
+	assertVersionImmutable(t, ctx, tx, versionTwo.VersionID)
 }
 
 func assertPinnedVersion(t *testing.T, ctx context.Context, tx pgx.Tx, runID, agentID, versionID, deploymentID, triggerID, checksum string) {

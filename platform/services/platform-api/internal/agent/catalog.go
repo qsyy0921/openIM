@@ -58,6 +58,21 @@ type AgentSummary struct {
 }
 
 func ParseAgentSpec(schemaVersion int, raw []byte, expectedChecksum string) (AgentSpec, error) {
+	spec, err := DecodeAgentSpec(schemaVersion, raw)
+	if err != nil {
+		return AgentSpec{}, err
+	}
+	checksum, err := AgentSpecChecksum(spec)
+	if err != nil {
+		return AgentSpec{}, err
+	}
+	if checksum != expectedChecksum {
+		return AgentSpec{}, fmt.Errorf("%w: spec checksum mismatch", ErrInvalidCatalog)
+	}
+	return spec, nil
+}
+
+func DecodeAgentSpec(schemaVersion int, raw []byte) (AgentSpec, error) {
 	if schemaVersion != AgentSpecSchemaV1 {
 		return AgentSpec{}, fmt.Errorf("%w: unsupported spec schema version %d", ErrInvalidCatalog, schemaVersion)
 	}
@@ -72,13 +87,6 @@ func ParseAgentSpec(schemaVersion int, raw []byte, expectedChecksum string) (Age
 	}
 	if err := validateAgentSpec(spec); err != nil {
 		return AgentSpec{}, err
-	}
-	checksum, err := AgentSpecChecksum(spec)
-	if err != nil {
-		return AgentSpec{}, err
-	}
-	if checksum != expectedChecksum {
-		return AgentSpec{}, fmt.Errorf("%w: spec checksum mismatch", ErrInvalidCatalog)
 	}
 	return spec, nil
 }

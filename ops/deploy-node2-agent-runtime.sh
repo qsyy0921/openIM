@@ -39,7 +39,7 @@ fi
 set -a
 . /etc/openim/proxy.env
 set +a
-"$venv/bin/python" -m pip install --disable-pip-version-check --upgrade "$wheel"
+"$venv/bin/python" -m pip install --disable-pip-version-check --force-reinstall --no-deps "$wheel"
 chown -R ubuntu:ubuntu "$venv"
 
 cat >"$config_dir/intelligence.env" <<'EOF'

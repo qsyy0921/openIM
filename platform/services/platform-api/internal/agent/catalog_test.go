@@ -25,6 +25,12 @@ func TestParseAgentSpecAcceptsSeedAndVerifiesChecksum(t *testing.T) {
 	}
 }
 
+func TestDecodeAgentSpecRejectsUnknownFieldsBeforePublication(t *testing.T) {
+	if _, err := DecodeAgentSpec(AgentSpecSchemaV1, []byte(`{"runtime_kind":"knowledge_ticket_v1","unknown":true}`)); !errors.Is(err, ErrInvalidCatalog) {
+		t.Fatalf("error = %v", err)
+	}
+}
+
 type catalogStoreStub struct {
 	tenantID string
 	agents   []AgentSummary
