@@ -87,6 +87,19 @@ if ($includeWeb) {
         npm run build
         if ($LASTEXITCODE -ne 0) { throw "Web production build failed" }
         Copy-Item (Join-Path $webApp "dist\*") $web -Recurse -Force
+        Get-ChildItem $web -Recurse -Filter "*.wasm" | ForEach-Object {
+            $source = [IO.File]::OpenRead($_.FullName)
+            $target = [IO.File]::Create("$($_.FullName).gz")
+            $gzip = [IO.Compression.GZipStream]::new($target, [IO.Compression.CompressionLevel]::Optimal)
+            try {
+                $source.CopyTo($gzip)
+            }
+            finally {
+                $gzip.Dispose()
+                $target.Dispose()
+                $source.Dispose()
+            }
+        }
     }
     finally {
         Pop-Location

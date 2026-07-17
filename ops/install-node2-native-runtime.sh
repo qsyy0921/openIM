@@ -135,6 +135,14 @@ grep -Fq '<div id="root"></div>' <<<"$callback_html" || {
   echo "OIDC callback is not routed to the Web application" >&2
   exit 1
 }
+wasm_encoding="$(curl --silent --show-error --fail --head \
+  --cacert "$deploy_root/native-ubuntu/openim-node2-lab-ca.crt" \
+  --header 'Accept-Encoding: gzip' \
+  "$public_origin/openIM.wasm" | sed -n 's/^Content-Encoding: //Ip' | tr -d '\r' | head -1)"
+[[ "$wasm_encoding" == "gzip" ]] || {
+  echo "OpenIM WASM is not served from the precompressed artifact" >&2
+  exit 1
+}
 
 echo "dataset=documents:$documents,versions:$versions,chunks:$chunks,grants:$grants"
 echo "node2_native_runtime=installed"
