@@ -5,11 +5,18 @@ deploy_root="${1:-/home/ubuntu/MFL/deploy/node2-20260711}"
 release_root="${2:-/home/ubuntu/MFL/releases/d663256}"
 bin_dir="$release_root/linux-amd64"
 wheel="$(find "$release_root/python" -maxdepth 1 -type f -name 'openim_intelligence_worker-*.whl' -print -quit)"
-venv=/home/ubuntu/MFL/venvs/intelligence-worker
+runtime_user="${OPENIM_PLATFORM_RUNTIME_USER:-ubuntu}"
+runtime_group="${OPENIM_PLATFORM_RUNTIME_GROUP:-$runtime_user}"
+mfl_root="${OPENIM_PLATFORM_MFL_ROOT:-$(dirname "$(dirname "$release_root")")}"
+venv="${OPENIM_INTELLIGENCE_VENV:-$mfl_root/venvs/intelligence-worker}"
 config_dir=/etc/openim-platform
 credential_file="$config_dir/credentials/deepseek-api-key"
 action_env="$config_dir/action-executor.env"
-postgres_container=openim-platform-local-postgres-1
+postgres_container="${OPENIM_PLATFORM_POSTGRES_CONTAINER:-openim-platform-local-postgres-1}"
+install_dependencies="${OPENIM_INTELLIGENCE_INSTALL_DEPENDENCIES:-false}"
+proxy_env="${OPENIM_PLATFORM_PROXY_ENV:-/etc/openim/proxy.env}"
+deepseek_base_url="${OPENIM_INTELLIGENCE_DEEPSEEK_BASE_URL:-https://api.deepseek.com}"
+deepseek_model="${OPENIM_INTELLIGENCE_DEEPSEEK_MODEL:-deepseek-v4-pro}"
 
 [[ "$(id -u)" -eq 0 ]] || {
   echo "run as root" >&2
@@ -17,6 +24,18 @@ postgres_container=openim-platform-local-postgres-1
 }
 [[ "$(ps -p 1 -o comm=)" == systemd ]] || {
   echo "systemd must be PID 1" >&2
+  exit 1
+}
+id "$runtime_user" >/dev/null 2>&1 || {
+  echo "runtime user does not exist: $runtime_user" >&2
+  exit 1
+}
+getent group "$runtime_group" >/dev/null 2>&1 || {
+  echo "runtime group does not exist: $runtime_group" >&2
+  exit 1
+}
+[[ "$install_dependencies" == "true" || "$install_dependencies" == "false" ]] || {
+  echo "OPENIM_INTELLIGENCE_INSTALL_DEPENDENCIES must be true or false" >&2
   exit 1
 }
 for path in "$wheel" "$bin_dir/agent-runtime" "$bin_dir/action-executor" "$config_dir/platform.env"; do
@@ -27,8 +46,8 @@ for path in "$wheel" "$bin_dir/agent-runtime" "$bin_dir/action-executor" "$confi
 done
 
 chmod 0755 "$bin_dir/agent-runtime" "$bin_dir/action-executor"
-install -d -m 0750 -o root -g ubuntu "$config_dir" "$config_dir/credentials"
-install -d -m 0750 -o ubuntu -g ubuntu "$(dirname "$venv")"
+install -d -m 0750 -o root -g "$runtime_group" "$config_dir" "$config_dir/credentials"
+install -d -m 0750 -o "$runtime_user" -g "$runtime_group" "$(dirname "$venv")"
 
 if [[ ! -x "$venv/bin/python" ]]; then
   python3 -m venv "$venv"
@@ -36,21 +55,27 @@ fi
 if ! "$venv/bin/python" -m pip --version >/dev/null 2>&1; then
   python3 -m venv --upgrade "$venv"
 fi
-set -a
-. /etc/openim/proxy.env
-set +a
-"$venv/bin/python" -m pip install --disable-pip-version-check --force-reinstall --no-deps "$wheel"
-chown -R ubuntu:ubuntu "$venv"
+if [[ -r "$proxy_env" ]]; then
+  set -a
+  . "$proxy_env"
+  set +a
+fi
+pip_args=(install --disable-pip-version-check --force-reinstall)
+if [[ "$install_dependencies" == "false" ]]; then
+  pip_args+=(--no-deps)
+fi
+"$venv/bin/python" -m pip "${pip_args[@]}" "$wheel"
+chown -R "$runtime_user:$runtime_group" "$venv"
 
-cat >"$config_dir/intelligence.env" <<'EOF'
+cat >"$config_dir/intelligence.env" <<EOF
 INTELLIGENCE_HTTP_HOST=127.0.0.1
 INTELLIGENCE_HTTP_PORT=18082
-INTELLIGENCE_DEEPSEEK_BASE_URL=https://api.deepseek.com
-INTELLIGENCE_DEEPSEEK_MODEL=deepseek-v4-pro
+INTELLIGENCE_DEEPSEEK_BASE_URL=$deepseek_base_url
+INTELLIGENCE_DEEPSEEK_MODEL=$deepseek_model
 INTELLIGENCE_DEEPSEEK_TIMEOUT_SECONDS=90
 INTELLIGENCE_DEEPSEEK_MAX_TOKENS=1024
 EOF
-chown root:ubuntu "$config_dir/intelligence.env"
+chown root:"$runtime_group" "$config_dir/intelligence.env"
 chmod 0640 "$config_dir/intelligence.env"
 
 if [[ ! -f "$action_env" ]]; then
@@ -90,7 +115,7 @@ umask 027
 printf 'ACTION_DATABASE_URL=postgres://platform_action_executor:%s@127.0.0.1:15432/platform?sslmode=disable\n' "$action_password" >"$action_env"
 printf 'ACTION_POLL_INTERVAL=500ms\nACTION_LEASE=30s\nACTION_DEPENDENCY_TIMEOUT=20s\nACTION_MAX_ATTEMPTS=3\n' >>"$action_env"
 unset action_password escaped_action_password action_url
-chown root:ubuntu "$action_env"
+chown root:"$runtime_group" "$action_env"
 chmod 0640 "$action_env"
 
 cat >/etc/systemd/system/openim-intelligence-worker.service <<EOF
@@ -100,8 +125,8 @@ After=network-online.target
 
 [Service]
 Type=simple
-User=ubuntu
-Group=ubuntu
+User=$runtime_user
+Group=$runtime_group
 EnvironmentFile=$config_dir/intelligence.env
 LoadCredential=deepseek_api_key:$credential_file
 ExecStart=/bin/sh -ec 'export INTELLIGENCE_DEEPSEEK_API_KEY="\$(cat "\$CREDENTIALS_DIRECTORY/deepseek_api_key")"; exec $venv/bin/python -m uvicorn intelligence_worker.app:app --host "\$INTELLIGENCE_HTTP_HOST" --port "\$INTELLIGENCE_HTTP_PORT"'
@@ -125,8 +150,8 @@ After=docker.service openim-intelligence-worker.service
 
 [Service]
 Type=simple
-User=ubuntu
-Group=ubuntu
+User=$runtime_user
+Group=$runtime_group
 EnvironmentFile=$config_dir/platform.env
 ExecStart=$bin_dir/agent-runtime
 Restart=on-failure
@@ -149,8 +174,8 @@ After=docker.service
 
 [Service]
 Type=simple
-User=ubuntu
-Group=ubuntu
+User=$runtime_user
+Group=$runtime_group
 EnvironmentFile=$action_env
 ExecStart=$bin_dir/action-executor
 Restart=on-failure
