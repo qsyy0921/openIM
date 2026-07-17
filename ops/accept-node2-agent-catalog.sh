@@ -130,7 +130,7 @@ print(json.dumps({
     "groupID": "",
     "senderNickname": "Local Member",
     "senderPlatformID": 5,
-    "content": {"content": "@Agent 第三方安全评估的受理确认和正常完成时限分别是多少？请仅依据授权证据回答并标注引用。 " + os.environ["CASE_NAME"]},
+    "content": {"content": "@Agent 第三方安全评估管理制度：受理确认和正常完成时限分别是多少？请仅依据授权证据回答并标注引用。 " + os.environ["CASE_NAME"]},
     "contentType": 101,
     "sessionType": 1,
     "notOfflinePush": True,
