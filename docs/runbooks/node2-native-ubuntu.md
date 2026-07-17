@@ -69,21 +69,11 @@ docker exec -i openim-platform-local-postgres-1 \
 
 ## Services
 
-Run the generalized deployment scripts as root with:
+The native installer verifies the release, runs migrations and fixtures, and invokes the generalized deployment scripts:
 
 ```bash
-export OPENIM_PLATFORM_RUNTIME_USER=qsyy0921
-export OPENIM_PLATFORM_RUNTIME_GROUP=qsyy0921
-export OPENIM_PLATFORM_MFL_ROOT=/home/qsyy0921/MFL
-export OPENIM_PLATFORM_OIDC_ISSUER=http://<public-host>:18081/realms/platform
-export OPENIM_PLATFORM_OPENIM_WS_URL=ws://<public-host>:12001
-export OPENIM_INTELLIGENCE_INSTALL_DEPENDENCIES=true
-
-bash ops/deploy-node2-platform-runtime.sh "$DEPLOY_ROOT" "$RELEASE_ROOT"
-bash ops/deploy-node2-agent-runtime.sh "$DEPLOY_ROOT" "$RELEASE_ROOT"
-bash ops/deploy-node2-native-web.sh \
-  "$RELEASE_ROOT" \
-  "$DEPLOY_ROOT/native-ubuntu/nginx-openim-platform.conf"
+sudo bash "$DEPLOY_ROOT/ops/install-node2-native-runtime.sh" \
+  "$DEPLOY_ROOT" "$RELEASE_ROOT" qsyy0921 <public-host>
 ```
 
 Provision the DeepSeek key only through standard input into `/etc/openim-platform/credentials/deepseek-api-key`, owned by `root:root` with mode `0400`. Do not place it in shell arguments, environment files, Compose YAML, release bundles, screenshots, or logs.
