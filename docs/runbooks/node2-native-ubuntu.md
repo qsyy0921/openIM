@@ -49,7 +49,17 @@ Copy `platform/deploy/local` into `$DEPLOY_ROOT/platform`. Generate `platform/.e
 
 Apply `node2-native-ubuntu.override.yaml` when starting PostgreSQL and Keycloak. Apply `openim-native-ubuntu.override.yaml` to the pinned OpenIM Compose project to publish the stable aliases and host-only Kafka listener.
 
-Run migrations `0001` through `0008`, then apply the explicit local identity fixture. The enterprise dataset import is a development fixture, not a migration:
+Run migrations `0001` through `0008`, then apply `seed-node2-native-identity.sql` with the exact public issuer:
+
+```bash
+docker exec -i openim-platform-local-postgres-1 \
+  psql -v ON_ERROR_STOP=1 \
+  -v platform_oidc_issuer=http://<public-host>:18081/realms/platform \
+  -U platform -d platform \
+  < platform/deploy/local/seed-node2-native-identity.sql
+```
+
+The enterprise dataset import is a development fixture, not a migration:
 
 ```bash
 docker exec -i openim-platform-local-postgres-1 \
