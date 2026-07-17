@@ -98,6 +98,11 @@ if ($includeWeb) {
 
 Copy-Item (Join-Path $root "dependencies\openim.lock.yaml") (Join-Path $output "openim.lock.yaml")
 Copy-Item (Join-Path $root "contracts") (Join-Path $output "contracts") -Recurse
+$enterpriseDataset = Join-Path $root "datasets\enterprise-knowledge\v1"
+if (Test-Path $enterpriseDataset) {
+    $datasetOutput = New-Item -ItemType Directory -Force (Join-Path $output "datasets\enterprise-knowledge")
+    Copy-Item $enterpriseDataset $datasetOutput -Recurse
+}
 
 $previousErrorPreference = $ErrorActionPreference
 $ErrorActionPreference = "Continue"
