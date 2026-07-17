@@ -50,6 +50,8 @@ npm --prefix platform/apps/web ci
 
 Verify every entry in `SHA256SUMS` after transfer. Do not transfer `.env`, API keys, tokens, database volumes, or upstream source mirrors.
 
+The release builder emits precompressed `.wasm.gz` files. Nginx serves them with `gzip_static`; the native installer fails if `/openIM.wasm` does not return `Content-Encoding: gzip` for a gzip-capable client. The signed-out entry point must remain independent of the OpenIM SDK so an OIDC redirect cannot abort an unnecessary WASM initialization.
+
 ## Infrastructure
 
 Copy `platform/deploy/local` into `$DEPLOY_ROOT/platform`. Generate `platform/.env` on node2 with independent PostgreSQL and Keycloak passwords plus `PLATFORM_NODE2_PUBLIC_HOST`.
@@ -76,7 +78,7 @@ docker exec -i openim-platform-local-postgres-1 \
 
 ## Services
 
-The native installer verifies the release, creates or verifies TLS material, configures the existing Keycloak client without deleting its volume, runs migrations and fixtures, and invokes the generalized deployment scripts:
+The native installer verifies the release, creates or verifies TLS material, configures the existing Keycloak client without deleting its volume, runs migrations and fixtures, and invokes the generalized deployment scripts. Nginx routes the exact `/auth/callback` path to the Web SPA before forwarding the remaining `/auth/` namespace to Keycloak:
 
 ```bash
 sudo bash "$DEPLOY_ROOT/ops/install-node2-native-runtime.sh" \
