@@ -7,6 +7,7 @@ version="$(basename "$release_root")"
 source_root="$release_root/web"
 web_root=/srv/openim-platform/web
 destination="$web_root/$version"
+health_url="${OPENIM_PLATFORM_WEB_HEALTH_URL:-https://127.0.0.1:3443/}"
 
 [[ "$(id -u)" -eq 0 ]] || {
   echo "run as root" >&2
@@ -46,5 +47,5 @@ fi
 nginx -t
 systemctl enable nginx.service
 systemctl restart nginx.service
-curl -fsS --max-time 5 http://127.0.0.1:3000/ >/dev/null
+curl -fsS --max-time 5 "$health_url" >/dev/null
 echo "native_web=ready"

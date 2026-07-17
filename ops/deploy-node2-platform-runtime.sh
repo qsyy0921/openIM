@@ -43,7 +43,7 @@ for path in \
 done
 
 postgres_password="$(sed -n 's/^PLATFORM_LOCAL_POSTGRES_PASSWORD=//p' "$deploy_root/platform/.env" | tr -d '\r')"
-openim_secret="$(sed -n 's/^OPENIM_SECRET=//p' "$deploy_root/openim/.env" | tail -1 | tr -d '\r')"
+openim_secret="$(sed -n 's/^OPENIM_SECRET=//p' "$deploy_root/openim/.env" | tail -1 | tr -d '\r' | sed -E 's/[[:space:]]+#.*$//')"
 [[ -n "$postgres_password" && -n "$openim_secret" ]] || {
   echo "host-local PostgreSQL or OpenIM secret is empty" >&2
   exit 1

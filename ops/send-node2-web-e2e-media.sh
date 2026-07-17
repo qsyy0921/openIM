@@ -41,7 +41,7 @@ PY
 media_url="${decoded[0]}"
 file_name="${decoded[1]}"
 
-secret="$(sed -n 's/^OPENIM_SECRET=//p' "$openim_env" | tail -1 | tr -d '\r')"
+secret="$(sed -n 's/^OPENIM_SECRET=//p' "$openim_env" | tail -1 | tr -d '\r' | sed -E 's/[[:space:]]+#.*$//')"
 admin_response="$(curl -fsS --max-time 10 -X POST \
   http://127.0.0.1:12002/auth/get_admin_token \
   -H 'Content-Type: application/json' \

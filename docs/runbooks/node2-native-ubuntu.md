@@ -13,20 +13,27 @@ Status: executable deployment path for Ubuntu 26.04 on `qsyy0921@172.31.50.2` or
 
 ## Public addresses
 
-The current reachable management address is `192.168.0.38`. The static wired address is `172.31.50.2`. Select one as `PLATFORM_NODE2_PUBLIC_HOST` before starting Keycloak and building Web; the OIDC issuer and Web build must use the same host.
+The current reachable management address is `192.168.0.38`. The static wired address is `172.31.50.2`. Select one as `PLATFORM_NODE2_PUBLIC_HOST` before starting Keycloak and building Web; the HTTPS origin, OIDC issuer, and Web build must use the same host.
 
 Published ports:
 
 | Port | Service |
 | --- | --- |
-| `3000` | enterprise collaboration Web |
-| `18080` | Platform API |
-| `18081` | Keycloak |
+| `3000` | HTTP-to-HTTPS redirect only |
+| `3443` | HTTPS Web, OIDC, Platform/OpenIM API proxy, and secure WebSocket |
 | `12001` / `12002` | OpenIM WebSocket / API aliases |
 | `12005` | OpenIM MinIO alias |
 | `12008` / `12009` | OpenIM Chat / Admin API aliases |
 
-PostgreSQL `15432`, Kafka `19094`, and intelligence worker `18082` remain loopback-only.
+Platform API `18080`, Keycloak `18081`, PostgreSQL `15432`, Kafka `19094`, and intelligence worker `18082` remain loopback-only. Browser traffic must use the `3443` ingress.
+
+The installer creates a Node2-local lab CA and server certificate under root-owned `/etc/openim-platform/tls`. It exports only the public CA certificate to `$DEPLOY_ROOT/native-ubuntu/openim-node2-lab-ca.crt`. Import that public certificate into the controller user's trust store before opening the Web client:
+
+```powershell
+certutil.exe -user -addstore Root .\openim-node2-lab-ca.crt
+```
+
+Never copy `lab-ca.key` or `node2.key` from Node2. Set `OPENIM_PLATFORM_TLS_ROTATE=true` only for an explicit lab certificate rotation, then replace the controller's old CA trust entry.
 
 ## Release
 
@@ -36,9 +43,9 @@ From a clean Windows worktree:
 npm --prefix platform/apps/web ci
 ./ops/build-release.ps1 `
   -Version <version> `
-  -WebPublicOrigin http://<public-host>:3000 `
-  -WebOIDCAuthority http://<public-host>:18081/realms/platform `
-  -WebOpenIMWSURL ws://<public-host>:12001
+  -WebPublicOrigin https://<public-host>:3443 `
+  -WebOIDCAuthority https://<public-host>:3443/auth/realms/platform `
+  -WebOpenIMWSURL wss://<public-host>:3443/openim-ws
 ```
 
 Verify every entry in `SHA256SUMS` after transfer. Do not transfer `.env`, API keys, tokens, database volumes, or upstream source mirrors.
@@ -47,14 +54,14 @@ Verify every entry in `SHA256SUMS` after transfer. Do not transfer `.env`, API k
 
 Copy `platform/deploy/local` into `$DEPLOY_ROOT/platform`. Generate `platform/.env` on node2 with independent PostgreSQL and Keycloak passwords plus `PLATFORM_NODE2_PUBLIC_HOST`.
 
-Apply `node2-native-ubuntu.override.yaml` when starting PostgreSQL and Keycloak. Apply `openim-native-ubuntu.override.yaml` to the pinned OpenIM Compose project to publish the stable aliases and host-only Kafka listener.
+Apply `node2-native-ubuntu.override.yaml` when starting PostgreSQL and Keycloak. Keycloak listens only on Node2 loopback under `/auth`; Nginx terminates TLS and publishes its canonical issuer. Apply `openim-native-ubuntu.override.yaml` to the pinned OpenIM Compose project to publish the stable aliases and host-only Kafka listener.
 
 Run migrations `0001` through `0008`, then apply `seed-node2-native-identity.sql` with the exact public issuer:
 
 ```bash
 docker exec -i openim-platform-local-postgres-1 \
   psql -v ON_ERROR_STOP=1 \
-  -v platform_oidc_issuer=http://<public-host>:18081/realms/platform \
+  -v platform_oidc_issuer=https://<public-host>:3443/auth/realms/platform \
   -U platform -d platform \
   < platform/deploy/local/seed-node2-native-identity.sql
 ```
@@ -69,7 +76,7 @@ docker exec -i openim-platform-local-postgres-1 \
 
 ## Services
 
-The native installer verifies the release, runs migrations and fixtures, and invokes the generalized deployment scripts:
+The native installer verifies the release, creates or verifies TLS material, configures the existing Keycloak client without deleting its volume, runs migrations and fixtures, and invokes the generalized deployment scripts:
 
 ```bash
 sudo bash "$DEPLOY_ROOT/ops/install-node2-native-runtime.sh" \

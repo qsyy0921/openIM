@@ -8,7 +8,8 @@ public_host="${4:?public host is required}"
 runtime_group="${OPENIM_PLATFORM_RUNTIME_GROUP:-$runtime_user}"
 bin_dir="$release_root/linux-amd64"
 postgres_container="${OPENIM_PLATFORM_POSTGRES_CONTAINER:-openim-platform-local-postgres-1}"
-oidc_issuer="http://$public_host:18081/realms/platform"
+public_origin="${OPENIM_PLATFORM_PUBLIC_ORIGIN:-https://$public_host:3443}"
+oidc_issuer="$public_origin/auth/realms/platform"
 
 [[ "$(id -u)" -eq 0 ]] || {
   echo "run as root" >&2
@@ -43,6 +44,8 @@ required_paths=(
   "$deploy_root/ops/deploy-node2-platform-runtime.sh"
   "$deploy_root/ops/deploy-node2-agent-runtime.sh"
   "$deploy_root/ops/deploy-node2-native-web.sh"
+  "$deploy_root/ops/install-node2-native-tls.sh"
+  "$deploy_root/ops/configure-node2-native-keycloak.sh"
   "$release_root/SHA256SUMS"
   "$release_root/datasets/enterprise-knowledge/v1/postgres_import.sql"
   "$bin_dir/platform-migrate"
@@ -62,6 +65,15 @@ docker inspect "$postgres_container" >/dev/null 2>&1 || {
   exit 1
 }
 docker exec "$postgres_container" pg_isready -U platform -d platform >/dev/null
+
+bash "$deploy_root/ops/install-node2-native-tls.sh" \
+  "$public_host" \
+  "$runtime_user" \
+  "$deploy_root/native-ubuntu/nginx-openim-platform.conf" \
+  "$deploy_root/native-ubuntu/openim-node2-lab-ca.crt"
+bash "$deploy_root/ops/configure-node2-native-keycloak.sh" \
+  "$deploy_root/platform/.env" \
+  "$public_origin"
 
 (
   cd "$release_root"
@@ -105,8 +117,10 @@ export OPENIM_PLATFORM_RUNTIME_USER="$runtime_user"
 export OPENIM_PLATFORM_RUNTIME_GROUP="$runtime_group"
 export OPENIM_PLATFORM_MFL_ROOT="$(dirname "$(dirname "$release_root")")"
 export OPENIM_PLATFORM_OIDC_ISSUER="$oidc_issuer"
-export OPENIM_PLATFORM_OPENIM_WS_URL="ws://$public_host:12001"
+export OPENIM_PLATFORM_OPENIM_WS_URL="wss://$public_host:3443/openim-ws"
+export OPENIM_PLATFORM_HTTP_ADDR="127.0.0.1:18080"
 export OPENIM_INTELLIGENCE_INSTALL_DEPENDENCIES=true
+export OPENIM_PLATFORM_WEB_HEALTH_URL="$public_origin/"
 
 bash "$deploy_root/ops/deploy-node2-platform-runtime.sh" "$deploy_root" "$release_root"
 bash "$deploy_root/ops/deploy-node2-agent-runtime.sh" "$deploy_root" "$release_root"
