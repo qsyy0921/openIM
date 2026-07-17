@@ -19,6 +19,12 @@ payload = {
     "tenant_id": "node2-acceptance-tenant",
     "conversation_id": "node2-intelligence-acceptance",
     "sender_id": "node2-acceptance-user",
+    "agent_id": "node2-acceptance-agent",
+    "agent_version_id": "node2-acceptance-version-1",
+    "agent_spec_checksum": "sha256:" + "a" * 64,
+    "instructions": "Answer only from the supplied authorized evidence and cite it.",
+    "model_route": "deepseek-v4-pro",
+    "allowed_action_types": ["create_ticket"],
     "content": "根据证据说明本次迁移的验收范围。",
     "evidence": [
         {
@@ -29,7 +35,7 @@ payload = {
             "title": "Node2 migration acceptance",
             "source_uri": "openim://acceptance/node2",
             "checksum": "node2-acceptance-checksum",
-            "content": "本次验收仅覆盖 Windows node1 与 Windows/WSL2 node2，不包含其他主机。",
+            "content": "本次验收仅覆盖 Windows node1 与原生 Ubuntu node2，不包含其他主机。",
         }
     ],
 }

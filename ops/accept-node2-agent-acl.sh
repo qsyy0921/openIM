@@ -6,7 +6,7 @@ openim_env="$deploy_root/openim/.env"
 postgres_container=openim-platform-local-postgres-1
 tenant_id=aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa
 member_id=bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb
-document_id=dddddddd-dddd-4ddd-8ddd-dddddddddddd
+document_id=0c202ead-9feb-50b2-b52e-5322d1aeb679
 grant_removed=false
 
 psql_value() {
@@ -20,7 +20,7 @@ restore_grant() {
 }
 trap restore_grant EXIT
 
-secret="$(sed -n 's/^OPENIM_SECRET=//p' "$openim_env" | tail -1 | tr -d '\r')"
+secret="$(sed -n 's/^OPENIM_SECRET=//p' "$openim_env" | tail -1 | tr -d '\r' | sed -E 's/[[:space:]]+#.*$//')"
 sender="$(psql_value "select openim_user_id from identity.identity_links where member_id='$member_id' and provisioning_state='ready'")"
 [[ -n "$secret" && -n "$sender" ]] || {
   echo "OpenIM secret or provisioned sender is missing" >&2
@@ -87,7 +87,7 @@ PY
 }
 
 nonce="$(date +%s%N)"
-valid="$(send_and_wait "valid-$nonce" 'OpenIM 平台 本机优先开发 PostgreSQL Keycloak')"
+valid="$(send_and_wait "valid-$nonce" '第三方安全评估管理制度')"
 IFS='|' read -r valid_run valid_model valid_provider valid_citations <<<"$valid"
 [[ "$valid_model" == deepseek-v4-pro && -n "$valid_provider" && "$valid_citations" -ge 1 ]] || {
   echo "authorized evidence was not processed by DeepSeek: $valid" >&2
@@ -97,7 +97,7 @@ echo "authorized_acl_rag=accepted run_id=$valid_run citations=$valid_citations"
 
 psql_value "DELETE FROM authz.document_grants WHERE tenant_id='$tenant_id' AND document_id='$document_id' AND member_id='$member_id' AND permission='read'" >/dev/null
 grant_removed=true
-revoked="$(send_and_wait "revoked-$nonce" 'OpenIM 平台 本机优先开发 PostgreSQL Keycloak')"
+revoked="$(send_and_wait "revoked-$nonce" '第三方安全评估管理制度')"
 IFS='|' read -r revoked_run revoked_model revoked_provider revoked_citations <<<"$revoked"
 [[ "$revoked_model" == runtime-policy && "$revoked_provider" == no-evidence:* && "$revoked_citations" -eq 0 ]] || {
   echo "revoked evidence escaped authorization: $revoked" >&2
@@ -105,7 +105,7 @@ IFS='|' read -r revoked_run revoked_model revoked_provider revoked_citations <<<
 }
 echo "revoked_acl=denied run_id=$revoked_run citations=0"
 
-restore_grant
+psql_value "INSERT INTO authz.document_grants(tenant_id,document_id,member_id,permission) VALUES('$tenant_id','$document_id','$member_id','read') ON CONFLICT DO NOTHING" >/dev/null
 grant_removed=false
 no_match="$(send_and_wait "no-match-$nonce" "不存在的验收词条 $nonce")"
 IFS='|' read -r no_match_run no_match_model no_match_provider no_match_citations <<<"$no_match"

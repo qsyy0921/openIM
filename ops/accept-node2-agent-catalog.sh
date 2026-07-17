@@ -105,7 +105,7 @@ fi
 activate "$version_two_id" "$revision"
 rollback_needed=true
 
-secret="$(sed -n 's/^OPENIM_SECRET=//p' "$openim_env" | tail -1 | tr -d '\r')"
+secret="$(sed -n 's/^OPENIM_SECRET=//p' "$openim_env" | tail -1 | tr -d '\r' | sed -E 's/[[:space:]]+#.*$//')"
 admin_response="$(curl -fsS --max-time 10 -X POST \
   http://127.0.0.1:12002/auth/get_admin_token \
   -H 'Content-Type: application/json' \
