@@ -128,5 +128,13 @@ bash "$deploy_root/ops/deploy-node2-native-web.sh" \
   "$release_root" \
   "$deploy_root/native-ubuntu/nginx-openim-platform.conf"
 
+callback_title="$(curl --silent --show-error --fail \
+  --cacert "$deploy_root/native-ubuntu/openim-node2-lab-ca.crt" \
+  "$public_origin/auth/callback" | sed -n 's:.*<title>\(.*\)</title>.*:\1:p' | head -1)"
+[[ "$callback_title" == "OpenIM Workspace" ]] || {
+  echo "OIDC callback is not routed to the Web application" >&2
+  exit 1
+}
+
 echo "dataset=documents:$documents,versions:$versions,chunks:$chunks,grants:$grants"
 echo "node2_native_runtime=installed"
