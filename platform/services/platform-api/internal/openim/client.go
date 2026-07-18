@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"sort"
 	"sync"
 	"time"
 )
@@ -180,6 +181,54 @@ func (c *Client) GetUserToken(ctx context.Context, userID string, platformID int
 		return "", time.Time{}, errors.New("OpenIM returned empty user token or invalid expiry")
 	}
 	return response.Token, time.Now().Add(time.Duration(response.ExpireTimeSeconds) * time.Second), nil
+}
+
+func (c *Client) GetOnlinePlatforms(ctx context.Context, userID string) ([]int32, error) {
+	adminToken, err := c.getAdminToken(ctx)
+	if err != nil {
+		return nil, err
+	}
+	request := struct {
+		UserIDs []string `json:"userIDs"`
+	}{UserIDs: []string{userID}}
+	var response []struct {
+		UserID               string `json:"userID"`
+		Status               int32  `json:"status"`
+		DetailPlatformStatus []struct {
+			PlatformID int32 `json:"platformID"`
+		} `json:"detailPlatformStatus"`
+	}
+	if err := c.post(ctx, "/user/get_users_online_status", adminToken, request, &response); err != nil {
+		return nil, err
+	}
+	platforms := make([]int32, 0)
+	seen := make(map[int32]struct{})
+	for _, user := range response {
+		if user.UserID != userID || user.Status == 0 {
+			continue
+		}
+		for _, detail := range user.DetailPlatformStatus {
+			if _, ok := seen[detail.PlatformID]; ok {
+				continue
+			}
+			seen[detail.PlatformID] = struct{}{}
+			platforms = append(platforms, detail.PlatformID)
+		}
+	}
+	sort.Slice(platforms, func(i, j int) bool { return platforms[i] < platforms[j] })
+	return platforms, nil
+}
+
+func (c *Client) ForceLogout(ctx context.Context, userID string, platformID int32) error {
+	adminToken, err := c.getAdminToken(ctx)
+	if err != nil {
+		return err
+	}
+	request := struct {
+		UserID     string `json:"userID"`
+		PlatformID int32  `json:"platformID"`
+	}{UserID: userID, PlatformID: platformID}
+	return c.post(ctx, "/auth/force_logout", adminToken, request, nil)
 }
 
 func (c *Client) getAdminToken(ctx context.Context) (string, error) {

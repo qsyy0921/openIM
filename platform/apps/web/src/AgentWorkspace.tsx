@@ -46,14 +46,14 @@ export function AgentWorkspace({ controller, state }: AgentWorkspaceProps) {
         </header>
         <button className="agent-item active" aria-current="page">
           <span className="agent-avatar"><Bot size={20} /></span>
-          <span><strong>Enterprise Agent</strong><small>知识问答 · 工单审批</small></span>
+          <span><strong>{state.agent?.display_name ?? "正在加载"}</strong><small>{state.agent?.description ?? "读取 Agent Catalog"}</small></span>
         </button>
       </aside>
 
       <section className="agent-main" aria-label="Agent 工作台">
         <header className="agent-header">
           <span className="agent-avatar"><Bot size={20} /></span>
-          <div><h2>Enterprise Agent</h2><span data-testid="agent-user-id">{state.agentUserID || "正在初始化"}</span></div>
+          <div><h2>{state.agent?.display_name ?? "Agent"}</h2><span data-testid="agent-user-id">{state.agentUserID || "正在初始化"}</span></div>
           <span className="agent-policy"><ShieldCheck size={15} />权限约束</span>
         </header>
 
@@ -73,6 +73,7 @@ export function AgentWorkspace({ controller, state }: AgentWorkspaceProps) {
                 <span className="agent-avatar small"><Bot size={15} /></span>
                 <div className="agent-response">
                   <div className={`run-state ${run.state}`}><Clock3 size={13} />{runStatus(run)}</div>
+                  <small className="agent-version" title={run.agent_spec_checksum}>{run.agent_display_name} · v{run.agent_version_number}</small>
                   {run.answer && <p>{run.answer}</p>}
                   {run.last_error && <p className="agent-run-error">{run.last_error}</p>}
                   {run.citations.length > 0 && (
@@ -119,7 +120,7 @@ export function AgentWorkspace({ controller, state }: AgentWorkspaceProps) {
         <footer className="agent-composer">
           <textarea
             aria-label="向 Agent 提问"
-            placeholder="向 Enterprise Agent 提问"
+            placeholder={`向 ${state.agent?.display_name ?? "Agent"} 提问`}
             maxLength={4000}
             value={draft}
             onChange={(event) => setDraft(event.target.value)}

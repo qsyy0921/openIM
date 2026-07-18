@@ -22,7 +22,12 @@ type Trigger struct {
 	ConversationID string
 	SenderID       string
 	SessionType    int32
-	Prompt         string
+	Mentions       []Mention
+}
+
+type Mention struct {
+	Alias  string
+	Prompt string
 }
 
 func Classify(event ingress.Event) (Trigger, bool, error) {
@@ -38,20 +43,48 @@ func Classify(event ingress.Event) (Trigger, bool, error) {
 	if err := json.Unmarshal([]byte(event.Content), &content); err != nil {
 		return Trigger{}, false, errors.New("text content is not valid JSON")
 	}
-	lower := strings.ToLower(content.Content)
-	marker := strings.Index(lower, "@agent")
-	if marker < 0 {
+	mentions := extractMentions(content.Content)
+	if len(mentions) == 0 {
 		return Trigger{}, false, nil
-	}
-	prompt := strings.TrimSpace(content.Content[:marker] + content.Content[marker+len("@agent"):])
-	if prompt == "" {
-		return Trigger{}, false, errors.New("agent prompt is empty")
 	}
 	if event.SessionType != 1 && event.SessionType != 2 {
 		return Trigger{}, false, errors.New("agent session type is unsupported")
 	}
 	return Trigger{
 		EventID: event.EventID, TenantID: event.TenantID, ConversationID: event.ConversationID,
-		SenderID: event.SenderID, SessionType: event.SessionType, Prompt: prompt,
+		SenderID: event.SenderID, SessionType: event.SessionType, Mentions: mentions,
 	}, true, nil
+}
+
+func extractMentions(content string) []Mention {
+	seen := make(map[string]struct{})
+	result := make([]Mention, 0, 2)
+	for index := 0; index < len(content); index++ {
+		if content[index] != '@' || (index > 0 && isAliasByte(content[index-1])) {
+			continue
+		}
+		end := index + 1
+		for end < len(content) && isAliasByte(content[end]) {
+			end++
+		}
+		if end == index+1 {
+			continue
+		}
+		alias := strings.ToLower(content[index:end])
+		if _, duplicate := seen[alias]; duplicate {
+			continue
+		}
+		seen[alias] = struct{}{}
+		result = append(result, Mention{
+			Alias:  alias,
+			Prompt: strings.TrimSpace(content[:index] + content[end:]),
+		})
+		index = end - 1
+	}
+	return result
+}
+
+func isAliasByte(value byte) bool {
+	return value >= 'a' && value <= 'z' || value >= 'A' && value <= 'Z' ||
+		value >= '0' && value <= '9' || value == '_' || value == '-'
 }

@@ -1,7 +1,7 @@
-import { MessageStatus, MessageType, SessionType, type ConversationItem, type MessageItem } from "@openim/wasm-client-sdk";
+import { GroupMemberRole, MessageReceiveOptType, MessageStatus, MessageType, SessionType, type ConversationItem, type GroupMemberItem, type MessageItem, type RevokedInfo } from "@openim/wasm-client-sdk";
 import { describe, expect, it } from "vitest";
 
-import { SingleChatController, type ChatEvents, type ChatPort } from "./chat";
+import { MAX_FILE_BYTES, MAX_IMAGE_BYTES, ConversationController, canForwardMessage, canInviteGroupMembers, canQuoteMessage, canRemoveGroupMember, canRequestRevoke, type ChatEvents, type ChatPort } from "./chat";
 
 function conversation(id: string, userID: string, unreadCount = 0, type = SessionType.Single): ConversationItem {
   return {
@@ -13,23 +13,68 @@ function conversation(id: string, userID: string, unreadCount = 0, type = Sessio
     unreadCount,
     latestMsg: "",
     latestMsgSendTime: 1,
-    isPinned: false
+    isPinned: false,
+    recvMsgOpt: MessageReceiveOptType.Normal
   } as ConversationItem;
 }
 
-function message(id: string, sendID: string, recvID: string, text = id, status = MessageStatus.Succeed): MessageItem {
+function message(
+  id: string,
+  sendID: string,
+  recvID: string,
+  text = id,
+  status = MessageStatus.Succeed,
+  type = SessionType.Single,
+  groupID = ""
+): MessageItem {
   return {
     clientMsgID: id,
     serverMsgID: `server-${id}`,
     createTime: Number(id.replace(/\D/g, "")) || 1,
     sendTime: Number(id.replace(/\D/g, "")) || 1,
-    sessionType: SessionType.Single,
+    sessionType: type,
     sendID,
     recvID,
+    groupID,
+    senderNickname: sendID,
     contentType: MessageType.TextMessage,
     status,
     textElem: { content: text }
   } as MessageItem;
+}
+
+function mediaMessage(
+  id: string,
+  contentType: MessageType.PictureMessage | MessageType.FileMessage,
+  sendID = "self",
+  recvID = "peer",
+  sessionType = SessionType.Single,
+  groupID = ""
+): MessageItem {
+  const common = {
+    ...message(id, sendID, recvID, "", MessageStatus.Sending, sessionType, groupID),
+    contentType,
+    textElem: undefined
+  };
+  if (contentType === MessageType.PictureMessage) {
+    const picture = { uuid: `uuid-${id}`, type: "image/png", size: 4, width: 2, height: 2, url: "https://media.example/image.png" };
+    return { ...common, pictureElem: { sourcePath: "", sourcePicture: picture, bigPicture: picture, snapshotPicture: picture } } as MessageItem;
+  }
+  return {
+    ...common,
+    fileElem: {
+      filePath: "",
+      uuid: `uuid-${id}`,
+      sourceUrl: "https://media.example/report.txt",
+      fileName: "report.txt",
+      fileSize: 4,
+      fileType: "text/plain"
+    }
+  } as MessageItem;
+}
+
+function groupMember(userID: string, roleLevel = GroupMemberRole.Normal, groupID = "group-1"): GroupMemberItem {
+  return { groupID, userID, nickname: userID, roleLevel } as GroupMemberItem;
 }
 
 class FakePort implements ChatPort {
@@ -37,19 +82,108 @@ class FakePort implements ChatPort {
   unread = 0;
   historyMessages: MessageItem[] = [];
   historyEnd = true;
+  historyCalls = 0;
+  surroundingMessages: MessageItem[] = [];
+  surroundingError: Error | null = null;
+  surroundingCalls: Array<{ conversationID: string; clientMsgID: string }> = [];
   sentResult: MessageItem | null = null;
   sendError: Error | null = null;
   handlers: ChatEvents | null = null;
   markedRead: string[] = [];
+  sentConversations: ConversationItem[] = [];
+  members: GroupMemberItem[] = [];
+  createdGroup = conversation("group-new", "group-new", 0, SessionType.Group);
+  createdGroupArgs: { name: string; memberUserIDs: string[] } | null = null;
+  imageCreates = 0;
+  fileCreates = 0;
+  settingCalls: Array<{ conversationID: string; patch: { isPinned?: boolean; recvMsgOpt?: MessageReceiveOptType } }> = [];
+  settingError: Error | null = null;
+  groupInvites: Array<{ groupID: string; userIDs: string[] }> = [];
+  groupRemovals: Array<{ groupID: string; userID: string }> = [];
+  leftGroups: string[] = [];
+  dismissedGroups: string[] = [];
+  groupActionError: Error | null = null;
+  quoteCreates: Array<{ text: string; sourceID: string }> = [];
+  forwardCreates: string[] = [];
+  revokedMessages: Array<{ conversationID: string; clientMsgID: string }> = [];
+  messageActionError: Error | null = null;
 
   listConversations = async () => this.conversations;
+  setConversation = async (conversationID: string, patch: { isPinned?: boolean; recvMsgOpt?: MessageReceiveOptType }) => {
+    this.settingCalls.push({ conversationID, patch });
+    if (this.settingError) throw this.settingError;
+  };
   totalUnread = async () => this.unread;
-  oneConversation = async (userID: string) => conversation(`si_self_${userID}`, userID);
-  history = async () => ({ isEnd: this.historyEnd, messageList: this.historyMessages });
+  oneConversation = async (sourceID: string, sessionType: SessionType) => conversation(
+    sessionType === SessionType.Group ? `group_${sourceID}` : `si_self_${sourceID}`,
+    sourceID,
+    0,
+    sessionType
+  );
+  history = async () => {
+    this.historyCalls += 1;
+    return { isEnd: this.historyEnd, messageList: this.historyMessages };
+  };
+  surrounding = async (conversationID: string, message: MessageItem) => {
+    this.surroundingCalls.push({ conversationID, clientMsgID: message.clientMsgID });
+    if (this.surroundingError) throw this.surroundingError;
+    return this.surroundingMessages;
+  };
   createText = async (text: string) => message("m100", "self", "peer", text, MessageStatus.Sending);
-  send = async (_receiverID: string, draft: MessageItem) => {
+  createQuote = async (text: string, source: MessageItem) => {
+    this.quoteCreates.push({ text, sourceID: source.clientMsgID });
+    if (this.messageActionError) throw this.messageActionError;
+    return {
+      ...message("quote-100", "self", "peer", text, MessageStatus.Sending),
+      contentType: MessageType.QuoteMessage,
+      textElem: undefined,
+      quoteElem: { text, quoteMessage: source }
+    } as MessageItem;
+  };
+  createForward = async (source: MessageItem) => {
+    this.forwardCreates.push(source.clientMsgID);
+    if (this.messageActionError) throw this.messageActionError;
+    return { ...source, clientMsgID: `forward-${source.clientMsgID}`, serverMsgID: "", status: MessageStatus.Sending };
+  };
+  createImage = async (_file: File) => {
+    this.imageCreates += 1;
+    return mediaMessage("image-100", MessageType.PictureMessage);
+  };
+  createFile = async (_file: File) => {
+    this.fileCreates += 1;
+    return mediaMessage("file-100", MessageType.FileMessage);
+  };
+  send = async (target: ConversationItem, draft: MessageItem) => {
+    this.sentConversations.push(target);
     if (this.sendError) throw this.sendError;
     return this.sentResult ?? { ...draft, serverMsgID: "server-sent", status: MessageStatus.Succeed };
+  };
+  createGroup = async (name: string, memberUserIDs: string[]) => {
+    this.createdGroupArgs = { name, memberUserIDs };
+    return this.createdGroup;
+  };
+  groupMembers = async () => this.members;
+  inviteGroupMembers = async (groupID: string, userIDs: string[]) => {
+    this.groupInvites.push({ groupID, userIDs });
+    if (this.groupActionError) throw this.groupActionError;
+    this.members = [...this.members, ...userIDs.map((userID) => groupMember(userID, GroupMemberRole.Normal, groupID))];
+  };
+  removeGroupMember = async (groupID: string, userID: string) => {
+    this.groupRemovals.push({ groupID, userID });
+    if (this.groupActionError) throw this.groupActionError;
+    this.members = this.members.filter((member) => member.userID !== userID);
+  };
+  leaveGroup = async (groupID: string) => {
+    this.leftGroups.push(groupID);
+    if (this.groupActionError) throw this.groupActionError;
+  };
+  dismissGroup = async (groupID: string) => {
+    this.dismissedGroups.push(groupID);
+    if (this.groupActionError) throw this.groupActionError;
+  };
+  revokeMessage = async (conversationID: string, clientMsgID: string) => {
+    this.revokedMessages.push({ conversationID, clientMsgID });
+    if (this.messageActionError) throw this.messageActionError;
   };
   markRead = async (conversationID: string) => { this.markedRead.push(conversationID); };
   subscribe = (events: ChatEvents) => {
@@ -58,23 +192,24 @@ class FakePort implements ChatPort {
   };
 }
 
-describe("SingleChatController", () => {
-  it("loads only single conversations and total unread", async () => {
+describe("ConversationController", () => {
+  it("loads single and group conversations with total unread", async () => {
     const port = new FakePort();
-    port.conversations = [conversation("single", "peer", 3), conversation("group", "group-1", 9, SessionType.Group)];
+    const dismissed = { ...conversation("dismissed", "group-old", 0, SessionType.Group), isNotInGroup: true };
+    port.conversations = [conversation("single", "peer", 3), conversation("group", "group-1", 9, SessionType.Group), dismissed];
     port.unread = 12;
-    const controller = new SingleChatController(port);
+    const controller = new ConversationController(port);
 
     await controller.start("self");
 
-    expect(controller.getState().conversations.map((item) => item.conversationID)).toEqual(["single"]);
+    expect(controller.getState().conversations.map((item) => item.conversationID)).toEqual(["single", "group"]);
     expect(controller.getState().totalUnread).toBe(12);
   });
 
   it("opens a direct conversation, loads history, and marks it read", async () => {
     const port = new FakePort();
     port.historyMessages = [message("m1", "peer", "self")];
-    const controller = new SingleChatController(port);
+    const controller = new ConversationController(port);
     await controller.start("self");
 
     await controller.openDirect("peer");
@@ -87,7 +222,7 @@ describe("SingleChatController", () => {
   it("moves an optimistic text message from sending to succeeded", async () => {
     const port = new FakePort();
     port.conversations = [conversation("single", "peer")];
-    const controller = new SingleChatController(port);
+    const controller = new ConversationController(port);
     await controller.start("self");
     await controller.select("single");
 
@@ -95,13 +230,390 @@ describe("SingleChatController", () => {
 
     expect(controller.getState().messages).toHaveLength(1);
     expect(controller.getState().messages[0]).toMatchObject({ clientMsgID: "m100", serverMsgID: "server-sent", status: MessageStatus.Succeed });
+    expect(port.sentConversations[0].conversationID).toBe("single");
+  });
+
+  it("filters the authoritative conversation projection by name, user ID, and group ID", async () => {
+    const port = new FakePort();
+    port.conversations = [
+      { ...conversation("single", "peer-user"), showName: "Design Team" },
+      { ...conversation("group", "group-42", 0, SessionType.Group), showName: "Release Room" }
+    ];
+    const controller = new ConversationController(port);
+    await controller.start("self");
+
+    controller.setConversationQuery("  DESIGN ");
+    expect(controller.visibleConversations().map((item) => item.conversationID)).toEqual(["single"]);
+    controller.setConversationQuery("peer-USER");
+    expect(controller.visibleConversations().map((item) => item.conversationID)).toEqual(["single"]);
+    controller.setConversationQuery("GROUP-42");
+    expect(controller.visibleConversations().map((item) => item.conversationID)).toEqual(["group"]);
+    controller.setConversationQuery("");
+    expect(controller.visibleConversations()).toHaveLength(2);
+    expect(controller.getState().conversations).toHaveLength(2);
+  });
+
+  it("pins only after the SDK setting call succeeds and keeps pinned ordering stable", async () => {
+    const port = new FakePort();
+    port.conversations = [
+      { ...conversation("older", "older"), latestMsgSendTime: 10 },
+      { ...conversation("newer", "newer"), latestMsgSendTime: 20 }
+    ];
+    const controller = new ConversationController(port);
+    await controller.start("self");
+
+    await controller.setPinned("older", true);
+
+    expect(port.settingCalls).toEqual([{ conversationID: "older", patch: { isPinned: true } }]);
+    expect(controller.getState().conversations.map((item) => [item.conversationID, item.isPinned])).toEqual([
+      ["older", true],
+      ["newer", false]
+    ]);
+    expect(controller.getState().conversationActionByID).toEqual({});
+  });
+
+  it("maps do-not-disturb to NotNotify and restores Normal when disabled", async () => {
+    const port = new FakePort();
+    port.conversations = [conversation("single", "peer")];
+    const controller = new ConversationController(port);
+    await controller.start("self");
+
+    await controller.setMuted("single", true);
+    await controller.setMuted("single", false);
+
+    expect(port.settingCalls).toEqual([
+      { conversationID: "single", patch: { recvMsgOpt: MessageReceiveOptType.NotNotify } },
+      { conversationID: "single", patch: { recvMsgOpt: MessageReceiveOptType.Normal } }
+    ]);
+    expect(controller.getState().conversations[0].recvMsgOpt).toBe(MessageReceiveOptType.Normal);
+  });
+
+  it("rejects unsupported NotReceive state without changing it", async () => {
+    const port = new FakePort();
+    port.conversations = [{ ...conversation("single", "peer"), recvMsgOpt: MessageReceiveOptType.NotReceive }];
+    const controller = new ConversationController(port);
+    await controller.start("self");
+
+    await expect(controller.setMuted("single", true)).rejects.toThrow("不接收消息");
+
+    expect(port.settingCalls).toEqual([]);
+    expect(controller.getState().conversations[0].recvMsgOpt).toBe(MessageReceiveOptType.NotReceive);
+    expect(controller.getState().error).toContain("不能在此切换");
+  });
+
+  it("keeps prior settings on SDK failure and clears the mutation marker", async () => {
+    const port = new FakePort();
+    port.conversations = [conversation("single", "peer")];
+    port.settingError = new Error("setting rejected");
+    const controller = new ConversationController(port);
+    await controller.start("self");
+
+    await expect(controller.setPinned("single", true)).rejects.toThrow("setting rejected");
+
+    expect(controller.getState().conversations[0].isPinned).toBe(false);
+    expect(controller.getState().conversationActionByID).toEqual({});
+    expect(controller.getState().error).toContain("setting rejected");
+  });
+
+  it("rejects a duplicate write for one conversation while another conversation can update", async () => {
+    const port = new FakePort();
+    port.conversations = [conversation("first", "first"), conversation("second", "second")];
+    let releaseFirst!: () => void;
+    port.setConversation = async (conversationID, patch) => {
+      port.settingCalls.push({ conversationID, patch });
+      if (conversationID === "first") await new Promise<void>((resolve) => { releaseFirst = resolve; });
+    };
+    const controller = new ConversationController(port);
+    await controller.start("self");
+
+    const first = controller.setPinned("first", true);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await expect(controller.setMuted("first", true)).rejects.toThrow("正在更新");
+    await controller.setMuted("second", true);
+    releaseFirst();
+    await first;
+
+    expect(port.settingCalls.map((item) => item.conversationID)).toEqual(["first", "second"]);
+    expect(controller.getState().conversations.find((item) => item.conversationID === "first")?.isPinned).toBe(true);
+    expect(controller.getState().conversations.find((item) => item.conversationID === "second")?.recvMsgOpt).toBe(MessageReceiveOptType.NotNotify);
+  });
+
+  it("loads supported media history while excluding unsupported custom messages", async () => {
+    const port = new FakePort();
+    port.conversations = [conversation("single", "peer")];
+    port.historyMessages = [
+      message("m1", "peer", "self"),
+      mediaMessage("image-1", MessageType.PictureMessage, "peer", "self"),
+      mediaMessage("file-1", MessageType.FileMessage, "peer", "self"),
+      { ...message("custom-1", "peer", "self"), contentType: MessageType.CustomMessage }
+    ];
+    const controller = new ConversationController(port);
+    await controller.start("self");
+
+    await controller.select("single");
+
+    expect(controller.getState().messages.map((item) => item.clientMsgID)).toEqual(["m1", "image-1", "file-1"]);
+  });
+
+  it("scopes and clamps real upload progress to the optimistic image", async () => {
+    const port = new FakePort();
+    port.conversations = [conversation("single", "peer")];
+    let resolveSend!: (message: MessageItem) => void;
+    port.send = async (_target, draft) => new Promise<MessageItem>((resolve) => {
+      resolveSend = () => resolve({ ...draft, serverMsgID: "server-image", status: MessageStatus.Succeed });
+    });
+    const controller = new ConversationController(port);
+    await controller.start("self");
+    await controller.select("single");
+
+    const sending = controller.sendImage(new File(["png"], "photo.png", { type: "image/png" }));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    port.handlers?.uploadProgress("unknown", 55);
+    port.handlers?.uploadProgress("image-100", 145.4);
+
+    expect(controller.getState().uploadProgressByClientMsgID).toEqual({ "image-100": 100 });
+    resolveSend(mediaMessage("unused", MessageType.PictureMessage));
+    await sending;
+    expect(controller.getState().messages[0]).toMatchObject({ clientMsgID: "image-100", serverMsgID: "server-image", status: MessageStatus.Succeed });
+    expect(controller.getState().uploadProgressByClientMsgID).toEqual({});
+  });
+
+  it("sends a file through the selected group conversation", async () => {
+    const port = new FakePort();
+    port.conversations = [conversation("group", "group-1", 0, SessionType.Group)];
+    const controller = new ConversationController(port);
+    await controller.start("self");
+    await controller.select("group");
+
+    await controller.sendFile(new File(["data"], "report.txt", { type: "text/plain" }));
+
+    expect(port.fileCreates).toBe(1);
+    expect(port.sentConversations[0]).toMatchObject({ conversationID: "group", groupID: "group-1" });
+    expect(controller.getState().messages[0]).toMatchObject({ contentType: MessageType.FileMessage, status: MessageStatus.Succeed });
+  });
+
+  it("rejects invalid media before invoking the SDK creation path", async () => {
+    const port = new FakePort();
+    port.conversations = [conversation("single", "peer")];
+    const controller = new ConversationController(port);
+    await controller.start("self");
+    await controller.select("single");
+
+    await expect(controller.sendImage(new File(["svg"], "vector.svg", { type: "image/svg+xml" }))).rejects.toThrow("仅支持");
+    await expect(controller.sendImage({ name: "large.png", size: MAX_IMAGE_BYTES + 1, type: "image/png" } as File)).rejects.toThrow("20 MiB");
+    await expect(controller.sendFile(new File([], "empty.txt", { type: "text/plain" }))).rejects.toThrow("空文件");
+    await expect(controller.sendFile({ name: "large.bin", size: MAX_FILE_BYTES + 1, type: "application/octet-stream" } as File)).rejects.toThrow("100 MiB");
+    expect(port.imageCreates).toBe(0);
+    expect(port.fileCreates).toBe(0);
+    expect(controller.getState().error).toContain("100 MiB");
+  });
+
+  it("keeps failed media visible and retains its last upload progress", async () => {
+    const port = new FakePort();
+    port.conversations = [conversation("single", "peer")];
+    port.send = async (_target, draft) => {
+      port.handlers?.uploadProgress(draft.clientMsgID, 42);
+      throw new Error("upload rejected");
+    };
+    const controller = new ConversationController(port);
+    await controller.start("self");
+    await controller.select("single");
+
+    await expect(controller.sendFile(new File(["data"], "report.txt", { type: "text/plain" }))).rejects.toThrow("upload rejected");
+
+    expect(controller.getState().messages[0].status).toBe(MessageStatus.Failed);
+    expect(controller.getState().uploadProgressByClientMsgID).toEqual({ "file-100": 42 });
+    expect(controller.getState().error).toContain("发送失败");
+  });
+
+  it("removes SDK event handlers when stopped", async () => {
+    const port = new FakePort();
+    const controller = new ConversationController(port);
+    await controller.start("self");
+    expect(port.handlers).not.toBeNull();
+
+    controller.stop();
+
+    expect(port.handlers).toBeNull();
+  });
+
+  it("loads group history and members, then sends to the selected group", async () => {
+    const port = new FakePort();
+    port.conversations = [conversation("group", "group-1", 2, SessionType.Group)];
+    port.historyMessages = [message("m1", "member-1", "", "group history", MessageStatus.Succeed, SessionType.Group, "group-1")];
+    port.members = [{ groupID: "group-1", userID: "member-1", nickname: "Member", roleLevel: GroupMemberRole.Normal }] as GroupMemberItem[];
+    const controller = new ConversationController(port);
+    await controller.start("self");
+
+    await controller.select("group");
+    await controller.sendText("group message");
+
+    expect(controller.getState().messages.map((item) => item.textElem?.content)).toEqual(["group history", "group message"]);
+    expect(controller.getState().groupMembers[0].userID).toBe("member-1");
+    expect(port.sentConversations[0].groupID).toBe("group-1");
+  });
+
+  it("discards stale group-member results after switching conversations", async () => {
+    const port = new FakePort();
+    port.conversations = [conversation("group", "group-1", 0, SessionType.Group), conversation("single", "peer")];
+    let resolveMembers!: (members: GroupMemberItem[]) => void;
+    const membersPromise = new Promise<GroupMemberItem[]>((resolve) => { resolveMembers = resolve; });
+    port.groupMembers = () => membersPromise;
+    const controller = new ConversationController(port);
+    await controller.start("self");
+
+    const groupSelection = controller.select("group");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await controller.select("single");
+    resolveMembers([{ groupID: "group-1", userID: "late", nickname: "Late", roleLevel: GroupMemberRole.Normal } as GroupMemberItem]);
+    await groupSelection;
+
+    expect(controller.getState()).toMatchObject({ activeConversationID: "single", groupMembers: [], loadingGroupMembers: false });
+  });
+
+  it("projects owner, admin, and normal member removal permissions", () => {
+    const ownerMembers = [groupMember("owner", GroupMemberRole.Owner), groupMember("admin", GroupMemberRole.Admin), groupMember("normal")];
+    expect(canInviteGroupMembers(ownerMembers, "owner")).toBe(true);
+    expect(canInviteGroupMembers(ownerMembers, "admin")).toBe(true);
+    expect(canInviteGroupMembers(ownerMembers, "normal")).toBe(false);
+    expect(canRemoveGroupMember(ownerMembers, "owner", "admin")).toBe(true);
+    expect(canRemoveGroupMember(ownerMembers, "admin", "normal")).toBe(true);
+    expect(canRemoveGroupMember(ownerMembers, "admin", "owner")).toBe(false);
+    expect(canRemoveGroupMember(ownerMembers, "admin", "admin")).toBe(false);
+    expect(canRemoveGroupMember(ownerMembers, "normal", "admin")).toBe(false);
+  });
+
+  it("invites only unique non-members and refreshes the active group", async () => {
+    const port = new FakePort();
+    port.conversations = [conversation("group", "group-1", 0, SessionType.Group)];
+    port.members = [groupMember("self", GroupMemberRole.Owner), groupMember("existing")];
+    const controller = new ConversationController(port);
+    await controller.start("self");
+    await controller.select("group");
+
+    await controller.inviteGroupMembers(["existing", "new-member", "new-member", "self"]);
+
+    expect(port.groupInvites).toEqual([{ groupID: "group-1", userIDs: ["new-member"] }]);
+    expect(controller.getState().groupMembers.map((member) => member.userID)).toEqual(["self", "existing", "new-member"]);
+    expect(controller.getState().groupAction).toBeNull();
+  });
+
+  it("removes one permitted member and rejects a stale or forbidden target", async () => {
+    const port = new FakePort();
+    port.conversations = [conversation("group", "group-1", 0, SessionType.Group)];
+    port.members = [groupMember("self", GroupMemberRole.Admin), groupMember("normal"), groupMember("other-admin", GroupMemberRole.Admin)];
+    const controller = new ConversationController(port);
+    await controller.start("self");
+    await controller.select("group");
+
+    await controller.removeGroupMember("normal");
+    await expect(controller.removeGroupMember("other-admin")).rejects.toThrow("不能移除");
+
+    expect(port.groupRemovals).toEqual([{ groupID: "group-1", userID: "normal" }]);
+    expect(controller.getState().groupMembers.map((member) => member.userID)).toEqual(["self", "other-admin"]);
+    expect(controller.getState().error).toContain("不能移除");
+  });
+
+  it("keeps group state on lifecycle failure and rejects a concurrent action", async () => {
+    const port = new FakePort();
+    port.conversations = [conversation("group", "group-1", 0, SessionType.Group)];
+    port.members = [groupMember("self", GroupMemberRole.Owner), groupMember("normal")];
+    let release!: () => void;
+    port.removeGroupMember = async (groupID, userID) => {
+      port.groupRemovals.push({ groupID, userID });
+      await new Promise<void>((resolve) => { release = resolve; });
+      throw new Error("remove rejected");
+    };
+    const controller = new ConversationController(port);
+    await controller.start("self");
+    await controller.select("group");
+
+    const removing = controller.removeGroupMember("normal");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await expect(controller.dismissActiveGroup()).rejects.toThrow("正在执行");
+    release();
+    await expect(removing).rejects.toThrow("remove rejected");
+
+    expect(controller.getState().activeConversationID).toBe("group");
+    expect(controller.getState().groupMembers.map((member) => member.userID)).toContain("normal");
+    expect(controller.getState().groupAction).toBeNull();
+  });
+
+  it("clears the active projection after non-owner leave and owner dismiss", async () => {
+    const leavePort = new FakePort();
+    leavePort.conversations = [conversation("group", "group-1", 0, SessionType.Group)];
+    leavePort.members = [groupMember("owner", GroupMemberRole.Owner), groupMember("self")];
+    const leaving = new ConversationController(leavePort);
+    await leaving.start("self");
+    await leaving.select("group");
+    await leaving.leaveActiveGroup();
+    expect(leavePort.leftGroups).toEqual(["group-1"]);
+    expect(leaving.getState()).toMatchObject({ activeConversationID: null, conversations: [], groupMembers: [] });
+
+    const dismissPort = new FakePort();
+    dismissPort.conversations = [conversation("group", "group-1", 0, SessionType.Group)];
+    dismissPort.members = [groupMember("self", GroupMemberRole.Owner), groupMember("normal")];
+    const dismissing = new ConversationController(dismissPort);
+    await dismissing.start("self");
+    await dismissing.select("group");
+    await dismissing.dismissActiveGroup();
+    expect(dismissPort.dismissedGroups).toEqual(["group-1"]);
+    expect(dismissing.getState()).toMatchObject({ activeConversationID: null, conversations: [], groupMembers: [] });
+  });
+
+  it("scopes member callbacks and clears a group-unavailable callback idempotently", async () => {
+    const port = new FakePort();
+    port.conversations = [conversation("group", "group-1", 0, SessionType.Group)];
+    port.members = [groupMember("self", GroupMemberRole.Owner)];
+    const controller = new ConversationController(port);
+    await controller.start("self");
+    await controller.select("group");
+    port.members = [...port.members, groupMember("new-member")];
+
+    port.handlers?.groupMembersChanged("other-group");
+    expect(controller.getState().groupMembers).toHaveLength(1);
+    port.handlers?.groupMembersChanged("group-1");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(controller.getState().groupMembers).toHaveLength(2);
+
+    port.handlers?.groupUnavailable("group-1");
+    port.handlers?.groupUnavailable("group-1");
+    expect(controller.getState()).toMatchObject({ activeConversationID: null, conversations: [], groupMembers: [] });
+    port.handlers?.conversationsChanged([conversation("group", "group-1", 0, SessionType.Group)]);
+    expect(controller.getState().conversations).toEqual([]);
+  });
+
+  it("creates and opens a group from unique explicit member IDs", async () => {
+    const port = new FakePort();
+    port.createdGroup = conversation("group-new", "group-new", 0, SessionType.Group);
+    const controller = new ConversationController(port);
+    await controller.start("self");
+
+    await controller.createGroup("Project", ["member-1", "member-2", "member-1", "self"]);
+
+    expect(controller.getState().activeConversationID).toBe("group-new");
+    expect(controller.getState().conversations[0].groupID).toBe("group-new");
+    expect(port.createdGroupArgs).toEqual({ name: "Project", memberUserIDs: ["member-1", "member-2"] });
+    expect(port.historyCalls).toBe(0);
+  });
+
+  it("keeps group creation failure explicit without creating a local conversation", async () => {
+    const port = new FakePort();
+    port.createGroup = async () => { throw new Error("group rejected"); };
+    const controller = new ConversationController(port);
+    await controller.start("self");
+
+    await expect(controller.createGroup("Project", ["member-1"])).rejects.toThrow("group rejected");
+
+    expect(controller.getState().conversations).toEqual([]);
+    expect(controller.getState().error).toContain("group rejected");
   });
 
   it("keeps a failed optimistic message and exposes the error", async () => {
     const port = new FakePort();
     port.conversations = [conversation("single", "peer")];
     port.sendError = new Error("transport rejected");
-    const controller = new SingleChatController(port);
+    const controller = new ConversationController(port);
     await controller.start("self");
     await controller.select("single");
 
@@ -111,10 +623,142 @@ describe("SingleChatController", () => {
     expect(controller.getState().error).toContain("发送失败");
   });
 
+  it("uses official quote and forward drafts with an explicit target conversation", async () => {
+    const port = new FakePort();
+    port.conversations = [conversation("single", "peer"), conversation("target", "other")];
+    port.historyMessages = [message("m1", "peer", "self", "source")];
+    const controller = new ConversationController(port);
+    await controller.start("self");
+    await controller.select("single");
+
+    await controller.sendQuote("official reply", "m1");
+    expect(port.quoteCreates).toEqual([{ text: "official reply", sourceID: "m1" }]);
+    expect(controller.getState().messages.at(-1)).toMatchObject({
+      contentType: MessageType.QuoteMessage,
+      quoteElem: { text: "official reply", quoteMessage: { clientMsgID: "m1" } },
+      status: MessageStatus.Succeed
+    });
+
+    const beforeForward = controller.getState().messages.map((item) => item.clientMsgID);
+    await controller.forwardMessage("m1", "target");
+    expect(port.forwardCreates).toEqual(["m1"]);
+    expect(port.sentConversations.at(-1)?.conversationID).toBe("target");
+    expect(controller.getState().messages.map((item) => item.clientMsgID)).toEqual(beforeForward);
+  });
+
+  it("rejects unsupported, stale, and concurrent message actions without fake success", async () => {
+    const port = new FakePort();
+    port.conversations = [conversation("single", "peer"), conversation("target", "other")];
+    port.historyMessages = [message("m1", "self", "peer", "source")];
+    let release!: () => void;
+    port.revokeMessage = async (conversationID, clientMsgID) => {
+      port.revokedMessages.push({ conversationID, clientMsgID });
+      await new Promise<void>((resolve) => { release = resolve; });
+    };
+    const controller = new ConversationController(port);
+    await controller.start("self");
+    await controller.select("single");
+
+    await expect(controller.forwardMessage("m1", "missing")).rejects.toThrow("有效的转发目标");
+    const revoking = controller.revokeMessage("m1");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await expect(controller.forwardMessage("m1", "target")).rejects.toThrow("消息操作正在执行");
+    release();
+    await revoking;
+    await expect(controller.sendQuote("reply", "missing")).rejects.toThrow("不能被引用");
+    expect(port.revokedMessages).toEqual([{ conversationID: "single", clientMsgID: "m1" }]);
+  });
+
+  it("keeps the source message when OpenIM rejects revoke", async () => {
+    const port = new FakePort();
+    port.conversations = [conversation("single", "peer")];
+    port.historyMessages = [message("m1", "peer", "self", "not mine")];
+    port.messageActionError = new Error("only send by yourself message can be revoked");
+    const controller = new ConversationController(port);
+    await controller.start("self");
+    await controller.select("single");
+
+    await expect(controller.revokeMessage("m1")).rejects.toThrow("only send by yourself");
+
+    expect(controller.getState().messages[0]).toMatchObject({ clientMsgID: "m1", contentType: MessageType.TextMessage });
+    expect(controller.getState().error).toContain("only send by yourself");
+  });
+
+  it("projects revoke only after the official SDK write succeeds", async () => {
+    const port = new FakePort();
+    port.conversations = [conversation("single", "peer")];
+    port.historyMessages = [message("m1", "self", "peer", "mine")];
+    const controller = new ConversationController(port);
+    await controller.start("self");
+    await controller.select("single");
+
+    await controller.revokeMessage("m1");
+
+    expect(port.revokedMessages).toEqual([{ conversationID: "single", clientMsgID: "m1" }]);
+    expect(controller.getState().messages[0]).toMatchObject({ clientMsgID: "m1", contentType: MessageType.RevokeMessage });
+  });
+
+  it("applies revoke and C2C receipt callbacks idempotently and within the active single-chat scope", async () => {
+    const port = new FakePort();
+    port.conversations = [conversation("single", "peer")];
+    const source = message("m1", "self", "peer", "source");
+    const outgoing = { ...message("m2", "self", "peer", "read me"), isRead: false };
+    const quote = {
+      ...message("m3", "peer", "self", "quoted"),
+      contentType: MessageType.QuoteMessage,
+      textElem: undefined,
+      quoteElem: { text: "quoted", quoteMessage: source }
+    } as MessageItem;
+    port.historyMessages = [source, outgoing, quote];
+    const controller = new ConversationController(port);
+    await controller.start("self");
+    await controller.select("single");
+    const revoked = {
+      clientMsgID: "m1",
+      revokerID: "self",
+      revokerNickname: "Self",
+      revokerRole: 0,
+      revokeTime: 10,
+      sourceMessageSendTime: 1,
+      sourceMessageSendID: "self",
+      sourceMessageSenderNickname: "Self",
+      sessionType: SessionType.Single,
+      seq: 1,
+      ex: ""
+    } as RevokedInfo;
+
+    port.handlers?.messageRevoked(revoked);
+    port.handlers?.messageRevoked(revoked);
+    expect(controller.getState().messages).toHaveLength(3);
+    expect(controller.getState().messages.find((item) => item.clientMsgID === "m1")?.contentType).toBe(MessageType.RevokeMessage);
+    expect(controller.getState().messages.find((item) => item.clientMsgID === "m3")?.quoteElem?.quoteMessage.contentType).toBe(MessageType.RevokeMessage);
+
+    port.handlers?.c2cReadReceipts([
+      { userID: "other", groupID: "", msgIDList: ["m2"], readTime: 20, sessionType: SessionType.Single, msgFrom: 0, contentType: MessageType.TextMessage },
+      { userID: "peer", groupID: "", msgIDList: ["m2", "unknown"], readTime: 30, sessionType: SessionType.Single, msgFrom: 0, contentType: MessageType.TextMessage }
+    ]);
+    port.handlers?.c2cReadReceipts([
+      { userID: "peer", groupID: "", msgIDList: ["m2"], readTime: 40, sessionType: SessionType.Single, msgFrom: 0, contentType: MessageType.TextMessage }
+    ]);
+    expect(controller.getState().messages.find((item) => item.clientMsgID === "m2")?.isRead).toBe(true);
+  });
+
+  it("exposes message action policy only for succeeded supported message types", () => {
+    const text = message("m1", "self", "peer");
+    const failed = { ...text, status: MessageStatus.Failed };
+    const revoked = { ...text, contentType: MessageType.RevokeMessage };
+    expect(canQuoteMessage(text)).toBe(true);
+    expect(canForwardMessage(text)).toBe(true);
+    expect(canRequestRevoke(text)).toBe(true);
+    expect(canQuoteMessage(failed)).toBe(false);
+    expect(canForwardMessage(revoked)).toBe(false);
+    expect(canRequestRevoke(revoked)).toBe(false);
+  });
+
   it("deduplicates real-time text and marks the active conversation read", async () => {
     const port = new FakePort();
     port.conversations = [conversation("single", "peer", 2)];
-    const controller = new SingleChatController(port);
+    const controller = new ConversationController(port);
     await controller.start("self");
     await controller.select("single");
     port.markedRead = [];
@@ -128,11 +772,29 @@ describe("SingleChatController", () => {
     expect(controller.getState().conversations[0].unreadCount).toBe(0);
   });
 
+  it("scopes real-time group text by exact group ID", async () => {
+    const port = new FakePort();
+    port.conversations = [conversation("group", "group-1", 2, SessionType.Group)];
+    const controller = new ConversationController(port);
+    await controller.start("self");
+    await controller.select("group");
+    port.markedRead = [];
+
+    port.handlers?.messagesReceived([
+      message("m2", "member-1", "", "included", MessageStatus.Succeed, SessionType.Group, "group-1"),
+      message("m3", "member-2", "", "excluded", MessageStatus.Succeed, SessionType.Group, "group-2")
+    ]);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(controller.getState().messages.map((item) => item.textElem?.content)).toEqual(["included"]);
+    expect(port.markedRead).toEqual(["group"]);
+  });
+
   it("reloads conversations, unread, active history, and read state after reconnect", async () => {
     const port = new FakePort();
     port.conversations = [conversation("single", "peer", 1)];
     port.historyMessages = [message("m1", "peer", "self", "before")];
-    const controller = new SingleChatController(port);
+    const controller = new ConversationController(port);
     await controller.start("self");
     await controller.select("single");
     port.unread = 4;
@@ -144,5 +806,37 @@ describe("SingleChatController", () => {
     expect(controller.getState()).toMatchObject({ totalUnread: 4, restoring: false, activeConversationID: "single" });
     expect(controller.getState().messages.map((item) => item.clientMsgID)).toEqual(["m2"]);
     expect(port.markedRead).toEqual(["single"]);
+  });
+
+  it("opens an official bidirectional-history context and highlights the exact search hit", async () => {
+    const port = new FakePort();
+    port.conversations = [conversation("single", "peer"), conversation("target", "other")];
+    port.historyMessages = [message("m1", "peer", "self", "current")];
+    const hit = message("m20", "other", "self", "needle");
+    port.surroundingMessages = [message("m19", "other", "self", "before"), hit, message("m21", "self", "other", "after")];
+    const controller = new ConversationController(port);
+    await controller.start("self");
+    await controller.select("single");
+
+    await controller.openSearchResult("target", hit);
+
+    expect(controller.getState()).toMatchObject({ activeConversationID: "target", searchTargetClientMsgID: "m20" });
+    expect(controller.getState().messages.map((item) => item.clientMsgID)).toEqual(["m19", "m20", "m21"]);
+    expect(port.surroundingCalls).toEqual([{ conversationID: "target", clientMsgID: "m20" }]);
+  });
+
+  it("preserves the current timeline when bidirectional-history context fails", async () => {
+    const port = new FakePort();
+    port.conversations = [conversation("single", "peer"), conversation("target", "other")];
+    port.historyMessages = [message("m1", "peer", "self", "current")];
+    port.surroundingError = new Error("search context unavailable");
+    const controller = new ConversationController(port);
+    await controller.start("self");
+    await controller.select("single");
+
+    await expect(controller.openSearchResult("target", message("m20", "other", "self", "needle"))).rejects.toThrow("search context unavailable");
+
+    expect(controller.getState().activeConversationID).toBe("single");
+    expect(controller.getState().messages.map((item) => item.clientMsgID)).toEqual(["m1"]);
   });
 });

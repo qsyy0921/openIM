@@ -2,16 +2,22 @@
 set -euo pipefail
 
 deploy_root="${1:-/home/ubuntu/MFL/deploy/node2-20260711}"
+device_id="${2:-ubuntu-web}"
 openim_env="$deploy_root/openim/.env"
 postgres_container=openim-platform-local-postgres-1
 member_id=bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb
+oidc_issuer="$(sed -n 's/^PLATFORM_OIDC_ISSUER=//p' /etc/openim-platform/platform.env | tail -1 | tr -d '\r')"
 
 psql_value() {
   docker exec "$postgres_container" psql -At -F '|' -v ON_ERROR_STOP=1 -U platform -d platform -c "$1"
 }
 
-secret="$(sed -n 's/^OPENIM_SECRET=//p' "$openim_env" | tail -1 | tr -d '\r')"
+secret="$(sed -n 's/^OPENIM_SECRET=//p' "$openim_env" | tail -1 | tr -d '\r' | sed -E 's/[[:space:]]+#.*$//')"
 sender="$(psql_value "select openim_user_id from identity.identity_links where member_id='$member_id' and provisioning_state='ready'")"
+[[ -n "$secret" && -n "$sender" && -n "$oidc_issuer" && "$device_id" =~ ^[A-Za-z0-9_-]{1,128}$ ]] || {
+  echo "OpenIM identity, OIDC issuer, or approval device is invalid" >&2
+  exit 1
+}
 admin_response="$(curl -fsS --max-time 10 -X POST http://127.0.0.1:12002/auth/get_admin_token \
   -H 'Content-Type: application/json' -H "operationID: node2-action-admin-$(date +%s)" \
   --data "{\"secret\":\"$secret\",\"userID\":\"imAdmin\"}")"
@@ -19,7 +25,7 @@ admin_token="$(RESPONSE="$admin_response" python3 -c 'import json,os; print(json
 unset admin_response secret
 
 nonce="$(date +%s%N)"
-title="OpenIM 平台 Node2 审批验收 $nonce"
+title="第三方安全评估管理制度 复核 $nonce"
 request_file="$(mktemp)"
 response_file="$(mktemp)"
 trap 'rm -f "$request_file" "$response_file"' EXIT
@@ -60,7 +66,7 @@ IFS='|' read -r run_id intent_id digest run_state ticket_count <<<"$intent_row"
 echo "pre_approval_ticket_count=0 run_id=$run_id intent_id=$intent_id"
 
 token_response="$(curl -fsS --max-time 15 -X POST \
-  http://172.31.50.2:18081/realms/platform/protocol/openid-connect/token \
+  "$oidc_issuer/protocol/openid-connect/token" \
   -H 'Content-Type: application/x-www-form-urlencoded' \
   --data-urlencode 'grant_type=password' \
   --data-urlencode 'client_id=platform-api' \
@@ -75,7 +81,7 @@ approve() {
   curl --silent --show-error --output "$response_file" --write-out '%{http_code}' \
     -X POST "http://127.0.0.1:18080/v1/agent/intents/$intent_id/approve" \
     -H 'Content-Type: application/json' -H "Authorization: Bearer $oidc_token" \
-    --data "{\"platform_id\":5,\"device_id\":\"local-browser\",\"payload_digest\":\"$approval_digest\"}"
+    --data "{\"platform_id\":5,\"device_id\":\"$device_id\",\"payload_digest\":\"$approval_digest\"}"
 }
 
 wrong_digest="sha256:$(printf '0%.0s' $(seq 1 64))"

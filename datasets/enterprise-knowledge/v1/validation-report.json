@@ -1,0 +1,21 @@
+{
+  "validator_version": "1.0.0",
+  "dataset_version": "1.0.0",
+  "release_hash": "d9a31899246bfa9077be3d42d3dd0b54737a3fa50461ffd628ad4c5ae68059c9",
+  "passed": true,
+  "counts": {
+    "topics": 104,
+    "documents": 520,
+    "versions": 624,
+    "chunks": 3224,
+    "qa_cases": 1120
+  },
+  "quality": {
+    "unique_document_body_ratio": 1.0,
+    "unique_question_ratio": 1.0,
+    "max_same_form_5gram_jaccard": 0.719577,
+    "answerable_cases": 1040,
+    "unanswerable_cases": 80
+  },
+  "errors": []
+}

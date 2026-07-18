@@ -1,6 +1,9 @@
 [CmdletBinding()]
 param(
-    [string]$Version = "0.1.0-dev"
+    [string]$Version = "0.1.0-dev",
+    [string]$WebPublicOrigin = "",
+    [string]$WebOIDCAuthority = "",
+    [string]$WebOpenIMWSURL = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -8,6 +11,13 @@ $root = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $output = Join-Path $root ".runtime\release\$Version"
 $api = Join-Path $root "platform\services\platform-api"
 $worker = Join-Path $root "platform\services\intelligence-worker"
+$webApp = Join-Path $root "platform\apps\web"
+
+$webValues = @($WebPublicOrigin, $WebOIDCAuthority, $WebOpenIMWSURL)
+$includeWeb = [bool]($webValues | Where-Object { $_ })
+if ($includeWeb -and ($webValues | Where-Object { -not $_ }).Count -gt 0) {
+    throw "WebPublicOrigin, WebOIDCAuthority, and WebOpenIMWSURL must be provided together"
+}
 
 if (Test-Path $output) {
     $resolvedOutput = (Resolve-Path $output).Path
@@ -21,7 +31,7 @@ if (Test-Path $output) {
 $windows = New-Item -ItemType Directory -Force (Join-Path $output "windows-amd64")
 $linux = New-Item -ItemType Directory -Force (Join-Path $output "linux-amd64")
 $python = New-Item -ItemType Directory -Force (Join-Path $output "python")
-$commands = @("platform-api", "platform-ingress", "platform-migrate", "agent-runtime", "action-executor")
+$commands = @("platform-api", "platform-ingress", "platform-migrate", "agent-runtime", "action-executor", "agent-catalog-admin")
 
 Push-Location $api
 try {
@@ -53,8 +63,59 @@ finally {
     Pop-Location
 }
 
+if ($includeWeb) {
+    $web = New-Item -ItemType Directory -Force (Join-Path $output "web")
+    $webEnvironment = @{
+        VITE_OIDC_AUTHORITY = $WebOIDCAuthority.TrimEnd("/")
+        VITE_OIDC_CLIENT_ID = "platform-api"
+        VITE_OIDC_REDIRECT_URI = "$($WebPublicOrigin.TrimEnd('/'))/auth/callback"
+        VITE_OIDC_POST_LOGOUT_REDIRECT_URI = "$($WebPublicOrigin.TrimEnd('/'))/"
+        VITE_PLATFORM_API_BASE_URL = "/platform-api"
+        VITE_DEVICE_ID = "ubuntu-web"
+        VITE_PLATFORM_API_PROXY_TARGET = "http://127.0.0.1:18080"
+        VITE_OPENIM_API_URL = "$($WebPublicOrigin.TrimEnd('/'))/openim-api"
+        VITE_OPENIM_API_PROXY_TARGET = "http://127.0.0.1:12002"
+        VITE_OPENIM_WS_URL = $WebOpenIMWSURL
+    }
+    $previousWebEnvironment = @{}
+    foreach ($entry in $webEnvironment.GetEnumerator()) {
+        $previousWebEnvironment[$entry.Key] = [Environment]::GetEnvironmentVariable($entry.Key, "Process")
+        [Environment]::SetEnvironmentVariable($entry.Key, $entry.Value, "Process")
+    }
+    Push-Location $webApp
+    try {
+        npm run build
+        if ($LASTEXITCODE -ne 0) { throw "Web production build failed" }
+        Copy-Item (Join-Path $webApp "dist\*") $web -Recurse -Force
+        Get-ChildItem $web -Recurse -Filter "*.wasm" | ForEach-Object {
+            $source = [IO.File]::OpenRead($_.FullName)
+            $target = [IO.File]::Create("$($_.FullName).gz")
+            $gzip = [IO.Compression.GZipStream]::new($target, [IO.Compression.CompressionLevel]::Optimal)
+            try {
+                $source.CopyTo($gzip)
+            }
+            finally {
+                $gzip.Dispose()
+                $target.Dispose()
+                $source.Dispose()
+            }
+        }
+    }
+    finally {
+        Pop-Location
+        foreach ($entry in $previousWebEnvironment.GetEnumerator()) {
+            [Environment]::SetEnvironmentVariable($entry.Key, $entry.Value, "Process")
+        }
+    }
+}
+
 Copy-Item (Join-Path $root "dependencies\openim.lock.yaml") (Join-Path $output "openim.lock.yaml")
 Copy-Item (Join-Path $root "contracts") (Join-Path $output "contracts") -Recurse
+$enterpriseDataset = Join-Path $root "datasets\enterprise-knowledge\v1"
+if (Test-Path $enterpriseDataset) {
+    $datasetOutput = New-Item -ItemType Directory -Force (Join-Path $output "datasets\enterprise-knowledge")
+    Copy-Item $enterpriseDataset $datasetOutput -Recurse
+}
 
 $previousErrorPreference = $ErrorActionPreference
 $ErrorActionPreference = "Continue"
@@ -71,6 +132,7 @@ $metadata = [ordered]@{
     working_tree_clean = -not [bool]$workingTreeState
     go_version = (go version)
     python_version = (python --version)
+    web_public_origin = if ($includeWeb) { $WebPublicOrigin.TrimEnd("/") } else { $null }
     generated_at_utc = [DateTime]::UtcNow.ToString("o")
 }
 $metadata | ConvertTo-Json | Set-Content -Encoding utf8 (Join-Path $output "release-metadata.json")

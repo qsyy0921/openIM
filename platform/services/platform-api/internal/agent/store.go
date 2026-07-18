@@ -16,27 +16,142 @@ type Store struct{ pool *pgxpool.Pool }
 
 func NewStore(pool *pgxpool.Pool) *Store { return &Store{pool: pool} }
 
-func (s *Store) Enqueue(ctx context.Context, trigger Trigger) (string, error) {
+type EnqueueResult struct {
+	RunID           string
+	RejectionReason string
+}
+
+type resolvedTrigger struct {
+	TriggerID, Alias string
+	Enabled          bool
+	AgentID, Status  string
+	DeploymentID     string
+	VersionID        string
+	Checksum         string
+}
+
+func (s *Store) Enqueue(ctx context.Context, source Source, trigger Trigger) (EnqueueResult, error) {
+	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.RepeatableRead})
+	if err != nil {
+		return EnqueueResult{}, fmt.Errorf("begin enqueue Agent Run: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	result, err := enqueueTx(ctx, tx, source, trigger)
+	if err != nil {
+		return EnqueueResult{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return EnqueueResult{}, fmt.Errorf("commit Agent Run resolution: %w", err)
+	}
+	return result, nil
+}
+
+func enqueueTx(ctx context.Context, tx pgx.Tx, source Source, trigger Trigger) (EnqueueResult, error) {
 	runID, err := newUUID()
 	if err != nil {
-		return "", err
+		return EnqueueResult{}, err
+	}
+	var existing string
+	err = tx.QueryRow(ctx, `SELECT id::text FROM agent.runs WHERE source_event_id = $1`, trigger.EventID).Scan(&existing)
+	if err == nil {
+		return EnqueueResult{RunID: existing}, nil
+	}
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return EnqueueResult{}, fmt.Errorf("read duplicate Agent Run: %w", err)
+	}
+	aliases := make([]string, 0, len(trigger.Mentions))
+	prompts := make(map[string]string, len(trigger.Mentions))
+	for _, mention := range trigger.Mentions {
+		aliases = append(aliases, mention.Alias)
+		prompts[mention.Alias] = mention.Prompt
+	}
+	const resolve = `
+SELECT tr.id::text, tr.trigger_value, tr.enabled, d.id::text, d.status,
+       COALESCE(dep.id::text, ''), COALESCE(v.id::text, ''), COALESCE(v.spec_checksum, '')
+FROM agent.triggers tr
+JOIN agent.definitions d ON d.tenant_id = tr.tenant_id AND d.id = tr.agent_id
+LEFT JOIN agent.deployments dep
+  ON dep.tenant_id = d.tenant_id AND dep.agent_id = d.id AND dep.slot = 'production'
+LEFT JOIN agent.versions v
+  ON v.tenant_id = dep.tenant_id AND v.agent_id = dep.agent_id AND v.id = dep.active_version_id
+WHERE tr.tenant_id = $1::uuid AND tr.trigger_type = 'mention_alias'
+  AND tr.trigger_value = ANY($2::text[])
+ORDER BY array_position($2::text[], tr.trigger_value)
+LIMIT 2`
+	rows, err := tx.Query(ctx, resolve, trigger.TenantID, aliases)
+	if err != nil {
+		return EnqueueResult{}, fmt.Errorf("resolve Agent trigger: %w", err)
+	}
+	resolved := make([]resolvedTrigger, 0, 2)
+	for rows.Next() {
+		var item resolvedTrigger
+		if err := rows.Scan(&item.TriggerID, &item.Alias, &item.Enabled, &item.AgentID, &item.Status,
+			&item.DeploymentID, &item.VersionID, &item.Checksum); err != nil {
+			rows.Close()
+			return EnqueueResult{}, fmt.Errorf("scan Agent trigger: %w", err)
+		}
+		resolved = append(resolved, item)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return EnqueueResult{}, fmt.Errorf("iterate Agent triggers: %w", err)
+	}
+	rows.Close()
+	if len(resolved) == 0 {
+		return EnqueueResult{}, nil
+	}
+	if len(resolved) > 1 {
+		return rejectEnqueueTx(ctx, tx, source, trigger.EventID, "ambiguous_trigger")
+	}
+	selection := resolved[0]
+	reason := ""
+	switch {
+	case !selection.Enabled:
+		reason = "trigger_disabled"
+	case selection.Status != "active":
+		reason = "agent_disabled"
+	case selection.DeploymentID == "":
+		reason = "deployment_missing"
+	case selection.VersionID == "" || selection.Checksum == "":
+		reason = "version_missing"
+	case prompts[selection.Alias] == "":
+		reason = "empty_prompt"
+	}
+	if reason != "" {
+		return rejectEnqueueTx(ctx, tx, source, trigger.EventID, reason)
 	}
 	const query = `
 INSERT INTO agent.runs (
     id, source_event_id, tenant_id, principal_member_id,
-    conversation_id, sender_id, session_type, prompt
+	agent_id, agent_version_id, agent_deployment_id, agent_trigger_id, agent_spec_checksum,
+	conversation_id, sender_id, session_type, prompt
 )
-SELECT $1::uuid, $2, $3::uuid, l.member_id, $4, $5, $6, $7
+SELECT $1::uuid, $2, $3::uuid, l.member_id,
+       $4::uuid, $5::uuid, $6::uuid, $7::uuid, $8,
+       $9, $10, $11, $12
 FROM identity.identity_links AS l
 WHERE l.tenant_id = $3::uuid
-  AND l.openim_user_id = $5
-  AND l.provisioning_state = 'ready'
+	AND l.openim_user_id = $10
+	AND l.provisioning_state = 'ready'
 ON CONFLICT (source_event_id) DO UPDATE SET source_event_id = EXCLUDED.source_event_id
 RETURNING id::text`
-	if err := s.pool.QueryRow(ctx, query, runID, trigger.EventID, trigger.TenantID, trigger.ConversationID, trigger.SenderID, trigger.SessionType, trigger.Prompt).Scan(&runID); err != nil {
-		return "", fmt.Errorf("enqueue Agent Run: %w", err)
+	if err := tx.QueryRow(ctx, query, runID, trigger.EventID, trigger.TenantID,
+		selection.AgentID, selection.VersionID, selection.DeploymentID, selection.TriggerID, selection.Checksum,
+		trigger.ConversationID, trigger.SenderID, trigger.SessionType, prompts[selection.Alias]).Scan(&runID); err != nil {
+		return EnqueueResult{}, fmt.Errorf("enqueue Agent Run: %w", err)
 	}
-	return runID, nil
+	return EnqueueResult{RunID: runID}, nil
+}
+
+func rejectEnqueueTx(ctx context.Context, tx pgx.Tx, source Source, eventID, reason string) (EnqueueResult, error) {
+	const query = `
+INSERT INTO agent.event_rejections (source_topic, source_partition, source_offset, event_id, reason)
+VALUES ($1, $2, $3, NULLIF($4, ''), $5)
+ON CONFLICT (source_topic, source_partition, source_offset) DO NOTHING`
+	if _, err := tx.Exec(ctx, query, source.Topic, source.Partition, source.Offset, eventID, reason); err != nil {
+		return EnqueueResult{}, fmt.Errorf("record Agent catalog rejection: %w", err)
+	}
+	return EnqueueResult{RejectionReason: reason}, nil
 }
 
 func (s *Store) Reject(ctx context.Context, source Source, eventID, reason string) error {
@@ -71,6 +186,11 @@ type Run struct {
 	ID                 string
 	TenantID           string
 	MemberID           string
+	AgentID            string
+	AgentVersionID     string
+	AgentDeploymentID  string
+	AgentTriggerID     string
+	AgentSpecChecksum  string
 	ConversationID     string
 	SenderID           string
 	SessionType        int32
@@ -106,13 +226,18 @@ SET state = 'running', attempts = attempts + 1,
     lease_token = $2, lease_until = now() + make_interval(secs => $3), updated_at = now()
 FROM candidate
 WHERE r.id = candidate.id
-RETURNING r.id::text, r.tenant_id::text, r.principal_member_id::text, r.conversation_id, r.sender_id, r.session_type,
+	RETURNING r.id::text, r.tenant_id::text, r.principal_member_id::text,
+	          r.agent_id::text, r.agent_version_id::text, r.agent_deployment_id::text,
+	          r.agent_trigger_id::text, r.agent_spec_checksum,
+	          r.conversation_id, r.sender_id, r.session_type,
           r.prompt, COALESCE(r.candidate_text, ''), r.lease_token, r.attempts,
 		  COALESCE(r.model, ''), COALESCE(r.provider_response_id, ''),
 		  COALESCE(r.action_type, ''), COALESCE(r.action_title, '')`
 	var run Run
 	err = s.pool.QueryRow(ctx, query, maxAttempts, token, leaseSeconds).Scan(
-		&run.ID, &run.TenantID, &run.MemberID, &run.ConversationID, &run.SenderID, &run.SessionType,
+		&run.ID, &run.TenantID, &run.MemberID,
+		&run.AgentID, &run.AgentVersionID, &run.AgentDeploymentID, &run.AgentTriggerID, &run.AgentSpecChecksum,
+		&run.ConversationID, &run.SenderID, &run.SessionType,
 		&run.Prompt, &run.CandidateText, &run.LeaseToken, &run.Attempts, &run.Model, &run.ProviderResponseID,
 		&run.ActionType, &run.ActionTitle,
 	)
@@ -202,6 +327,22 @@ WHERE id = $1::uuid AND state = 'running' AND lease_token = $2`
 		return fmt.Errorf("retry Agent Run: %w", err)
 	}
 	return requireOne(result.RowsAffected(), "retry Agent Run")
+}
+
+func (s *Store) Fail(ctx context.Context, run Run, failure string) error {
+	if len(failure) > 1000 {
+		failure = failure[:1000]
+	}
+	const query = `
+UPDATE agent.runs
+SET state = 'failed', completed_at = now(), lease_token = NULL, lease_until = NULL,
+    last_error = $3, updated_at = now()
+WHERE id = $1::uuid AND state = 'running' AND lease_token = $2`
+	result, err := s.pool.Exec(ctx, query, run.ID, run.LeaseToken, failure)
+	if err != nil {
+		return fmt.Errorf("fail Agent Run: %w", err)
+	}
+	return requireOne(result.RowsAffected(), "fail Agent Run")
 }
 
 func requireOne(rows int64, operation string) error {

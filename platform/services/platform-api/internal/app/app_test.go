@@ -27,7 +27,7 @@ func TestRunServesHealthAndShutsDown(t *testing.T) {
 		done <- Run(ctx, config.Config{
 			Version:         "test-version",
 			ShutdownTimeout: time.Second,
-		}, listener, httpserver.NewHandler("test-version", sessionStub{}, approvalStub{}, agentWorkspaceStub{}))
+		}, listener, httpserver.NewHandler("test-version", sessionStub{}, deviceStub{}, approvalStub{}, agentWorkspaceStub{}, agentCatalogStub{}))
 	}()
 
 	client := &http.Client{Timeout: time.Second}
@@ -67,11 +67,17 @@ func TestRunServesHealthAndShutsDown(t *testing.T) {
 }
 
 type sessionStub struct{}
+type deviceStub struct{}
 type approvalStub struct{}
 type agentWorkspaceStub struct{}
+type agentCatalogStub struct{}
 
 func (agentWorkspaceStub) Get(context.Context, string, string, int32) (agent.Workspace, error) {
 	return agent.Workspace{}, nil
+}
+
+func (agentCatalogStub) List(context.Context, string, string, int32) ([]agent.AgentSummary, error) {
+	return nil, nil
 }
 
 func (approvalStub) Approve(context.Context, string, string, int32, string, string) (action.ApprovalResult, error) {
@@ -80,4 +86,12 @@ func (approvalStub) Approve(context.Context, string, string, int32, string, stri
 
 func (sessionStub) CreateSession(context.Context, string, string, int32) (identity.Session, error) {
 	return identity.Session{}, nil
+}
+
+func (deviceStub) List(context.Context, string, string, int32) (identity.DeviceSnapshot, error) {
+	return identity.DeviceSnapshot{}, nil
+}
+
+func (deviceStub) LogoutPlatform(context.Context, string, string, int32, int32) error {
+	return nil
 }

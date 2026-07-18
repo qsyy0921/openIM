@@ -43,6 +43,74 @@ paths:
           $ref: "#/components/responses/ErrorResponse"
         "500":
           $ref: "#/components/responses/ErrorResponse"
+  /v1/im/devices:
+    get:
+      operationId: listMemberDevices
+      security:
+        - oidcBearer: []
+      parameters:
+        - in: query
+          name: platform_id
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 11
+            not: { const: 10 }
+        - in: query
+          name: device_id
+          required: true
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 128
+      responses:
+        "200":
+          description: Safe member-owned enrollment and platform-online projection.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeviceSnapshot"
+        "400": { "$ref": "#/components/responses/ErrorResponse" }
+        "401": { "$ref": "#/components/responses/ErrorResponse" }
+        "403": { "$ref": "#/components/responses/ErrorResponse" }
+        "409": { "$ref": "#/components/responses/ErrorResponse" }
+        "502": { "$ref": "#/components/responses/ErrorResponse" }
+        "500": { "$ref": "#/components/responses/ErrorResponse" }
+  /v1/im/platforms/{platform_id}/logout:
+    post:
+      operationId: logoutMemberPlatform
+      security:
+        - oidcBearer: []
+      parameters:
+        - in: path
+          name: platform_id
+          required: true
+          description: Another enrolled OpenIM platform to log out.
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 11
+            not: { const: 10 }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LogoutPlatformRequest"
+      responses:
+        "200":
+          description: The target platform has been logged out by OpenIM.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LogoutPlatformResponse"
+        "400": { "$ref": "#/components/responses/ErrorResponse" }
+        "401": { "$ref": "#/components/responses/ErrorResponse" }
+        "403": { "$ref": "#/components/responses/ErrorResponse" }
+        "409": { "$ref": "#/components/responses/ErrorResponse" }
+        "502": { "$ref": "#/components/responses/ErrorResponse" }
+        "500": { "$ref": "#/components/responses/ErrorResponse" }
   /v1/agent/intents/{intent_id}/approve:
     post:
       operationId: approveAgentIntent
@@ -101,6 +169,40 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/AgentWorkspace"
+        "400": { "$ref": "#/components/responses/ErrorResponse" }
+        "401": { "$ref": "#/components/responses/ErrorResponse" }
+        "403": { "$ref": "#/components/responses/ErrorResponse" }
+        "502": { "$ref": "#/components/responses/ErrorResponse" }
+  /v1/agents:
+    get:
+      operationId: listAgents
+      security:
+        - oidcBearer: []
+      parameters:
+        - in: query
+          name: platform_id
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 11
+            not: { const: 10 }
+        - in: query
+          name: device_id
+          required: true
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 128
+      responses:
+        "200":
+          description: Active tenant Agent definitions and their pinned production release metadata.
+          content:
+            application/json:
+              schema:
+                type: array
+                maxItems: 50
+                items: { "$ref": "#/components/schemas/AgentSummary" }
         "400": { "$ref": "#/components/responses/ErrorResponse" }
         "401": { "$ref": "#/components/responses/ErrorResponse" }
         "403": { "$ref": "#/components/responses/ErrorResponse" }
@@ -165,6 +267,63 @@ components:
         expires_at:
           type: string
           format: date-time
+    DeviceSnapshot:
+      type: object
+      additionalProperties: false
+      required: [devices, online_platform_ids]
+      properties:
+        devices:
+          type: array
+          items: { "$ref": "#/components/schemas/MemberDevice" }
+        online_platform_ids:
+          type: array
+          uniqueItems: true
+          items:
+            type: integer
+            minimum: 1
+            maximum: 11
+            not: { const: 10 }
+    MemberDevice:
+      type: object
+      additionalProperties: false
+      required: [device_id, platform_id, status, created_at, updated_at, current, online]
+      properties:
+        device_id: { type: string, minLength: 1, maxLength: 128 }
+        platform_id:
+          type: integer
+          minimum: 1
+          maximum: 11
+          not: { const: 10 }
+        status: { type: string, enum: [active, disabled] }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+        current: { type: boolean }
+        online:
+          type: boolean
+          description: Platform-level OpenIM online state, not per-device activity.
+    LogoutPlatformRequest:
+      type: object
+      additionalProperties: false
+      required: [current_platform_id, current_device_id]
+      properties:
+        current_platform_id:
+          type: integer
+          minimum: 1
+          maximum: 11
+          not: { const: 10 }
+        current_device_id: { type: string, minLength: 1, maxLength: 128 }
+    LogoutPlatformResponse:
+      type: object
+      additionalProperties: false
+      required: [platform_id, state, correlation_id]
+      properties:
+        platform_id:
+          type: integer
+          minimum: 1
+          maximum: 11
+          not: { const: 10 }
+        state: { type: string, const: logged_out }
+        correlation_id: { type: string, minLength: 1 }
     ApproveIntentRequest:
       type: object
       additionalProperties: false
@@ -200,12 +359,30 @@ components:
           type: array
           maxItems: 30
           items: { "$ref": "#/components/schemas/AgentRun" }
+    AgentSummary:
+      type: object
+      additionalProperties: false
+      required: [agent_id, slug, display_name, description, trigger_alias, production_version_number, production_version_id, spec_checksum, bot_user_id]
+      properties:
+        agent_id: { type: string, minLength: 1 }
+        slug: { type: string, pattern: "^[a-z][a-z0-9-]{0,62}$" }
+        display_name: { type: string, minLength: 1, maxLength: 120 }
+        description: { type: string, maxLength: 500 }
+        trigger_alias: { type: string, pattern: "^@[a-z][a-z0-9_-]{0,62}$" }
+        production_version_number: { type: integer, minimum: 1 }
+        production_version_id: { type: string, minLength: 1 }
+        spec_checksum: { type: string, pattern: "^sha256:[0-9a-f]{64}$" }
+        bot_user_id: { type: string, minLength: 1 }
     AgentRun:
       type: object
       additionalProperties: false
-      required: [run_id, conversation_id, prompt, state, created_at, updated_at, citations]
+      required: [run_id, agent_id, agent_display_name, agent_version_number, agent_spec_checksum, conversation_id, prompt, state, created_at, updated_at, citations]
       properties:
         run_id: { type: string, minLength: 1 }
+        agent_id: { type: string, minLength: 1 }
+        agent_display_name: { type: string, minLength: 1, maxLength: 120 }
+        agent_version_number: { type: integer, minimum: 1 }
+        agent_spec_checksum: { type: string, pattern: "^sha256:[0-9a-f]{64}$" }
         conversation_id: { type: string, minLength: 1 }
         prompt: { type: string }
         state: { type: string, enum: [queued, running, reply_pending, waiting_approval, succeeded, failed] }

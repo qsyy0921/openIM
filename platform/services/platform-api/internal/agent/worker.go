@@ -14,7 +14,7 @@ import (
 )
 
 type CandidateGenerator interface {
-	Generate(ctx context.Context, run Run, evidence []Evidence) (Candidate, error)
+	Generate(ctx context.Context, run Run, version CatalogVersion, evidence []Evidence) (Candidate, error)
 }
 
 type Retriever interface {
@@ -41,8 +41,18 @@ type MessageSender interface {
 	SendText(ctx context.Context, senderID string, target openim.TextTarget, content, runID string) (openim.SendResult, error)
 }
 
+type RuntimeStore interface {
+	Claim(context.Context, time.Duration, int) (*Run, error)
+	LoadCatalogVersion(context.Context, Run) (CatalogVersion, error)
+	SaveCandidate(context.Context, Run, Candidate, []Evidence) error
+	EnsureBotIdentity(context.Context, string, string) error
+	CompleteReply(context.Context, Run, string, bool) error
+	FailOrRetry(context.Context, Run, string, int, time.Duration) error
+	Fail(context.Context, Run, string) error
+}
+
 type Worker struct {
-	store       *Store
+	store       RuntimeStore
 	candidates  CandidateGenerator
 	retriever   Retriever
 	intents     IntentManager
@@ -52,7 +62,7 @@ type Worker struct {
 	maxAttempts int
 }
 
-func NewWorker(store *Store, candidates CandidateGenerator, retriever Retriever, intents IntentManager, sender MessageSender, poll, lease time.Duration, maxAttempts int) *Worker {
+func NewWorker(store RuntimeStore, candidates CandidateGenerator, retriever Retriever, intents IntentManager, sender MessageSender, poll, lease time.Duration, maxAttempts int) *Worker {
 	return &Worker{store: store, candidates: candidates, retriever: retriever, intents: intents, sender: sender, poll: poll, lease: lease, maxAttempts: maxAttempts}
 }
 
@@ -76,60 +86,73 @@ func (w *Worker) runOnce(ctx context.Context) error {
 	if err != nil || run == nil {
 		return err
 	}
+	version, err := w.store.LoadCatalogVersion(ctx, *run)
+	if err != nil {
+		if errors.Is(err, ErrInvalidCatalog) {
+			if failErr := w.store.Fail(ctx, *run, err.Error()); failErr != nil {
+				return failErr
+			}
+			slog.Warn("Agent Run rejected by pinned catalog version", "run_id", run.ID, "agent_id", run.AgentID, "agent_version_id", run.AgentVersionID, "error", err)
+			return nil
+		}
+		return err
+	}
 	if run.CandidateText == "" {
 		evidence, err := w.retriever.Search(ctx, RetrievalQuery{
-			TenantID: run.TenantID, MemberID: run.MemberID, Purpose: "agent_answer", Text: run.Prompt, Limit: 5,
+			TenantID: run.TenantID, MemberID: run.MemberID, Purpose: version.Spec.Retrieval.Purpose,
+			Text: run.Prompt, Limit: version.Spec.Retrieval.Limit,
 		})
 		if err != nil {
-			return w.retry(ctx, *run, fmt.Errorf("retrieve authorized knowledge: %w", err))
+			return w.retry(ctx, *run, fmt.Errorf("retrieve authorized knowledge: %w", err), version.Spec.MaxModelAttempts)
 		}
 		var candidate Candidate
 		var cited []Evidence
 		if len(evidence) == 0 {
 			candidate = Candidate{Text: "在你当前有权访问的知识中未找到可引用的证据。", Model: "runtime-policy", ProviderResponseID: "no-evidence:" + run.ID}
 		} else {
-			candidate, err = w.candidates.Generate(ctx, *run, evidence)
+			candidate, err = w.candidates.Generate(ctx, *run, version, evidence)
 			if err != nil {
-				return w.retry(ctx, *run, err)
+				return w.retry(ctx, *run, err, version.Spec.MaxModelAttempts)
 			}
 			cited, err = validateCitations(candidate, evidence)
 			if err != nil {
-				return w.retry(ctx, *run, err)
+				return w.retry(ctx, *run, err, version.Spec.MaxModelAttempts)
 			}
-			if err := validateActionCandidate(candidate.ActionIntent); err != nil {
-				return w.retry(ctx, *run, err)
+			if err := validateActionCandidate(candidate.ActionIntent, version.Spec); err != nil {
+				return w.retry(ctx, *run, err, version.Spec.MaxModelAttempts)
 			}
 		}
 		if err := w.store.SaveCandidate(ctx, *run, candidate, cited); err != nil {
 			return err
 		}
-		slog.Info("Agent candidate persisted", "run_id", run.ID, "model", candidate.Model)
+		slog.Info("Agent candidate persisted", "run_id", run.ID, "agent_id", run.AgentID,
+			"agent_version_id", run.AgentVersionID, "model", candidate.Model)
 		return nil
 	}
 
 	botID := BotUserID(run.TenantID)
 	if err := w.store.EnsureBotIdentity(ctx, run.TenantID, botID); err != nil {
-		return w.retry(ctx, *run, err)
+		return w.retry(ctx, *run, err, w.maxAttempts)
 	}
 	if err := w.sender.EnsureAgentBot(ctx, botID, run.TenantID); err != nil {
-		return w.retry(ctx, *run, fmt.Errorf("ensure Agent bot: %w", err))
+		return w.retry(ctx, *run, fmt.Errorf("ensure Agent bot: %w", err), w.maxAttempts)
 	}
 	target, err := replyTarget(*run)
 	if err != nil {
-		return w.retry(ctx, *run, err)
+		return w.retry(ctx, *run, err, w.maxAttempts)
 	}
 	reply := run.CandidateText
 	waitingApproval := run.ActionType != ""
 	if waitingApproval {
 		intent, err := w.intents.EnsureIntent(ctx, IntentRequest{RunID: run.ID, TenantID: run.TenantID, MemberID: run.MemberID, ActionType: run.ActionType, Title: run.ActionTitle})
 		if err != nil {
-			return w.retry(ctx, *run, fmt.Errorf("materialize action intent: %w", err))
+			return w.retry(ctx, *run, fmt.Errorf("materialize action intent: %w", err), w.maxAttempts)
 		}
 		reply += fmt.Sprintf("\n\n待审批动作：%s\n审批编号：%s\n摘要：%s", run.ActionType, intent.ID, intent.Digest)
 	}
 	result, err := w.sender.SendText(ctx, botID, target, reply, run.ID)
 	if err != nil {
-		return w.retry(ctx, *run, fmt.Errorf("send Agent reply: %w", err))
+		return w.retry(ctx, *run, fmt.Errorf("send Agent reply: %w", err), w.maxAttempts)
 	}
 	if err := w.store.CompleteReply(ctx, *run, result.ServerMsgID, waitingApproval); err != nil {
 		return err
@@ -138,13 +161,16 @@ func (w *Worker) runOnce(ctx context.Context) error {
 	return nil
 }
 
-func validateActionCandidate(intent *ActionIntentCandidate) error {
+func validateActionCandidate(intent *ActionIntentCandidate, spec AgentSpec) error {
 	if intent == nil {
 		return nil
 	}
 	intent.Title = strings.TrimSpace(intent.Title)
 	if intent.Type != "create_ticket" {
 		return fmt.Errorf("unsupported action intent %q", intent.Type)
+	}
+	if !spec.AllowsAction(intent.Type) {
+		return fmt.Errorf("Agent version does not allow action intent %q", intent.Type)
 	}
 	if len(intent.Title) < 1 || len(intent.Title) > 200 {
 		return errors.New("ticket title must be between 1 and 200 bytes")
@@ -179,9 +205,9 @@ func validateCitations(candidate Candidate, evidence []Evidence) ([]Evidence, er
 	return result, nil
 }
 
-func (w *Worker) retry(ctx context.Context, run Run, failure error) error {
+func (w *Worker) retry(ctx context.Context, run Run, failure error, maxAttempts int) error {
 	delay := time.Second << min(run.Attempts-1, 5)
-	if err := w.store.FailOrRetry(ctx, run, failure.Error(), w.maxAttempts, delay); err != nil {
+	if err := w.store.FailOrRetry(ctx, run, failure.Error(), maxAttempts, delay); err != nil {
 		return err
 	}
 	slog.Warn("Agent Run attempt failed", "run_id", run.ID, "attempt", run.Attempts, "error", failure)

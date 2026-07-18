@@ -20,11 +20,15 @@ The unit validates a strict question/evidence request, treats evidence as untrus
 - `POST /v1/candidates`
 - DeepSeek `POST /chat/completions`
 - Required environment configuration for base URL, API key, model, and timeout
+- Required immutable Catalog provenance, instructions, logical model route, and action allow-list from Agent Runtime
 
 ## Invariants
 
 - Unknown request fields fail validation.
 - The model name is required configuration and has no code default.
+- The request's logical model route must exactly match the configured model; an unknown route fails before provider egress.
+- Published Agent instructions are trusted configuration, while evidence and user input remain untrusted data.
+- An action candidate is rejected unless its type appears in the pinned Agent version allow-list.
 - Exactly one normally completed Chat Completion choice with non-empty JSON content is accepted.
 - DeepSeek JSON output is revalidated by Pydantic; the Go Runtime independently validates citations and action type/length.
 - The only action candidate schema is `create_ticket` with a title of at most 200 characters.
@@ -34,9 +38,9 @@ The unit validates a strict question/evidence request, treats evidence as untrus
 
 ## Runtime flow
 
-1. Validate Run, tenant, conversation, sender, and bounded prompt fields.
-2. Serialize only the authorized evidence supplied by the trusted Runtime.
-3. Call the configured DeepSeek Chat Completions API with JSON mode and thinking disabled.
+1. Validate Run, tenant, Agent/version/checksum, instructions, logical route, action allow-list, conversation, sender, and bounded prompt fields.
+2. Require the logical route to match the configured DeepSeek model and serialize only authorized evidence supplied by the trusted Runtime.
+3. Combine fixed governance instructions with the immutable published instructions, then call DeepSeek in JSON mode with thinking disabled.
 4. Extract and validate non-empty answer text, citation IDs, optional explicit-command action candidate, and provider response ID.
 5. Return the candidate to the trusted Go Runtime, which performs the authoritative citation allow-list check.
 
@@ -71,12 +75,13 @@ Record request outcome, provider latency, model name, provider response ID, and 
 
 ## Verification evidence
 
-- `python -m pytest -q`: 8 tests passed, including missing configuration, explicit-prefix action extraction, negated phrase handling, and unsolicited action rejection.
+- `python -m pytest -q`: 9 tests passed, including missing configuration, exact model-route enforcement, explicit-prefix action extraction, disallowed actions, negated phrase handling, and unsolicited action rejection.
 - The pinned setuptools build produced `openim_intelligence_worker-0.1.0-py3-none-any.whl`; installation into an isolated virtual environment returned HTTP 200 from `/healthz`.
 - A real DeepSeek `deepseek-v4-pro` request returned a validated `C1` answer and provider response ID.
 - Real OpenIM Run `7a68255b-395e-4cb2-a0aa-6f993f317442` completed Kafka ingress, ACL-RAG, DeepSeek generation, citation persistence, and OpenIM reply `72e0612b54bf873a854d01430e5310d4`.
 - Real explicit-prefix action Run `99216135-a79a-406f-b0c2-ca51b8baa55b` produced a digest-bound Intent, stayed at zero tickets before approval, then completed one verified ticket through the separate Executor.
 - Node2 release `d663256` loaded the DeepSeek credential through systemd `LoadCredential` and completed a real `deepseek-v4-pro` request with a validated `C1` citation. The credential remained absent from tracked files, unit command lines, and environment files.
+- Node2 release `9a6ffee` force-reinstalled the same-version wheel, verified the new Agent/version/checksum/instructions/model-route/action-policy request contract in the installed environment, and completed real v2 then rollback-v1 DeepSeek Runs without alternate-provider behavior.
 
 ## Open questions
 

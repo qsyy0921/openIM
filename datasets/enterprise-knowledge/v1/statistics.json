@@ -1,0 +1,59 @@
+{
+  "dataset_version": "1.0.0",
+  "documents": 520,
+  "versions": 624,
+  "chunks": 3224,
+  "qa_cases": 1120,
+  "domains": {
+    "ADM": 40,
+    "CS": 40,
+    "FIN": 40,
+    "GOV": 40,
+    "HR": 40,
+    "IT": 40,
+    "LEGAL": 40,
+    "PM": 40,
+    "PROC": 40,
+    "PROD": 40,
+    "RD": 40,
+    "SALES": 40,
+    "SEC": 40
+  },
+  "document_forms": {
+    "decision": 104,
+    "faq": 104,
+    "policy": 104,
+    "runbook": 104,
+    "sop": 104
+  },
+  "version_status": {
+    "published": 520,
+    "superseded": 104
+  },
+  "qa_types": {
+    "decision_trace": 104,
+    "multi_document": 208,
+    "numeric": 104,
+    "procedure": 104,
+    "single_document": 416,
+    "unanswerable": 80,
+    "version_awareness": 104
+  },
+  "qa_splits": {
+    "dev": 163,
+    "test": 178,
+    "train": 779
+  },
+  "published_document_characters": {
+    "minimum": 854,
+    "median": 902.0,
+    "maximum": 1118,
+    "total": 486966
+  },
+  "chunk_characters": {
+    "minimum": 111,
+    "median": 140.0,
+    "maximum": 304,
+    "total": 533412
+  }
+}

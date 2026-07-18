@@ -165,7 +165,25 @@ func seedWaitingRun(t *testing.T, ctx context.Context, pool *pgxpool.Pool, promp
 	t.Helper()
 	id, _ := newUUID()
 	source, _ := newUUID()
-	_, err := pool.Exec(ctx, `INSERT INTO agent.runs(id,source_event_id,tenant_id,principal_member_id,conversation_id,sender_id,session_type,prompt,state,candidate_text,model,provider_response_id,reply_server_msg_id,action_type,action_title) SELECT $1::uuid,$2,$3::uuid,$4::uuid,'si_test','sender',1,$5,'waiting_approval','candidate','test','resp','reply','create_ticket',$5`, id, source, testTenant, testMember, prompt)
+	_, err := pool.Exec(ctx, `
+INSERT INTO agent.runs (
+    id, source_event_id, tenant_id, principal_member_id, conversation_id, sender_id,
+    session_type, prompt, state, candidate_text, model, provider_response_id,
+    reply_server_msg_id, action_type, action_title, agent_id, agent_version_id,
+    agent_deployment_id, agent_trigger_id, agent_spec_checksum
+)
+SELECT $1::uuid, $2, $3::uuid, $4::uuid, 'si_test', 'sender', 1, $5,
+       'waiting_approval', 'candidate', 'test', 'resp', 'reply', 'create_ticket', $5,
+       d.id, v.id, dep.id, tr.id, v.spec_checksum
+FROM agent.definitions d
+JOIN agent.deployments dep
+  ON dep.tenant_id = d.tenant_id AND dep.agent_id = d.id AND dep.slot = 'production'
+JOIN agent.versions v
+  ON v.tenant_id = d.tenant_id AND v.agent_id = d.id AND v.id = dep.active_version_id
+JOIN agent.triggers tr
+  ON tr.tenant_id = d.tenant_id AND tr.agent_id = d.id
+ AND tr.trigger_type = 'mention_alias' AND tr.trigger_value = '@agent'
+WHERE d.tenant_id = $3::uuid AND d.slug = 'knowledge-agent'`, id, source, testTenant, testMember, prompt)
 	if err != nil {
 		t.Fatal(err)
 	}

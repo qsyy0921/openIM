@@ -49,18 +49,21 @@ func main() {
 		AdminUser: cfg.OpenIMAdminUserID,
 		Timeout:   cfg.DependencyTimeout,
 	})
+	identityStore := identity.NewPostgresStore(pool)
 	sessions := identity.NewService(
 		verifier,
-		identity.NewPostgresStore(pool),
+		identityStore,
 		openIM,
 		cfg.OpenIMWSURL,
 		2*cfg.DependencyTimeout,
 	)
+	devices := identity.NewDeviceService(verifier, identityStore, openIM)
 	actionStore := action.NewStore(pool)
-	approvals := action.NewService(verifier, identity.NewPostgresStore(pool), actionStore)
+	approvals := action.NewService(verifier, identityStore, actionStore)
 	agentStore := agent.NewStore(pool)
-	workspace := agent.NewWorkspaceService(verifier, identity.NewPostgresStore(pool), agentStore, openIM)
-	handler := httpserver.NewHandler(cfg.Version, sessions, approvals, workspace)
+	workspace := agent.NewWorkspaceService(verifier, identityStore, agentStore, openIM)
+	catalog := agent.NewCatalogService(verifier, identityStore, agentStore)
+	handler := httpserver.NewHandler(cfg.Version, sessions, devices, approvals, workspace, catalog)
 
 	listener, err := net.Listen("tcp", cfg.HTTPAddr)
 	if err != nil {

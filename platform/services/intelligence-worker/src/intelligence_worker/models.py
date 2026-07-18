@@ -8,6 +8,12 @@ class CandidateRequest(BaseModel):
     tenant_id: str = Field(min_length=1, max_length=128)
     conversation_id: str = Field(min_length=1, max_length=512)
     sender_id: str = Field(min_length=1, max_length=128)
+    agent_id: str = Field(min_length=1, max_length=128)
+    agent_version_id: str = Field(min_length=1, max_length=128)
+    agent_spec_checksum: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
+    instructions: str = Field(min_length=1, max_length=4000)
+    model_route: str = Field(min_length=1, max_length=128)
+    allowed_action_types: list[str] = Field(max_length=1)
     content: str = Field(min_length=1, max_length=16_000)
     evidence: list["Evidence"] = Field(max_length=8)
 

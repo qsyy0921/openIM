@@ -27,16 +27,23 @@ type healthResponse struct {
 type SessionService interface {
 	CreateSession(ctx context.Context, rawToken, deviceID string, platformID int32) (identity.Session, error)
 }
+type DeviceService interface {
+	List(ctx context.Context, rawToken, deviceID string, platformID int32) (identity.DeviceSnapshot, error)
+	LogoutPlatform(ctx context.Context, rawToken, deviceID string, currentPlatformID, targetPlatformID int32) error
+}
 type ApprovalService interface {
 	Approve(context.Context, string, string, int32, string, string) (action.ApprovalResult, error)
 }
 type AgentWorkspaceService interface {
 	Get(context.Context, string, string, int32) (agent.Workspace, error)
 }
+type AgentCatalogService interface {
+	List(context.Context, string, string, int32) ([]agent.AgentSummary, error)
+}
 
-func NewHandler(version string, sessions SessionService, approvals ApprovalService, workspace AgentWorkspaceService) http.Handler {
-	if sessions == nil || approvals == nil || workspace == nil {
-		panic("session, approval, and Agent workspace services are required")
+func NewHandler(version string, sessions SessionService, devices DeviceService, approvals ApprovalService, workspace AgentWorkspaceService, catalog AgentCatalogService) http.Handler {
+	if sessions == nil || devices == nil || approvals == nil || workspace == nil || catalog == nil {
+		panic("session, device, approval, Agent workspace, and Agent catalog services are required")
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
@@ -49,9 +56,143 @@ func NewHandler(version string, sessions SessionService, approvals ApprovalServi
 		})
 	})
 	mux.Handle("POST /v1/im/session", &sessionHandler{service: sessions})
+	mux.Handle("GET /v1/im/devices", &deviceListHandler{service: devices})
+	mux.Handle("POST /v1/im/platforms/{platform_id}/logout", &platformLogoutHandler{service: devices})
 	mux.Handle("GET /v1/agent/workspace", &agentWorkspaceHandler{service: workspace})
+	mux.Handle("GET /v1/agents", &agentCatalogHandler{service: catalog})
 	mux.Handle("POST /v1/agent/intents/{intent_id}/approve", &approvalHandler{service: approvals})
 	return requestLogger(mux)
+}
+
+type agentCatalogHandler struct{ service AgentCatalogService }
+
+func (h *agentCatalogHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	correlationID := correlationID(r)
+	w.Header().Set("X-Correlation-ID", correlationID)
+	token, ok := bearerToken(r.Header.Get("Authorization"))
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "AUTHENTICATION_REQUIRED", "a valid bearer token is required", false, correlationID)
+		return
+	}
+	deviceID, platformID, ok := requestDeviceContext(r)
+	if !ok {
+		writeError(w, http.StatusBadRequest, "INVALID_REQUEST", "platform_id or device_id is invalid", false, correlationID)
+		return
+	}
+	agents, err := h.service.List(r.Context(), token, deviceID, platformID)
+	if err != nil {
+		slog.Warn("read Agent catalog failed", "correlation_id", correlationID, "error", err)
+		switch {
+		case errors.Is(err, identity.ErrUnauthenticated):
+			writeError(w, http.StatusUnauthorized, "AUTHENTICATION_REQUIRED", "enterprise identity is invalid or expired", false, correlationID)
+		case errors.Is(err, identity.ErrForbidden):
+			writeError(w, http.StatusForbidden, "MEMBER_OR_DEVICE_FORBIDDEN", "member or device is not active", false, correlationID)
+		default:
+			writeError(w, http.StatusBadGateway, "AGENT_CATALOG_UNAVAILABLE", "Agent catalog dependencies are unavailable", true, correlationID)
+		}
+		return
+	}
+	writeJSON(w, http.StatusOK, agents)
+}
+
+type deviceListHandler struct{ service DeviceService }
+
+func (h *deviceListHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	correlationID := correlationID(r)
+	w.Header().Set("X-Correlation-ID", correlationID)
+	token, ok := bearerToken(r.Header.Get("Authorization"))
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "AUTHENTICATION_REQUIRED", "a valid bearer token is required", false, correlationID)
+		return
+	}
+	deviceID, platformID, ok := requestDeviceContext(r)
+	if !ok {
+		writeError(w, http.StatusBadRequest, "INVALID_REQUEST", "platform_id or device_id is invalid", false, correlationID)
+		return
+	}
+	snapshot, err := h.service.List(r.Context(), token, deviceID, platformID)
+	if err != nil {
+		slog.Warn("read device projection failed", "correlation_id", correlationID, "error", err)
+		writeDeviceError(w, err, correlationID)
+		return
+	}
+	writeJSON(w, http.StatusOK, snapshot)
+}
+
+type platformLogoutHandler struct{ service DeviceService }
+type platformLogoutRequest struct {
+	CurrentPlatformID int32  `json:"current_platform_id"`
+	CurrentDeviceID   string `json:"current_device_id"`
+}
+type platformLogoutResponse struct {
+	PlatformID    int32  `json:"platform_id"`
+	State         string `json:"state"`
+	CorrelationID string `json:"correlation_id"`
+}
+
+func (h *platformLogoutHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	correlationID := correlationID(r)
+	w.Header().Set("X-Correlation-ID", correlationID)
+	token, ok := bearerToken(r.Header.Get("Authorization"))
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "AUTHENTICATION_REQUIRED", "a valid bearer token is required", false, correlationID)
+		return
+	}
+	targetValue := strings.TrimSpace(r.PathValue("platform_id"))
+	targetPlatform, err := strconv.ParseInt(targetValue, 10, 32)
+	if err != nil || !validPlatformID(int32(targetPlatform)) {
+		writeError(w, http.StatusBadRequest, "INVALID_REQUEST", "target platform_id is invalid", false, correlationID)
+		return
+	}
+	var input platformLogoutRequest
+	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&input); err != nil {
+		writeError(w, http.StatusBadRequest, "INVALID_REQUEST", "request body is invalid", false, correlationID)
+		return
+	}
+	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
+		writeError(w, http.StatusBadRequest, "INVALID_REQUEST", "request body must contain one JSON object", false, correlationID)
+		return
+	}
+	input.CurrentDeviceID = strings.TrimSpace(input.CurrentDeviceID)
+	if !validPlatformID(input.CurrentPlatformID) || input.CurrentDeviceID == "" || len(input.CurrentDeviceID) > 128 {
+		writeError(w, http.StatusBadRequest, "INVALID_REQUEST", "current platform_id or device_id is invalid", false, correlationID)
+		return
+	}
+	if err := h.service.LogoutPlatform(r.Context(), token, input.CurrentDeviceID, input.CurrentPlatformID, int32(targetPlatform)); err != nil {
+		slog.Warn("logout OpenIM platform failed", "correlation_id", correlationID, "target_platform_id", targetPlatform, "error", err)
+		writeDeviceError(w, err, correlationID)
+		return
+	}
+	writeJSON(w, http.StatusOK, platformLogoutResponse{PlatformID: int32(targetPlatform), State: "logged_out", CorrelationID: correlationID})
+}
+
+func requestDeviceContext(r *http.Request) (string, int32, bool) {
+	deviceID := strings.TrimSpace(r.URL.Query().Get("device_id"))
+	platformValue := strings.TrimSpace(r.URL.Query().Get("platform_id"))
+	platformID, err := strconv.ParseInt(platformValue, 10, 32)
+	if err != nil || !validPlatformID(int32(platformID)) || deviceID == "" || len(deviceID) > 128 {
+		return "", 0, false
+	}
+	return deviceID, int32(platformID), true
+}
+
+func writeDeviceError(w http.ResponseWriter, err error, correlationID string) {
+	switch {
+	case errors.Is(err, identity.ErrUnauthenticated):
+		writeError(w, http.StatusUnauthorized, "AUTHENTICATION_REQUIRED", "enterprise identity is invalid or expired", false, correlationID)
+	case errors.Is(err, identity.ErrForbidden), errors.Is(err, identity.ErrTargetNotEnrolled):
+		writeError(w, http.StatusForbidden, "DEVICE_MANAGEMENT_FORBIDDEN", "member, current device, or target platform is not active", false, correlationID)
+	case errors.Is(err, identity.ErrCurrentPlatform):
+		writeError(w, http.StatusConflict, "CURRENT_PLATFORM_CONFLICT", "the current platform cannot be logged out", false, correlationID)
+	case errors.Is(err, identity.ErrIdentityLinkNotReady):
+		writeError(w, http.StatusConflict, "IM_IDENTITY_NOT_READY", "OpenIM identity provisioning is not ready", true, correlationID)
+	case errors.Is(err, identity.ErrDependencyUnavailable):
+		writeError(w, http.StatusBadGateway, "DEPENDENCY_UNAVAILABLE", "a required dependency is unavailable", true, correlationID)
+	default:
+		writeError(w, http.StatusInternalServerError, "INTERNAL_ERROR", "the request could not be completed", false, correlationID)
+	}
 }
 
 type agentWorkspaceHandler struct{ service AgentWorkspaceService }
