@@ -50,8 +50,21 @@ if [[ "$rotate" == "true" ]]; then
   rm -f "$ca_key" "$ca_cert" "$tls_dir/lab-ca.srl" "$server_key" "$server_cert" "$host_marker"
 fi
 if [[ -f "$host_marker" && "$(cat "$host_marker")" != "$public_host" ]]; then
-  echo "existing TLS identity belongs to another public host" >&2
-  exit 1
+  if [[ ! -f "$server_cert" ]]; then
+    echo "existing TLS identity belongs to another public host" >&2
+    exit 1
+  fi
+  if [[ "$public_host" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]]; then
+    openssl x509 -in "$server_cert" -noout -checkip "$public_host" >/dev/null || {
+      echo "existing TLS certificate does not cover the requested public host" >&2
+      exit 1
+    }
+  else
+    openssl x509 -in "$server_cert" -noout -checkhost "$public_host" >/dev/null || {
+      echo "existing TLS certificate does not cover the requested public host" >&2
+      exit 1
+    }
+  fi
 fi
 
 if [[ ! -f "$ca_key" || ! -f "$ca_cert" ]]; then

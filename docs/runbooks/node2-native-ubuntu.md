@@ -13,7 +13,7 @@ Status: executable deployment path for Ubuntu 26.04 on `qsyy0921@172.31.50.2` or
 
 ## Public addresses
 
-The current reachable management address is `192.168.0.38`. The static wired address is `172.31.50.2`. Select one as `PLATFORM_NODE2_PUBLIC_HOST` before starting Keycloak and building Web; the HTTPS origin, OIDC issuer, and Web build must use the same host.
+The Wi-Fi management address is `192.168.0.38`. The static wired address is `172.31.50.2` and is the required application origin for `.1` to `.2` development because the Web client loads the large OpenIM WASM runtime during startup. Set `PLATFORM_NODE2_PUBLIC_HOST=172.31.50.2` before starting Keycloak and building Web; the HTTPS origin, OIDC issuer, and Web build must use the same host. Keep Wi-Fi for management access only.
 
 Published ports:
 
@@ -34,6 +34,8 @@ certutil.exe -user -addstore Root .\openim-node2-lab-ca.crt
 ```
 
 Never copy `lab-ca.key` or `node2.key` from Node2. Set `OPENIM_PLATFORM_TLS_ROTATE=true` only for an explicit lab certificate rotation, then replace the controller's old CA trust entry.
+
+Changing the canonical host does not require CA rotation when the existing server certificate already contains the new host in its SAN list. The installer verifies that coverage before updating the host marker and fails closed when the certificate does not cover the requested host.
 
 ## Release
 

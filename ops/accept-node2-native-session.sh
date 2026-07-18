@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-public_host="${1:-192.168.0.38}"
+public_host="${1:-172.31.50.2}"
 device_id="${2:-ubuntu-web}"
 public_origin="${3:-https://${public_host}:3443}"
 platform_id=5
