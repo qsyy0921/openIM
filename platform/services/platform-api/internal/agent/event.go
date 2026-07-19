@@ -19,6 +19,8 @@ type Source struct {
 type Trigger struct {
 	EventID        string
 	TenantID       string
+	MemberID       string
+	SourceChannel  string
 	ConversationID string
 	SenderID       string
 	SessionType    int32
@@ -31,7 +33,7 @@ type Mention struct {
 }
 
 func Classify(event ingress.Event) (Trigger, bool, error) {
-	if event.EventType != ingress.EventType || event.EventID == "" || event.TenantID == "" || event.ConversationID == "" || event.SenderID == "" {
+	if event.EventType != ingress.EventType || event.EventID == "" || event.TenantID == "" || event.SourceChannel == "" || event.ConversationID == "" || event.SenderID == "" {
 		return Trigger{}, false, errors.New("required event identity is missing")
 	}
 	if event.ContentType != textContentType {
@@ -47,11 +49,15 @@ func Classify(event ingress.Event) (Trigger, bool, error) {
 	if len(mentions) == 0 {
 		return Trigger{}, false, nil
 	}
+	if event.PrincipalMemberID == "" {
+		return Trigger{}, false, errors.New("triggering enterprise member is missing")
+	}
 	if event.SessionType != 1 && event.SessionType != 2 {
 		return Trigger{}, false, errors.New("agent session type is unsupported")
 	}
 	return Trigger{
-		EventID: event.EventID, TenantID: event.TenantID, ConversationID: event.ConversationID,
+		EventID: event.EventID, TenantID: event.TenantID, MemberID: event.PrincipalMemberID,
+		SourceChannel: event.SourceChannel, ConversationID: event.ConversationID,
 		SenderID: event.SenderID, SessionType: event.SessionType, Mentions: mentions,
 	}, true, nil
 }

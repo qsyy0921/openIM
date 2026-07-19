@@ -1,0 +1,190 @@
+{
+  "schema_version": 1,
+  "evaluator_version": "grounded-generation-v1",
+  "model": "qwen2.5:3b",
+  "sample_digest": "sha256:ecf59964fba3bf6f672e90fd1deafb3fff27f4c1f9be3eb903ec6105bd0d7b89",
+  "cases": 40,
+  "answerable_cases": 20,
+  "unanswerable_cases": 20,
+  "model_calls": 40,
+  "provider_failures": 40,
+  "retrieval_misses": 0,
+  "generated_candidates": 0,
+  "required_fact_matches": 0,
+  "required_fact_total": 74,
+  "correct_generated_citations": 0,
+  "generated_citations": 0,
+  "cited_expected_chunks": 0,
+  "expected_citation_chunks": 30,
+  "candidate_contract_success_rate": 0,
+  "grounding_decision_accuracy": 0,
+  "abstention_accuracy": 0,
+  "required_fact_coverage": 0,
+  "generated_citation_precision": 0,
+  "generated_citation_recall": 0,
+  "citation_syntax_integrity": 0,
+  "end_to_end_success_rate": 0,
+  "production_gate_evaluated": false,
+  "failures": [
+    {
+      "qa_id": "05c71d28-28dd-5be8-9af5-83437924d89f",
+      "reason": "provider_or_schema_failure"
+    },
+    {
+      "qa_id": "06fb763a-c0b0-5d71-9fc7-c30033a6b744",
+      "reason": "provider_or_schema_failure"
+    },
+    {
+      "qa_id": "179c1093-8ec2-5b4e-b727-9c179a117249",
+      "reason": "provider_or_schema_failure"
+    },
+    {
+      "qa_id": "22d57e51-79e4-5e32-a8f6-7637625fcb51",
+      "reason": "provider_or_schema_failure"
+    },
+    {
+      "qa_id": "2eeb69e2-1f99-5b39-aa59-09247e75b163",
+      "reason": "provider_or_schema_failure"
+    },
+    {
+      "qa_id": "43713c12-5e35-54fd-be1d-2be968f7b59e",
+      "reason": "provider_or_schema_failure"
+    },
+    {
+      "qa_id": "47251c0c-e3e7-5f2b-a49a-84c2c854530d",
+      "reason": "provider_or_schema_failure"
+    },
+    {
+      "qa_id": "488f17ac-3b0b-5eb7-ab2b-6f49cb74e98f",
+      "reason": "provider_or_schema_failure"
+    },
+    {
+      "qa_id": "4e5197e7-6248-5e32-961d-0d6f597afb2b",
+      "reason": "provider_or_schema_failure"
+    },
+    {
+      "qa_id": "50ac0778-c383-5e61-ba86-d4cae594dc2a",
+      "reason": "provider_or_schema_failure"
+    },
+    {
+      "qa_id": "553d33fa-7a48-5277-a90b-7862cc19b31e",
+      "reason": "provider_or_schema_failure"
+    },
+    {
+      "qa_id": "5ad9110e-e084-5e96-b1cd-601e7100a0b7",
+      "reason": "provider_or_schema_failure"
+    },
+    {
+      "qa_id": "6158d346-c390-56ca-b1b7-e3c5a8cf1686",
+      "reason": "provider_or_schema_failure"
+    },
+    {
+      "qa_id": "6527bea3-0f01-58a6-bd73-5868b33b0558",
+      "reason": "provider_or_schema_failure"
+    },
+    {
+      "qa_id": "6b65432d-92c0-5b09-8d5b-540e0cc8731b",
+      "reason": "provider_or_schema_failure"
+    },
+    {
+      "qa_id": "76d7ad86-21d6-52a9-a371-f095edf41699",
+      "reason": "provider_or_schema_failure"
+    },
+    {
+      "qa_id": "835879e2-1b36-5c84-b7e1-c3a67bdb8d02",
+      "reason": "provider_or_schema_failure"
+    },
+    {
+      "qa_id": "854fa7a6-24fb-5720-b934-5d22dfd797d3",
+      "reason": "provider_or_schema_failure"
+    },
+    {
+      "qa_id": "8636677b-d6ea-5565-8d52-d3991eccc73a",
+      "reason": "provider_or_schema_failure"
+    },
+    {
+      "qa_id": "8fd5b83c-4128-5ddf-8786-54b5d8fe19ec",
+      "reason": "provider_or_schema_failure"
+    },
+    {
+      "qa_id": "93177dc4-e3a6-5ad9-9eca-6ad50dac5eda",
+      "reason": "provider_or_schema_failure"
+    },
+    {
+      "qa_id": "9f565da0-0c29-5a3b-a37f-fe38ba5cd389",
+      "reason": "provider_or_schema_failure"
+    },
+    {
+      "qa_id": "ab2dcd75-b90c-5268-9382-8222820e0c84",
+      "reason": "provider_or_schema_failure"
+    },
+    {
+      "qa_id": "ac27b6dc-e468-56bf-83a8-1a06e61cad4c",
+      "reason": "provider_or_schema_failure"
+    },
+    {
+      "qa_id": "acb75a28-1a95-5cb1-8e3d-5d7c5ee938ca",
+      "reason": "provider_or_schema_failure"
+    },
+    {
+      "qa_id": "aee8f488-916a-53e0-a7ca-352f852d49f6",
+      "reason": "provider_or_schema_failure"
+    },
+    {
+      "qa_id": "af99c319-5b25-5eed-9c8c-34c7463100cb",
+      "reason": "provider_or_schema_failure"
+    },
+    {
+      "qa_id": "c2521dea-d96a-5eb4-9d8e-f81d29d4a96a",
+      "reason": "provider_or_schema_failure"
+    },
+    {
+      "qa_id": "cb06789e-5678-580d-ba80-30ba93dc3b74",
+      "reason": "provider_or_schema_failure"
+    },
+    {
+      "qa_id": "cd7f2041-9228-5b5d-a7cd-c8edc7b1734f",
+      "reason": "provider_or_schema_failure"
+    },
+    {
+      "qa_id": "d5eb8e90-4f80-5054-9b01-49ae84738ae1",
+      "reason": "provider_or_schema_failure"
+    },
+    {
+      "qa_id": "d9bc1e5e-3229-5b53-8d5a-e032eda863fc",
+      "reason": "provider_or_schema_failure"
+    },
+    {
+      "qa_id": "da7c1966-f0c9-5feb-80f9-d5ade459a3e6",
+      "reason": "provider_or_schema_failure"
+    },
+    {
+      "qa_id": "dd1d3610-a371-5a80-adca-3b858dacb33a",
+      "reason": "provider_or_schema_failure"
+    },
+    {
+      "qa_id": "ed0b0628-68db-5569-ab0c-3ff20e2dbd93",
+      "reason": "provider_or_schema_failure"
+    },
+    {
+      "qa_id": "ee409c51-5ec7-5e17-8373-cfe6d838b725",
+      "reason": "provider_or_schema_failure"
+    },
+    {
+      "qa_id": "f0e0108c-f480-5d76-8710-717ce00a9f65",
+      "reason": "provider_or_schema_failure"
+    },
+    {
+      "qa_id": "f3748296-c2a8-5aa3-a26e-c275bc3c45b4",
+      "reason": "provider_or_schema_failure"
+    },
+    {
+      "qa_id": "f67f04d8-d6a6-5dda-90d2-dcff848b2bb8",
+      "reason": "provider_or_schema_failure"
+    },
+    {
+      "qa_id": "fb851966-3d09-5d74-b8f9-74d431cc605a",
+      "reason": "provider_or_schema_failure"
+    }
+  ]
+}

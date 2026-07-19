@@ -1,6 +1,8 @@
 -- Generated synthetic single-enterprise knowledge fixture; not a production migration.
--- dataset=1.0.0 generator=1.0.0
+-- dataset=1.0.0 generator=1.0.1
 BEGIN;
+INSERT INTO identity.tenants (id, external_id, display_name, status) VALUES ('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'::uuid, 'dataset-xinglan', '星澜智协科技有限公司', 'active') ON CONFLICT (id) DO UPDATE SET display_name=EXCLUDED.display_name, status='active';
+INSERT INTO identity.members (id, tenant_id, issuer, subject, display_name, status) VALUES ('bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb'::uuid, 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'::uuid, 'dataset://local', 'enterprise-rag-evaluator', '企业知识评测员', 'active') ON CONFLICT (id) DO UPDATE SET display_name=EXCLUDED.display_name, status='active';
 INSERT INTO knowledge.documents (id, tenant_id, title, source_uri, classification, status) VALUES ('a39d33b4-713b-5ab4-8756-2a4e64ac0812'::uuid, 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'::uuid, '会议室管理专题决策纪要', 'knowledge://xinglan/adm/adm-03/decision', 'internal', 'active') ON CONFLICT (id) DO UPDATE SET title=EXCLUDED.title, source_uri=EXCLUDED.source_uri, classification=EXCLUDED.classification, status='active';
 INSERT INTO knowledge.documents (id, tenant_id, title, source_uri, classification, status) VALUES ('e0fc6a81-fc77-5669-bb1a-d1b7afc1121d'::uuid, 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'::uuid, '会议室管理常见问题手册', 'knowledge://xinglan/adm/adm-03/faq', 'internal', 'active') ON CONFLICT (id) DO UPDATE SET title=EXCLUDED.title, source_uri=EXCLUDED.source_uri, classification=EXCLUDED.classification, status='active';
 INSERT INTO knowledge.documents (id, tenant_id, title, source_uri, classification, status) VALUES ('7bf56d80-63f3-59dc-988b-186e9cc7ea4f'::uuid, 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'::uuid, '会议室管理制度', 'knowledge://xinglan/adm/adm-03/policy', 'internal', 'active') ON CONFLICT (id) DO UPDATE SET title=EXCLUDED.title, source_uri=EXCLUDED.source_uri, classification=EXCLUDED.classification, status='active';

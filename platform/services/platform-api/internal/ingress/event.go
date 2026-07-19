@@ -14,6 +14,11 @@ import (
 
 const EventType = "im.message.accepted.v1"
 
+const (
+	ChannelOpenIM   = "openim"
+	ChannelTelegram = "telegram"
+)
+
 type Source struct {
 	Topic     string
 	Partition int32
@@ -23,6 +28,8 @@ type Source struct {
 
 type Message struct {
 	Source         Source
+	SourceChannel  string
+	MemberID       string
 	ServerMsgID    string
 	ClientMsgID    string
 	SenderID       string
@@ -38,11 +45,13 @@ type Event struct {
 	EventType          string `json:"event_type"`
 	OccurredAt         string `json:"occurred_at"`
 	TenantID           string `json:"tenant_id"`
+	SourceChannel      string `json:"source_channel"`
 	ConversationID     string `json:"conversation_id"`
 	SourceKey          string `json:"source_key"`
 	ServerMsgID        string `json:"server_msg_id"`
 	ClientMsgID        string `json:"client_msg_id"`
 	SenderID           string `json:"sender_id"`
+	PrincipalMemberID  string `json:"principal_member_id"`
 	SessionType        int32  `json:"session_type"`
 	ContentType        int32  `json:"content_type"`
 	Content            string `json:"content"`
@@ -70,6 +79,7 @@ func Normalize(source Source, data *sdkws.MsgData) (Message, error) {
 	}
 	return Message{
 		Source:         source,
+		SourceChannel:  ChannelOpenIM,
 		ServerMsgID:    data.ServerMsgID,
 		ClientMsgID:    data.ClientMsgID,
 		SenderID:       data.SendID,
@@ -81,7 +91,10 @@ func Normalize(source Source, data *sdkws.MsgData) (Message, error) {
 	}, nil
 }
 
-func (m Message) ToEvent(tenantID string) (Event, error) {
+func (m Message) ToEvent(tenantID, memberID string) (Event, error) {
+	if m.SourceChannel != ChannelOpenIM && m.SourceChannel != ChannelTelegram {
+		return Event{}, fmt.Errorf("unsupported source channel %q", m.SourceChannel)
+	}
 	eventID, err := newID()
 	if err != nil {
 		return Event{}, err
@@ -91,11 +104,13 @@ func (m Message) ToEvent(tenantID string) (Event, error) {
 		EventType:          EventType,
 		OccurredAt:         m.OccurredAt.Format(time.RFC3339Nano),
 		TenantID:           tenantID,
+		SourceChannel:      m.SourceChannel,
 		ConversationID:     m.ConversationID,
-		SourceKey:          "openim:" + m.ServerMsgID,
+		SourceKey:          m.SourceChannel + ":" + m.ServerMsgID,
 		ServerMsgID:        m.ServerMsgID,
 		ClientMsgID:        m.ClientMsgID,
 		SenderID:           m.SenderID,
+		PrincipalMemberID:  memberID,
 		SessionType:        m.SessionType,
 		ContentType:        m.ContentType,
 		Content:            m.Content,

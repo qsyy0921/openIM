@@ -1,7 +1,7 @@
 {
   "dataset_name": "xinglan-enterprise-knowledge-qa",
   "dataset_version": "1.0.0",
-  "generator_version": "1.0.0",
+  "generator_version": "1.0.1",
   "release_date": "2026-07-14",
   "seed": 20260714,
   "synthetic": true,
@@ -19,7 +19,7 @@
     "company_profile.json": "5f9cd9dd766432c5b5f52d9cccf35fefc69e2160e0c51d90f5e546cd0d3336c9",
     "document_versions.jsonl": "3dfc56a266bb23cef2dc92821918b26f74e9050cb153d04831efac5b2182580d",
     "documents.jsonl": "d77a41cd6754050d023dd4a47e7eb16fb10a57b7618cf8445fa2f7c035fb860f",
-    "postgres_import.sql": "fd55543928856fba5c7334fd28fc4d8cd2fdccb58c89aa98a3a4108827fe357a",
+    "postgres_import.sql": "8c111127fc59739a4c5ab0a2c9fdb860f10e18fea78d1bbf9e15196a945e94b9",
     "qa.jsonl": "b9f163665f40c3f2e8392d00aa38080520144cf6dcff2e4236563703e0674c61",
     "raw/adm/08235857-76a0-5df9-b1c8-a9521992aef0-v1.md": "0f8a1b7d7dddde2eda2c75c211620ddbea2ee32d06bd4feec32b4d124bba63d0",
     "raw/adm/168bde16-f923-529b-98c0-e7cdcf8f2fd0-v1.md": "f95cabe0df9e998bb65cc33fab26104272d0de149f87e7f584b1e91c535f0a9d",
@@ -645,8 +645,8 @@
     "raw/sec/eb2ab601-5252-5f64-95e7-4ed0b7d47007-v1.md": "91c6c69fed8c5c98d1c08e123f02224d6ee5d1e008f5e5cce499d25575d44d80",
     "raw/sec/eb2ab601-5252-5f64-95e7-4ed0b7d47007-v2.md": "f418bd5b324bbd6f1911e579b30f4e5822c93539bd71dbde8591ef94a84c017c",
     "raw/sec/ee0a6ced-7ae6-5854-afca-48e843b1298d-v1.md": "ce7ea4b9cce483be8a27198a33f2364d14eb59b937d052179ab1c6e769c2133f",
-    "README.md": "cafa798c8b50a5aae5ea103cdba1236fb8db49dfd9d4bccef81d09a5b931f0cf",
+    "README.md": "73515ab917f58ee3f750efd937aa07e4d5a21dce9d8cef68b8eebe2c10f9c285",
     "statistics.json": "1ddfcb1e3fc41c0acd545130dd079ae697ba0b17f6963fa96f466ed4d9fff2bc"
   },
-  "release_hash": "d9a31899246bfa9077be3d42d3dd0b54737a3fa50461ffd628ad4c5ae68059c9"
+  "release_hash": "7a8cd3e3a979865104ae128256e0f61703bec5f703bbbf235f22e3e4e0db9432"
 }

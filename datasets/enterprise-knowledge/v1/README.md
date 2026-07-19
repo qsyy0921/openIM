@@ -19,7 +19,7 @@
 - `chunks.jsonl`：对应 `knowledge.chunks`。
 - `qa.jsonl`：标准问题、答案、证据和 split。
 - `raw/`：每个版本的 Markdown 原文。
-- `postgres_import.sql`：映射现有本地 schema 的幂等开发导入脚本。
+- `postgres_import.sql`：映射现有本地 schema 的幂等开发导入脚本，包含固定的合成 tenant/member 身份种子，因此可在完成迁移的空库中直接执行。
 - `statistics.json`、`manifest.json`、`validation-report.json`：统计、哈希和质量门禁。
 
 ## 生成与验证

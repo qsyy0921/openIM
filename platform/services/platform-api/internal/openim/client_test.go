@@ -202,6 +202,38 @@ func TestClientForceLogoutUsesResolvedUserAndPlatform(t *testing.T) {
 	}
 }
 
+func TestClientChecksCurrentGroupMembership(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/auth/get_admin_token":
+			writeEnvelope(t, w, map[string]any{"token": "admin-token", "expireTimeSeconds": 3600})
+		case "/group/get_group_members_info":
+			if r.Header.Get("token") != "admin-token" {
+				t.Fatalf("token = %q", r.Header.Get("token"))
+			}
+			var request struct {
+				GroupID string   `json:"groupID"`
+				UserIDs []string `json:"userIDs"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+				t.Fatal(err)
+			}
+			if request.GroupID != "group-1" || len(request.UserIDs) != 1 || request.UserIDs[0] != "user-1" {
+				t.Fatalf("request = %#v", request)
+			}
+			writeEnvelope(t, w, map[string]any{"members": []map[string]string{{"userID": "user-1"}}})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	client := NewClient(Config{BaseURL: server.URL, Secret: "secret", AdminUser: "imAdmin", Timeout: time.Second})
+	member, err := client.IsGroupMember(context.Background(), "group-1", "user-1")
+	if err != nil || !member {
+		t.Fatalf("IsGroupMember() = %v, %v", member, err)
+	}
+}
+
 func TestEnsureAgentBotAcceptsEmptySuccessData(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {

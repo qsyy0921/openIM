@@ -18,6 +18,18 @@ import (
 	"github.com/qsyy0921/openim/platform/services/platform-api/internal/agent"
 )
 
+type stringList []string
+
+func (s *stringList) String() string { return strings.Join(*s, ",") }
+func (s *stringList) Set(value string) error {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return errors.New("empty Skill UUID")
+	}
+	*s = append(*s, value)
+	return nil
+}
+
 func main() {
 	if err := run(); err != nil {
 		log.Fatal(err)
@@ -25,12 +37,19 @@ func main() {
 }
 
 func run() error {
-	operation := flag.String("operation", "", "publish or activate")
+	operation := flag.String("operation", "", "create, publish, or activate")
 	tenantID := flag.String("tenant-id", "", "tenant UUID")
 	agentID := flag.String("agent-id", "", "Agent definition UUID")
 	actorMemberID := flag.String("actor-member-id", "", "operator member UUID")
+	slug := flag.String("slug", "", "new Agent slug")
+	displayName := flag.String("display-name", "", "new Agent display name")
+	description := flag.String("description", "", "new Agent description")
+	mentionAlias := flag.String("mention-alias", "", "new Agent mention alias")
 	specFile := flag.String("spec-file", "", "published Agent spec JSON file")
 	expectedVersion := flag.Int("expected-version", 0, "next version number required for publish")
+	capabilitySnapshotID := flag.String("capability-snapshot-id", "", "immutable capability snapshot required for publish")
+	var skillIDs stringList
+	flag.Var(&skillIDs, "skill-id", "immutable Skill UUID; repeat in execution order")
 	versionID := flag.String("version-id", "", "target immutable version UUID")
 	expectedRevision := flag.Int64("expected-revision", 0, "current deployment revision required for activate")
 	flag.Parse()
@@ -39,8 +58,9 @@ func run() error {
 	*tenantID = strings.TrimSpace(*tenantID)
 	*agentID = strings.TrimSpace(*agentID)
 	*actorMemberID = strings.TrimSpace(*actorMemberID)
-	if *tenantID == "" || *agentID == "" || *actorMemberID == "" {
-		return errors.New("tenant-id, agent-id, and actor-member-id are required")
+	*capabilitySnapshotID = strings.TrimSpace(*capabilitySnapshotID)
+	if *tenantID == "" || *actorMemberID == "" {
+		return errors.New("tenant-id and actor-member-id are required")
 	}
 	databaseURL := strings.TrimSpace(os.Getenv("PLATFORM_DATABASE_URL"))
 	if databaseURL == "" {
@@ -66,9 +86,9 @@ func run() error {
 	store := agent.NewStore(pool)
 
 	switch *operation {
-	case "publish":
-		if strings.TrimSpace(*specFile) == "" || *expectedVersion < 1 {
-			return errors.New("spec-file and positive expected-version are required for publish")
+	case "create":
+		if strings.TrimSpace(*specFile) == "" || *capabilitySnapshotID == "" {
+			return errors.New("spec-file and capability-snapshot-id are required for create")
 		}
 		raw, err := readBounded(*specFile, 1<<20)
 		if err != nil {
@@ -78,25 +98,48 @@ func run() error {
 		if err != nil {
 			return err
 		}
-		version, err := store.PublishVersion(ctx, *tenantID, *agentID, *actorMemberID, *expectedVersion, spec)
+		created, err := store.CreateAgent(ctx, agent.CreateAgentRequest{
+			TenantID: *tenantID, ActorMemberID: *actorMemberID,
+			Slug: *slug, DisplayName: *displayName, Description: *description,
+			MentionAlias: *mentionAlias, CapabilitySnapshotID: *capabilitySnapshotID,
+			Spec: spec, SkillIDs: skillIDs,
+		})
+		if err != nil {
+			return err
+		}
+		return json.NewEncoder(os.Stdout).Encode(created)
+	case "publish":
+		if *agentID == "" || strings.TrimSpace(*specFile) == "" || *expectedVersion < 1 || *capabilitySnapshotID == "" {
+			return errors.New("agent-id, spec-file, capability-snapshot-id, and positive expected-version are required for publish")
+		}
+		raw, err := readBounded(*specFile, 1<<20)
+		if err != nil {
+			return err
+		}
+		spec, err := agent.DecodeAgentSpec(agent.AgentSpecSchemaV1, raw)
+		if err != nil {
+			return err
+		}
+		version, err := store.PublishVersionWithSkills(ctx, *tenantID, *agentID, *actorMemberID, *expectedVersion, *capabilitySnapshotID, spec, skillIDs)
 		if err != nil {
 			return err
 		}
 		return json.NewEncoder(os.Stdout).Encode(map[string]any{
 			"agent_id": version.AgentID, "version_id": version.VersionID,
 			"version_number": version.VersionNumber, "spec_checksum": version.Checksum,
+			"capability_snapshot_id": version.CapabilitySnapshotID,
 		})
 	case "activate":
 		*versionID = strings.TrimSpace(*versionID)
-		if *versionID == "" || *expectedRevision < 1 {
-			return errors.New("version-id and positive expected-revision are required for activate")
+		if *agentID == "" || *versionID == "" || *expectedRevision < 1 {
+			return errors.New("agent-id, version-id, and positive expected-revision are required for activate")
 		}
 		if err := store.ActivateVersion(ctx, *tenantID, *agentID, *versionID, *actorMemberID, *expectedRevision); err != nil {
 			return err
 		}
 		return json.NewEncoder(os.Stdout).Encode(map[string]any{"status": "activated", "version_id": *versionID})
 	default:
-		return errors.New("operation must be publish or activate")
+		return errors.New("operation must be create, publish, or activate")
 	}
 }
 

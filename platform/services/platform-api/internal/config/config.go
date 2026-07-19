@@ -26,17 +26,20 @@ const (
 )
 
 type Config struct {
-	HTTPAddr          string
-	Version           string
-	ShutdownTimeout   time.Duration
-	DependencyTimeout time.Duration
-	DatabaseURL       string
-	OIDCIssuer        string
-	OIDCAudience      string
-	OpenIMAPIURL      string
-	OpenIMWSURL       string
-	OpenIMSecret      string
-	OpenIMAdminUserID string
+	HTTPAddr               string
+	Version                string
+	ShutdownTimeout        time.Duration
+	DependencyTimeout      time.Duration
+	DatabaseURL            string
+	OIDCIssuer             string
+	OIDCAudience           string
+	OpenIMAPIURL           string
+	OpenIMWSURL            string
+	OpenIMSecret           string
+	OpenIMAdminUserID      string
+	A2AAllowedHosts        []string
+	A2AAllowedPrivateCIDRs []string
+	A2ATimeout             time.Duration
 }
 
 type LookupEnv func(string) (string, bool)
@@ -103,20 +106,46 @@ func Load(lookup LookupEnv) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	a2aHosts := optionalCSV(lookup, "PLATFORM_A2A_ALLOWED_HOSTS")
+	var a2aTimeout time.Duration
+	if len(a2aHosts) > 0 {
+		a2aTimeout, err = requiredDuration(lookup, "PLATFORM_A2A_TIMEOUT")
+		if err != nil {
+			return Config{}, err
+		}
+	}
 
 	return Config{
-		HTTPAddr:          httpAddr,
-		Version:           version,
-		ShutdownTimeout:   shutdownTimeout,
-		DependencyTimeout: dependencyTimeout,
-		DatabaseURL:       databaseURL,
-		OIDCIssuer:        strings.TrimRight(oidcIssuer, "/"),
-		OIDCAudience:      oidcAudience,
-		OpenIMAPIURL:      strings.TrimRight(openIMAPIURL, "/"),
-		OpenIMWSURL:       openIMWSURL,
-		OpenIMSecret:      openIMSecret,
-		OpenIMAdminUserID: openIMAdminUserID,
+		HTTPAddr:               httpAddr,
+		Version:                version,
+		ShutdownTimeout:        shutdownTimeout,
+		DependencyTimeout:      dependencyTimeout,
+		DatabaseURL:            databaseURL,
+		OIDCIssuer:             strings.TrimRight(oidcIssuer, "/"),
+		OIDCAudience:           oidcAudience,
+		OpenIMAPIURL:           strings.TrimRight(openIMAPIURL, "/"),
+		OpenIMWSURL:            openIMWSURL,
+		OpenIMSecret:           openIMSecret,
+		OpenIMAdminUserID:      openIMAdminUserID,
+		A2AAllowedHosts:        a2aHosts,
+		A2AAllowedPrivateCIDRs: optionalCSV(lookup, "PLATFORM_A2A_ALLOWED_PRIVATE_CIDRS"),
+		A2ATimeout:             a2aTimeout,
 	}, nil
+}
+
+func optionalCSV(lookup LookupEnv, key string) []string {
+	raw, _ := lookup(key)
+	if raw = strings.TrimSpace(raw); raw == "" {
+		return nil
+	}
+	values := strings.Split(raw, ",")
+	result := make([]string, 0, len(values))
+	for _, value := range values {
+		if value = strings.TrimSpace(value); value != "" {
+			result = append(result, value)
+		}
+	}
+	return result
 }
 
 func requiredDuration(lookup LookupEnv, key string) (time.Duration, error) {

@@ -9,6 +9,7 @@ import (
 func TestClassifyAgentText(t *testing.T) {
 	event := ingress.Event{
 		EventID: "event-1", EventType: ingress.EventType, TenantID: "tenant-1",
+		SourceChannel: ingress.ChannelOpenIM, PrincipalMemberID: "member-1",
 		ConversationID: "si_a_b", SenderID: "a", SessionType: 1, ContentType: 101,
 		Content: `{"content":"请 @Agent 总结这段内容"}`,
 	}
@@ -24,6 +25,7 @@ func TestClassifyAgentText(t *testing.T) {
 func TestClassifyIgnoresOrdinaryText(t *testing.T) {
 	event := ingress.Event{
 		EventID: "event-1", EventType: ingress.EventType, TenantID: "tenant-1",
+		SourceChannel: ingress.ChannelOpenIM, PrincipalMemberID: "member-1",
 		ConversationID: "si_a_b", SenderID: "a", SessionType: 1, ContentType: 101,
 		Content: `{"content":"普通消息"}`,
 	}
@@ -36,6 +38,7 @@ func TestClassifyIgnoresOrdinaryText(t *testing.T) {
 func TestClassifyDefersKnownAliasAndEmptyPromptToCatalog(t *testing.T) {
 	event := ingress.Event{
 		EventID: "event-1", EventType: ingress.EventType, TenantID: "tenant-1",
+		SourceChannel: ingress.ChannelOpenIM, PrincipalMemberID: "member-1",
 		ConversationID: "si_a_b", SenderID: "a", SessionType: 1, ContentType: 101,
 		Content: `{"content":"@agent"}`,
 	}
@@ -48,6 +51,7 @@ func TestClassifyDefersKnownAliasAndEmptyPromptToCatalog(t *testing.T) {
 func TestClassifyExtractsExactMentionCandidatesWithoutSubstringMatch(t *testing.T) {
 	event := ingress.Event{
 		EventID: "event-1", EventType: ingress.EventType, TenantID: "tenant-1",
+		SourceChannel: ingress.ChannelOpenIM, PrincipalMemberID: "member-1",
 		ConversationID: "si_a_b", SenderID: "a", SessionType: 1, ContentType: 101,
 		Content: `{"content":"mail@example.com @Unknown 请 @Agent 回答"}`,
 	}
@@ -60,10 +64,14 @@ func TestClassifyExtractsExactMentionCandidatesWithoutSubstringMatch(t *testing.
 	}
 }
 
-func TestReplyTargetAndBotID(t *testing.T) {
-	target, err := replyTarget(Run{SessionType: 2, ConversationID: "sg_group-1"})
-	if err != nil || target.GroupID != "group-1" || target.SessionType != 2 {
-		t.Fatalf("replyTarget() = %#v, %v", target, err)
+func TestDeliveryTargetAndBotID(t *testing.T) {
+	target, err := deliveryTarget(Run{SourceChannel: "openim", SessionType: 2, ConversationID: "sg_group-1"})
+	if err != nil || target != "group-1" {
+		t.Fatalf("deliveryTarget() = %q, %v", target, err)
+	}
+	target, err = deliveryTarget(Run{SourceChannel: "telegram", SessionType: 1, ConversationID: "tg_10001"})
+	if err != nil || target != "10001" {
+		t.Fatalf("deliveryTarget() = %q, %v", target, err)
 	}
 	if BotUserID("tenant-1") != BotUserID("tenant-1") || BotUserID("tenant-1") == BotUserID("tenant-2") {
 		t.Fatal("bot user ID is not deterministic per tenant")
@@ -92,5 +100,33 @@ func TestValidateActionCandidateAllowsOnlyBoundedTicket(t *testing.T) {
 	}
 	if err := validateActionCandidate(&ActionIntentCandidate{Type: "create_ticket", Title: "x"}, AgentSpec{}); err == nil {
 		t.Fatal("action disabled by pinned Agent version was accepted")
+	}
+}
+
+func TestValidateKnowledgeCandidateAllowsExplicitAbstentionWithoutCitation(t *testing.T) {
+	evidence := []Evidence{{CitationID: "C1", DocumentID: "doc-1"}}
+	cited, err := validateKnowledgeCandidate(Candidate{
+		Text: "现有证据不足以回答该问题。", GroundingStatus: GroundingInsufficientEvidence,
+	}, evidence)
+	if err != nil || len(cited) != 0 {
+		t.Fatalf("cited=%#v err=%v", cited, err)
+	}
+}
+
+func TestValidateKnowledgeCandidateRejectsGroundedAnswerWithoutCitation(t *testing.T) {
+	_, err := validateKnowledgeCandidate(Candidate{
+		Text: "没有引用的企业断言", GroundingStatus: GroundingGrounded,
+	}, []Evidence{{CitationID: "C1", DocumentID: "doc-1"}})
+	if err == nil {
+		t.Fatal("grounded answer without citations was accepted")
+	}
+}
+
+func TestValidateCitationsRejectsUndeclaredCitationInText(t *testing.T) {
+	_, err := validateCitations(Candidate{
+		Text: "answer [C1] and hidden [C2]", CitationIDs: []string{"C1"},
+	}, []Evidence{{CitationID: "C1", DocumentID: "doc-1"}, {CitationID: "C2", DocumentID: "doc-2"}})
+	if err == nil {
+		t.Fatal("undeclared citation token was accepted")
 	}
 }

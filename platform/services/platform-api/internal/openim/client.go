@@ -231,6 +231,34 @@ func (c *Client) ForceLogout(ctx context.Context, userID string, platformID int3
 	return c.post(ctx, "/auth/force_logout", adminToken, request, nil)
 }
 
+func (c *Client) IsGroupMember(ctx context.Context, groupID, userID string) (bool, error) {
+	if groupID == "" || userID == "" {
+		return false, errors.New("OpenIM group membership query is invalid")
+	}
+	adminToken, err := c.getAdminToken(ctx)
+	if err != nil {
+		return false, err
+	}
+	request := struct {
+		GroupID string   `json:"groupID"`
+		UserIDs []string `json:"userIDs"`
+	}{GroupID: groupID, UserIDs: []string{userID}}
+	var response struct {
+		Members []struct {
+			UserID string `json:"userID"`
+		} `json:"members"`
+	}
+	if err := c.post(ctx, "/group/get_group_members_info", adminToken, request, &response); err != nil {
+		return false, err
+	}
+	for _, member := range response.Members {
+		if member.UserID == userID {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 func (c *Client) getAdminToken(ctx context.Context) (string, error) {
 	c.adminMu.Lock()
 	defer c.adminMu.Unlock()

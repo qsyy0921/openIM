@@ -16,13 +16,21 @@ import (
 )
 
 type Config struct {
-	DatabaseURL, EventTopic, ConsumerGroup        string
-	Brokers                                       []string
-	TLS                                           *tls.Config
-	DependencyTimeout, Poll, Lease                time.Duration
-	MaxAttempts                                   int
-	IntelligenceURL                               string
-	OpenIMAPIURL, OpenIMSecret, OpenIMAdminUserID string
+	DatabaseURL, EventTopic, ConsumerGroup     string
+	OpenIMAPIURL, OpenIMSecret                 string
+	OpenIMAdminUserID                          string
+	Brokers                                    []string
+	TLS                                        *tls.Config
+	DependencyTimeout, Poll, Lease             time.Duration
+	ToolApprovalTTL                            time.Duration
+	MCPReconcileInterval                       time.Duration
+	MaxAttempts                                int
+	IntelligenceURL                            string
+	RetrievalModelRevision                     string
+	RetrievalDimension, RetrievalMaxCandidates int
+	RetrievalDenseMinSimilarity                float64
+	A2AAllowedHosts, A2AAllowedPrivateCIDRs    []string
+	A2ATimeout                                 time.Duration
 }
 
 func LoadConfig() (Config, error) {
@@ -73,17 +81,49 @@ func LoadConfig() (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
-	openIM, err := httpURL("PLATFORM_OPENIM_API_URL")
+	openIMAPIURL, err := httpURL("PLATFORM_OPENIM_API_URL")
 	if err != nil {
 		return Config{}, err
 	}
-	secret, err := env("PLATFORM_OPENIM_SECRET")
+	openIMSecret, err := env("PLATFORM_OPENIM_SECRET")
 	if err != nil {
 		return Config{}, err
 	}
-	admin, err := env("PLATFORM_OPENIM_ADMIN_USER_ID")
+	openIMAdminUserID, err := env("PLATFORM_OPENIM_ADMIN_USER_ID")
 	if err != nil {
 		return Config{}, err
+	}
+	toolApprovalTTL, err := durationEnv("PLATFORM_TOOL_APPROVAL_TTL")
+	if err != nil {
+		return Config{}, err
+	}
+	mcpReconcile, err := durationEnv("PLATFORM_MCP_RECONCILE_INTERVAL")
+	if err != nil {
+		return Config{}, err
+	}
+	retrievalModel, err := env("PLATFORM_RETRIEVAL_EMBEDDING_MODEL")
+	if err != nil {
+		return Config{}, err
+	}
+	retrievalDimension, err := intEnv("PLATFORM_RETRIEVAL_EMBEDDING_DIMENSION", 8, 8192)
+	if err != nil {
+		return Config{}, err
+	}
+	retrievalCandidates, err := intEnv("PLATFORM_RETRIEVAL_MAX_CANDIDATES", 1, 10000)
+	if err != nil {
+		return Config{}, err
+	}
+	retrievalDenseMinimum, err := floatEnv("PLATFORM_RETRIEVAL_DENSE_MIN_SIMILARITY", -1, 1)
+	if err != nil {
+		return Config{}, err
+	}
+	a2aHosts := csvEnv("PLATFORM_A2A_ALLOWED_HOSTS")
+	var a2aTimeout time.Duration
+	if len(a2aHosts) > 0 {
+		a2aTimeout, err = durationEnv("PLATFORM_A2A_TIMEOUT")
+		if err != nil {
+			return Config{}, err
+		}
 	}
 	tlsConfig, err := kafkaTLS()
 	if err != nil {
@@ -91,7 +131,12 @@ func LoadConfig() (Config, error) {
 	}
 	return Config{DatabaseURL: database, Brokers: brokers, EventTopic: topic, ConsumerGroup: group, TLS: tlsConfig,
 		DependencyTimeout: dependency, Poll: poll, Lease: lease, MaxAttempts: maxAttempts,
-		IntelligenceURL: strings.TrimRight(intelligence, "/"), OpenIMAPIURL: strings.TrimRight(openIM, "/"), OpenIMSecret: secret, OpenIMAdminUserID: admin}, nil
+		IntelligenceURL: strings.TrimRight(intelligence, "/"), ToolApprovalTTL: toolApprovalTTL,
+		MCPReconcileInterval: mcpReconcile, OpenIMAPIURL: strings.TrimRight(openIMAPIURL, "/"),
+		OpenIMSecret: openIMSecret, OpenIMAdminUserID: openIMAdminUserID,
+		RetrievalModelRevision: retrievalModel, RetrievalDimension: retrievalDimension,
+		RetrievalMaxCandidates: retrievalCandidates, RetrievalDenseMinSimilarity: retrievalDenseMinimum,
+		A2AAllowedHosts: a2aHosts, A2AAllowedPrivateCIDRs: csvEnv("PLATFORM_A2A_ALLOWED_PRIVATE_CIDRS"), A2ATimeout: a2aTimeout}, nil
 }
 
 func (c Config) SaramaConfig() *sarama.Config {
@@ -126,6 +171,28 @@ func durationEnv(key string) (time.Duration, error) {
 	}
 	return d, nil
 }
+func intEnv(key string, minimum, maximum int) (int, error) {
+	raw, err := env(key)
+	if err != nil {
+		return 0, err
+	}
+	value, err := strconv.Atoi(raw)
+	if err != nil || value < minimum || value > maximum {
+		return 0, fmt.Errorf("%s must be between %d and %d", key, minimum, maximum)
+	}
+	return value, nil
+}
+func floatEnv(key string, minimum, maximum float64) (float64, error) {
+	raw, err := env(key)
+	if err != nil {
+		return 0, err
+	}
+	value, err := strconv.ParseFloat(raw, 64)
+	if err != nil || value < minimum || value > maximum {
+		return 0, fmt.Errorf("%s must be between %g and %g", key, minimum, maximum)
+	}
+	return value, nil
+}
 func httpURL(key string) (string, error) {
 	value, err := env(key)
 	if err != nil {
@@ -136,6 +203,21 @@ func httpURL(key string) (string, error) {
 		return "", fmt.Errorf("%s must be an HTTP(S) URL", key)
 	}
 	return value, nil
+}
+
+func csvEnv(key string) []string {
+	raw := strings.TrimSpace(os.Getenv(key))
+	if raw == "" {
+		return nil
+	}
+	values := strings.Split(raw, ",")
+	result := make([]string, 0, len(values))
+	for _, value := range values {
+		if value = strings.TrimSpace(value); value != "" {
+			result = append(result, value)
+		}
+	}
+	return result
 }
 
 func kafkaTLS() (*tls.Config, error) {

@@ -14,8 +14,11 @@ import (
 	"time"
 
 	"github.com/qsyy0921/openim/platform/services/platform-api/internal/action"
+	"github.com/qsyy0921/openim/platform/services/platform-api/internal/admincontrol"
 	"github.com/qsyy0921/openim/platform/services/platform-api/internal/agent"
+	"github.com/qsyy0921/openim/platform/services/platform-api/internal/agentcontrol"
 	"github.com/qsyy0921/openim/platform/services/platform-api/internal/identity"
+	"github.com/qsyy0921/openim/platform/services/platform-api/internal/observe"
 )
 
 type healthResponse struct {
@@ -42,8 +45,33 @@ type AgentCatalogService interface {
 }
 
 func NewHandler(version string, sessions SessionService, devices DeviceService, approvals ApprovalService, workspace AgentWorkspaceService, catalog AgentCatalogService) http.Handler {
+	return newHandler(version, sessions, devices, approvals, workspace, catalog, nil, nil)
+}
+
+func NewHandlerWithAgentControl(version string, sessions SessionService, devices DeviceService, approvals ApprovalService, workspace AgentWorkspaceService, catalog AgentCatalogService, control *agentcontrol.Service) http.Handler {
+	if control == nil {
+		panic("Agent control service is required")
+	}
+	return newHandler(version, sessions, devices, approvals, workspace, catalog, control, nil)
+}
+
+func NewHandlerWithAgentControls(version string, sessions SessionService, devices DeviceService, approvals ApprovalService, workspace AgentWorkspaceService, catalog AgentCatalogService, control *agentcontrol.Service, admin *admincontrol.Service) http.Handler {
+	if control == nil || admin == nil {
+		panic("member and administrator Agent control services are required")
+	}
+	return newHandler(version, sessions, devices, approvals, workspace, catalog, control, admin)
+}
+
+func newHandler(version string, sessions SessionService, devices DeviceService, approvals ApprovalService, workspace AgentWorkspaceService, catalog AgentCatalogService, control AgentControlService, admins ...AdminControlService) http.Handler {
 	if sessions == nil || devices == nil || approvals == nil || workspace == nil || catalog == nil {
 		panic("session, device, approval, Agent workspace, and Agent catalog services are required")
+	}
+	if len(admins) > 1 {
+		panic("at most one administrator Agent control service is allowed")
+	}
+	var admin AdminControlService
+	if len(admins) == 1 {
+		admin = admins[0]
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
@@ -55,13 +83,20 @@ func NewHandler(version string, sessions SessionService, devices DeviceService, 
 			Version: version,
 		})
 	})
+	mux.Handle("GET /metrics", observe.MetricsHandler())
 	mux.Handle("POST /v1/im/session", &sessionHandler{service: sessions})
 	mux.Handle("GET /v1/im/devices", &deviceListHandler{service: devices})
 	mux.Handle("POST /v1/im/platforms/{platform_id}/logout", &platformLogoutHandler{service: devices})
 	mux.Handle("GET /v1/agent/workspace", &agentWorkspaceHandler{service: workspace})
 	mux.Handle("GET /v1/agents", &agentCatalogHandler{service: catalog})
 	mux.Handle("POST /v1/agent/intents/{intent_id}/approve", &approvalHandler{service: approvals})
-	return requestLogger(mux)
+	if control != nil {
+		registerAgentControlRoutes(mux, control)
+	}
+	if admin != nil {
+		registerAdminControlRoutes(mux, admin)
+	}
+	return requestLogger(observe.HTTPMetrics(mux))
 }
 
 type agentCatalogHandler struct{ service AgentCatalogService }

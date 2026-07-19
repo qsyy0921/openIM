@@ -1,0 +1,214 @@
+{
+  "schema_version": 3,
+  "cases": 1120,
+  "answerable_cases": 1040,
+  "unanswerable_cases": 80,
+  "recall_at_k": 0.9288461538461539,
+  "mrr": 0.594902701465202,
+  "retrieval_precision_at_k": 0.16694711538461537,
+  "unanswerable_retrieval_empty_rate": 0,
+  "generation_abstention_evaluated": false,
+  "provenance_integrity": 1,
+  "failures": [
+    {
+      "qa_id": "0287ea96-a956-537d-aad0-295885ce6865",
+      "reason": "expected evidence not retrieved"
+    },
+    {
+      "qa_id": "02e6b031-fbb1-559c-9f43-9d477775a01b",
+      "reason": "expected evidence not retrieved"
+    },
+    {
+      "qa_id": "038dee9c-6313-519e-951f-d7ba40f801f1",
+      "reason": "expected evidence not retrieved"
+    },
+    {
+      "qa_id": "03e8139a-16a4-5e75-9aa4-5ed14749f84c",
+      "reason": "expected evidence not retrieved"
+    },
+    {
+      "qa_id": "150f2ce9-f738-504d-873e-717d5865d9dc",
+      "reason": "expected evidence not retrieved"
+    },
+    {
+      "qa_id": "1665a7a4-b7ee-5746-9739-7b953cfe7d31",
+      "reason": "expected evidence not retrieved"
+    },
+    {
+      "qa_id": "18d1a0c0-684c-5b23-9b24-781d96770a15",
+      "reason": "expected evidence not retrieved"
+    },
+    {
+      "qa_id": "1adda7e6-b6db-5bf6-8806-513cdb3c9afe",
+      "reason": "expected evidence not retrieved"
+    },
+    {
+      "qa_id": "1fb1dc7f-ccc9-50d6-8dc1-1a2131e65c43",
+      "reason": "expected evidence not retrieved"
+    },
+    {
+      "qa_id": "2330848b-2d3c-5171-82a5-1ec1f3ec64c3",
+      "reason": "expected evidence not retrieved"
+    },
+    {
+      "qa_id": "289dc9fe-1bd2-5ce0-a778-c51301a7b0e3",
+      "reason": "expected evidence not retrieved"
+    },
+    {
+      "qa_id": "2caa3969-2e46-532b-9cf8-e5b236bb8506",
+      "reason": "expected evidence not retrieved"
+    },
+    {
+      "qa_id": "2dd8562c-ad93-56b5-9117-c46e698d3d3b",
+      "reason": "expected evidence not retrieved"
+    },
+    {
+      "qa_id": "381750a2-10ef-5e63-afff-161280337b0e",
+      "reason": "expected evidence not retrieved"
+    },
+    {
+      "qa_id": "3b271cb2-5609-5aed-af39-22079f7e8803",
+      "reason": "expected evidence not retrieved"
+    },
+    {
+      "qa_id": "3fb08515-0bfc-57cb-b63b-e584e54a00f0",
+      "reason": "expected evidence not retrieved"
+    },
+    {
+      "qa_id": "4562be86-7673-5ca1-9bb8-1e921eb765d7",
+      "reason": "expected evidence not retrieved"
+    },
+    {
+      "qa_id": "45d4200e-486a-5ed9-a41e-9813684506f9",
+      "reason": "expected evidence not retrieved"
+    },
+    {
+      "qa_id": "4c334224-3de5-51ce-b198-0585ebd8eec2",
+      "reason": "expected evidence not retrieved"
+    },
+    {
+      "qa_id": "4d295568-0ea6-5f72-ba30-cc2d4aa7775e",
+      "reason": "expected evidence not retrieved"
+    },
+    {
+      "qa_id": "4fd20f0b-7993-5e11-93a0-b5fd3dc42c00",
+      "reason": "expected evidence not retrieved"
+    },
+    {
+      "qa_id": "57297e96-5d60-57b9-ab06-912ceecd5eb2",
+      "reason": "expected evidence not retrieved"
+    },
+    {
+      "qa_id": "5ab3fdf0-d670-5b42-a066-787d6f20da76",
+      "reason": "expected evidence not retrieved"
+    },
+    {
+      "qa_id": "5bde86b8-4ab2-54bf-87cc-6191e22b3fff",
+      "reason": "expected evidence not retrieved"
+    },
+    {
+      "qa_id": "5ecb2557-3405-53c7-8023-e388de57e880",
+      "reason": "expected evidence not retrieved"
+    },
+    {
+      "qa_id": "5f0ad80f-7bdb-5f68-9648-fd739d2772a0",
+      "reason": "expected evidence not retrieved"
+    },
+    {
+      "qa_id": "60790e0f-586d-5045-89cb-88a5c665eb9f",
+      "reason": "expected evidence not retrieved"
+    },
+    {
+      "qa_id": "62f606cd-0a7d-593f-8f8c-7f3c708c2a0f",
+      "reason": "expected evidence not retrieved"
+    },
+    {
+      "qa_id": "642cdfac-c4e4-54c3-be48-4034c6d6ffc6",
+      "reason": "expected evidence not retrieved"
+    },
+    {
+      "qa_id": "649c9c94-1c80-5918-933b-58643292bf1f",
+      "reason": "expected evidence not retrieved"
+    },
+    {
+      "qa_id": "65bffcd2-0c5a-5a3d-8bd7-c1275ce8b16c",
+      "reason": "expected evidence not retrieved"
+    },
+    {
+      "qa_id": "697987a4-d63b-53b6-9bab-a82253da3a29",
+      "reason": "expected evidence not retrieved"
+    },
+    {
+      "qa_id": "6cef061a-4627-521e-8438-516a3a36b266",
+      "reason": "expected evidence not retrieved"
+    },
+    {
+      "qa_id": "6e674a1b-3a15-5672-86f1-c2cc66e127a1",
+      "reason": "expected evidence not retrieved"
+    },
+    {
+      "qa_id": "70f0f593-4259-5173-9a19-625737c3b266",
+      "reason": "expected evidence not retrieved"
+    },
+    {
+      "qa_id": "78ad4303-77fd-58fc-ad47-35fa81094c9e",
+      "reason": "expected evidence not retrieved"
+    },
+    {
+      "qa_id": "7f47bcef-aba9-5712-922f-41beef2a8c7d",
+      "reason": "expected evidence not retrieved"
+    },
+    {
+      "qa_id": "812f7318-1f00-59ba-9691-2229fb8713a8",
+      "reason": "expected evidence not retrieved"
+    },
+    {
+      "qa_id": "841af58c-46cc-5b8f-9ef7-0e554a373740",
+      "reason": "expected evidence not retrieved"
+    },
+    {
+      "qa_id": "85e45e6f-8f10-587d-a30c-47ac818d84ac",
+      "reason": "expected evidence not retrieved"
+    },
+    {
+      "qa_id": "8673194c-4d61-5e06-9bd3-fa8d3ea0091e",
+      "reason": "expected evidence not retrieved"
+    },
+    {
+      "qa_id": "8ad211fa-fb60-5f7d-8a31-ea9787450d48",
+      "reason": "expected evidence not retrieved"
+    },
+    {
+      "qa_id": "9275fae3-070c-5b62-874c-560008b99753",
+      "reason": "expected evidence not retrieved"
+    },
+    {
+      "qa_id": "a0f3e2b5-ec36-546f-8a21-e8826d11cb71",
+      "reason": "expected evidence not retrieved"
+    },
+    {
+      "qa_id": "ab7fdb21-aee7-523f-a55e-b162cb8ac7e7",
+      "reason": "expected evidence not retrieved"
+    },
+    {
+      "qa_id": "ac0a161d-73db-5442-8bf8-5e62925cc7fa",
+      "reason": "expected evidence not retrieved"
+    },
+    {
+      "qa_id": "aef5d5c4-58a7-5a98-acdf-cea3db1c3cd0",
+      "reason": "expected evidence not retrieved"
+    },
+    {
+      "qa_id": "b22eaeab-8789-5d60-8088-8f4359cc66f4",
+      "reason": "expected evidence not retrieved"
+    },
+    {
+      "qa_id": "ba9056d7-6715-50bf-af61-faf54caeff7f",
+      "reason": "expected evidence not retrieved"
+    },
+    {
+      "qa_id": "baf74916-4032-5dd9-9d9b-0f388e203d71",
+      "reason": "expected evidence not retrieved"
+    }
+  ]
+}

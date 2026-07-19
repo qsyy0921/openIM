@@ -10,6 +10,8 @@ import (
 	"io"
 	"slices"
 	"strings"
+
+	"github.com/qsyy0921/openim/platform/services/platform-api/internal/capability"
 )
 
 const (
@@ -37,24 +39,28 @@ type AgentSpec struct {
 }
 
 type CatalogVersion struct {
-	AgentID       string
-	VersionID     string
-	VersionNumber int
-	SchemaVersion int
-	Checksum      string
-	Spec          AgentSpec
+	TenantID             string
+	AgentID              string
+	VersionID            string
+	VersionNumber        int
+	SchemaVersion        int
+	Checksum             string
+	CapabilitySnapshotID string
+	Spec                 AgentSpec
+	Skills               []capability.Skill
 }
 
 type AgentSummary struct {
-	ID            string `json:"agent_id"`
-	Slug          string `json:"slug"`
-	DisplayName   string `json:"display_name"`
-	Description   string `json:"description"`
-	TriggerAlias  string `json:"trigger_alias"`
-	VersionNumber int    `json:"production_version_number"`
-	VersionID     string `json:"production_version_id"`
-	SpecChecksum  string `json:"spec_checksum"`
-	BotUserID     string `json:"bot_user_id"`
+	ID                   string `json:"agent_id"`
+	Slug                 string `json:"slug"`
+	DisplayName          string `json:"display_name"`
+	Description          string `json:"description"`
+	TriggerAlias         string `json:"trigger_alias"`
+	VersionNumber        int    `json:"production_version_number"`
+	VersionID            string `json:"production_version_id"`
+	SpecChecksum         string `json:"spec_checksum"`
+	CapabilitySnapshotID string `json:"capability_snapshot_id"`
+	BotUserID            string `json:"bot_user_id"`
 }
 
 func ParseAgentSpec(schemaVersion int, raw []byte, expectedChecksum string) (AgentSpec, error) {

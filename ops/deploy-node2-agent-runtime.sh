@@ -11,12 +11,19 @@ mfl_root="${OPENIM_PLATFORM_MFL_ROOT:-$(dirname "$(dirname "$release_root")")}"
 venv="${OPENIM_INTELLIGENCE_VENV:-$mfl_root/venvs/intelligence-worker}"
 config_dir=/etc/openim-platform
 credential_file="$config_dir/credentials/deepseek-api-key"
+telegram_credential_file="$config_dir/credentials/telegram-bot-token"
 action_env="$config_dir/action-executor.env"
 postgres_container="${OPENIM_PLATFORM_POSTGRES_CONTAINER:-openim-platform-local-postgres-1}"
 install_dependencies="${OPENIM_INTELLIGENCE_INSTALL_DEPENDENCIES:-false}"
 proxy_env="${OPENIM_PLATFORM_PROXY_ENV:-/etc/openim/proxy.env}"
 deepseek_base_url="${OPENIM_INTELLIGENCE_DEEPSEEK_BASE_URL:-https://api.deepseek.com}"
 deepseek_model="${OPENIM_INTELLIGENCE_DEEPSEEK_MODEL:-deepseek-v4-pro}"
+embedding_base_url="${OPENIM_INTELLIGENCE_EMBEDDING_BASE_URL:-http://127.0.0.1:11434/v1}"
+embedding_api_key="${OPENIM_INTELLIGENCE_EMBEDDING_API_KEY:-local-only}"
+embedding_model="${OPENIM_INTELLIGENCE_EMBEDDING_MODEL:-qwen3-embedding:4b}"
+embedding_dimension="${OPENIM_INTELLIGENCE_EMBEDDING_DIMENSION:-2560}"
+embedding_timeout="${OPENIM_INTELLIGENCE_EMBEDDING_TIMEOUT_SECONDS:-60}"
+routing_dense_min_similarity="${OPENIM_INTELLIGENCE_ROUTING_DENSE_MIN_SIMILARITY:-0.2}"
 
 [[ "$(id -u)" -eq 0 ]] || {
   echo "run as root" >&2
@@ -38,14 +45,31 @@ getent group "$runtime_group" >/dev/null 2>&1 || {
   echo "OPENIM_INTELLIGENCE_INSTALL_DEPENDENCIES must be true or false" >&2
   exit 1
 }
-for path in "$wheel" "$bin_dir/agent-runtime" "$bin_dir/action-executor" "$config_dir/platform.env"; do
+runtime_binaries=(
+  agent-runtime
+  agent-delivery
+  telegram-ingress
+  memory-extractor
+  memory-projector
+  proactive-runtime
+  action-executor
+)
+for path in "$wheel" "$config_dir/platform.env"; do
   [[ -e "$path" ]] || {
     echo "required path is missing: $path" >&2
     exit 1
   }
 done
+for binary in "${runtime_binaries[@]}"; do
+  [[ -e "$bin_dir/$binary" ]] || {
+    echo "required path is missing: $bin_dir/$binary" >&2
+    exit 1
+  }
+done
 
-chmod 0755 "$bin_dir/agent-runtime" "$bin_dir/action-executor"
+for binary in "${runtime_binaries[@]}"; do
+  chmod 0755 "$bin_dir/$binary"
+done
 install -d -m 0750 -o root -g "$runtime_group" "$config_dir" "$config_dir/credentials"
 install -d -m 0750 -o "$runtime_user" -g "$runtime_group" "$(dirname "$venv")"
 
@@ -74,6 +98,12 @@ INTELLIGENCE_DEEPSEEK_BASE_URL=$deepseek_base_url
 INTELLIGENCE_DEEPSEEK_MODEL=$deepseek_model
 INTELLIGENCE_DEEPSEEK_TIMEOUT_SECONDS=90
 INTELLIGENCE_DEEPSEEK_MAX_TOKENS=1024
+INTELLIGENCE_EMBEDDING_BASE_URL=$embedding_base_url
+INTELLIGENCE_EMBEDDING_API_KEY=$embedding_api_key
+INTELLIGENCE_EMBEDDING_MODEL=$embedding_model
+INTELLIGENCE_EMBEDDING_DIMENSION=$embedding_dimension
+INTELLIGENCE_EMBEDDING_TIMEOUT_SECONDS=$embedding_timeout
+INTELLIGENCE_ROUTING_DENSE_MIN_SIMILARITY=$routing_dense_min_similarity
 EOF
 chown root:"$runtime_group" "$config_dir/intelligence.env"
 chmod 0640 "$config_dir/intelligence.env"
@@ -190,10 +220,87 @@ UMask=0077
 WantedBy=multi-user.target
 EOF
 
+write_platform_worker_unit() {
+  local service="$1"
+  local description="$2"
+  local binary="$3"
+  local requires="$4"
+  local after="$5"
+  cat >"/etc/systemd/system/$service.service" <<EOF
+[Unit]
+Description=$description
+Requires=$requires
+After=$after
+
+[Service]
+Type=simple
+User=$runtime_user
+Group=$runtime_group
+EnvironmentFile=$config_dir/platform.env
+ExecStart=$bin_dir/$binary
+Restart=on-failure
+RestartSec=3s
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target
+EOF
+}
+
+write_telegram_worker_unit() {
+  local service="$1"
+  local description="$2"
+  local binary="$3"
+  cat >"/etc/systemd/system/$service.service" <<EOF
+[Unit]
+Description=$description
+Requires=docker.service
+After=docker.service network-online.target
+
+[Service]
+Type=simple
+User=$runtime_user
+Group=$runtime_group
+EnvironmentFile=$config_dir/platform.env
+LoadCredential=telegram_bot_token:$telegram_credential_file
+ExecStart=/bin/sh -ec 'export PLATFORM_TELEGRAM_BOT_TOKEN="\$(cat "\$CREDENTIALS_DIRECTORY/telegram_bot_token")"; exec $bin_dir/$binary'
+Restart=on-failure
+RestartSec=3s
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target
+EOF
+}
+
+write_platform_worker_unit \
+  openim-memory-projector "OpenIM Agent Memory projector" memory-projector \
+  docker.service docker.service
+write_platform_worker_unit \
+  openim-memory-extractor "OpenIM Agent Memory extractor" memory-extractor \
+  "docker.service openim-intelligence-worker.service" \
+  "docker.service openim-intelligence-worker.service"
+write_platform_worker_unit \
+  openim-proactive-runtime "OpenIM proactive Agent Runtime" proactive-runtime \
+  "docker.service openim-intelligence-worker.service" \
+  "docker.service openim-intelligence-worker.service"
+write_telegram_worker_unit \
+  openim-telegram-ingress "OpenIM Telegram ingress" telegram-ingress
+write_telegram_worker_unit \
+  openim-agent-delivery "OpenIM Agent channel delivery" agent-delivery
+
 systemctl daemon-reload
-systemctl enable openim-action-executor.service
-systemctl restart openim-action-executor.service
-systemctl is-active openim-action-executor.service
+systemctl enable openim-action-executor.service openim-memory-projector.service
+systemctl restart openim-action-executor.service openim-memory-projector.service
+systemctl is-active openim-action-executor.service openim-memory-projector.service
 
 assert_running_binary() {
   local service="$1"
@@ -214,15 +321,67 @@ assert_running_binary() {
 }
 
 assert_running_binary openim-action-executor.service "$bin_dir/action-executor"
+assert_running_binary openim-memory-projector.service "$bin_dir/memory-projector"
 
 if [[ -f "$credential_file" ]]; then
-  systemctl enable openim-intelligence-worker.service openim-agent-runtime.service
-  systemctl restart openim-intelligence-worker.service openim-agent-runtime.service
-  systemctl is-active openim-intelligence-worker.service openim-agent-runtime.service
+  systemctl enable openim-intelligence-worker.service openim-agent-runtime.service \
+    openim-memory-extractor.service openim-proactive-runtime.service
+  systemctl restart openim-intelligence-worker.service
+  for _ in $(seq 1 60); do
+    if curl --fail --silent --show-error http://127.0.0.1:18082/healthz >/dev/null; then
+      break
+    fi
+    sleep 2
+  done
+  curl --fail --silent --show-error http://127.0.0.1:18082/healthz >/dev/null
+  embedding_probe="$(mktemp)"
+  trap 'rm -f "$embedding_probe"' EXIT
+  curl --fail --silent --show-error --max-time "$((embedding_timeout + 5))" \
+    -H 'Content-Type: application/json' \
+    --data '{"texts":["node2 deployment readiness"]}' \
+    http://127.0.0.1:18082/v1/embeddings >"$embedding_probe"
+  "$venv/bin/python" - "$embedding_probe" "$embedding_model" "$embedding_dimension" <<'PY'
+import json
+import sys
+
+path, expected_model, expected_dimension_raw = sys.argv[1:]
+expected_dimension = int(expected_dimension_raw)
+with open(path, encoding="utf-8") as handle:
+    body = json.load(handle)
+
+vectors = body.get("vectors")
+if body.get("model") != expected_model:
+    raise SystemExit("embedding probe returned an unexpected model")
+if body.get("dimension") != expected_dimension:
+    raise SystemExit("embedding probe returned an unexpected dimension")
+if not isinstance(vectors, list) or len(vectors) != 1:
+    raise SystemExit("embedding probe returned an unexpected vector count")
+if not isinstance(vectors[0], list) or len(vectors[0]) != expected_dimension:
+    raise SystemExit("embedding probe returned an unexpected vector length")
+if not all(isinstance(value, (int, float)) for value in vectors[0]):
+    raise SystemExit("embedding probe returned a non-numeric vector")
+PY
+  rm -f "$embedding_probe"
+  trap - EXIT
+  systemctl restart openim-agent-runtime.service openim-memory-extractor.service openim-proactive-runtime.service
+  systemctl is-active openim-intelligence-worker.service openim-agent-runtime.service \
+    openim-memory-extractor.service openim-proactive-runtime.service
   assert_running_binary openim-agent-runtime.service "$bin_dir/agent-runtime"
+  assert_running_binary openim-memory-extractor.service "$bin_dir/memory-extractor"
+  assert_running_binary openim-proactive-runtime.service "$bin_dir/proactive-runtime"
   echo "deepseek_credential=present"
 else
   echo "deepseek_credential=required"
+fi
+if [[ -f "$telegram_credential_file" ]]; then
+  systemctl enable openim-telegram-ingress.service openim-agent-delivery.service
+  systemctl restart openim-telegram-ingress.service openim-agent-delivery.service
+  systemctl is-active openim-telegram-ingress.service openim-agent-delivery.service
+  assert_running_binary openim-telegram-ingress.service "$bin_dir/telegram-ingress"
+  assert_running_binary openim-agent-delivery.service "$bin_dir/agent-delivery"
+  echo "telegram_credential=present"
+else
+  echo "telegram_credential=required"
 fi
 echo "agent_runtime_binaries=verified"
 echo "node2_agent_runtime=installed"

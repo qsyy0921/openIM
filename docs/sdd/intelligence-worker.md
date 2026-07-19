@@ -13,7 +13,7 @@ Generate a structured, citation-bearing candidate from bounded authorized eviden
 
 ## Responsibilities and non-goals
 
-The unit validates a strict question/evidence request, treats evidence as untrusted data, calls the single required DeepSeek provider in JSON mode, and returns answer text, citation IDs, an optional explicitly requested `create_ticket` candidate, and provider evidence. It does not own Run state, authorization, approval, execution, business writes, OpenIM credentials, or provider fallback.
+The unit validates a strict question/evidence request, treats evidence as untrusted data, calls the single required DeepSeek provider in JSON mode, and returns answer text, citation IDs, an explicit grounding status, an optional explicitly requested `create_ticket` candidate, and provider evidence. It does not own Run state, authorization, approval, execution, business writes, OpenIM credentials, or provider fallback.
 
 ## Contracts and dependencies
 
@@ -31,6 +31,8 @@ The unit validates a strict question/evidence request, treats evidence as untrus
 - An action candidate is rejected unless its type appears in the pinned Agent version allow-list.
 - Exactly one normally completed Chat Completion choice with non-empty JSON content is accepted.
 - DeepSeek JSON output is revalidated by Pydantic; the Go Runtime independently validates citations and action type/length.
+- `grounding_status` is exactly `grounded`, `insufficient_evidence`, or `not_applicable`. Enterprise knowledge answers must be `grounded` or `insufficient_evidence`; general chat, Tool summaries, and action candidates must be `not_applicable`.
+- A grounded enterprise answer requires at least one authorized citation. An insufficient-evidence answer may return no citation and must not be forced to cite an irrelevant retrieved chunk.
 - The only action candidate schema is `create_ticket` with a title of at most 200 characters.
 - An action candidate exists only when the request starts with the explicit `创建工单：<标题>` protocol. Negated/embedded phrases do not match, and unsolicited model action output is rejected.
 - Missing output, provider errors, and malformed responses return failure; no synthetic candidate is produced.
@@ -41,8 +43,8 @@ The unit validates a strict question/evidence request, treats evidence as untrus
 1. Validate Run, tenant, Agent/version/checksum, instructions, logical route, action allow-list, conversation, sender, and bounded prompt fields.
 2. Require the logical route to match the configured DeepSeek model and serialize only authorized evidence supplied by the trusted Runtime.
 3. Combine fixed governance instructions with the immutable published instructions, then call DeepSeek in JSON mode with thinking disabled.
-4. Extract and validate non-empty answer text, citation IDs, optional explicit-command action candidate, and provider response ID.
-5. Return the candidate to the trusted Go Runtime, which performs the authoritative citation allow-list check.
+4. Extract and validate non-empty answer text, citation IDs, grounding status, optional explicit-command action candidate, and provider response ID.
+5. Return the candidate to the trusted Go Runtime, which enforces the route-specific grounding state and authoritative citation allow-list.
 
 ## Data ownership and state
 
@@ -65,6 +67,7 @@ Record request outcome, provider latency, model name, provider response ID, and 
 - Strict request validation passes unit tests.
 - Chat Completions JSON request and response parsing pass against an HTTP transport mock.
 - Provider failure returns 502 and no candidate.
+- Grounded output without a citation, enterprise output marked `not_applicable`, and general output marked `grounded` fail closed.
 - A real provider call succeeds with a valid deployment credential.
 
 ## Source evidence

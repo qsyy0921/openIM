@@ -10,8 +10,12 @@ dependencies = [
   "fastapi==0.136.0",
   "httpx==0.28.1",
   "pydantic==2.12.5",
+  "prometheus-client==0.25.0",
   "uvicorn==0.44.0",
 ]
+
+[project.scripts]
+openim-agent-routing-eval = "intelligence_worker.evaluation:main"
 
 [project.optional-dependencies]
 test = ["pytest==9.0.2"]

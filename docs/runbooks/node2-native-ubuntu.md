@@ -60,7 +60,7 @@ Copy `platform/deploy/local` into `$DEPLOY_ROOT/platform`. Generate `platform/.e
 
 Apply `node2-native-ubuntu.override.yaml` when starting PostgreSQL and Keycloak. Keycloak listens only on Node2 loopback under `/auth`; Nginx terminates TLS and publishes its canonical issuer. Apply `openim-native-ubuntu.override.yaml` to the pinned OpenIM Compose project to publish the stable aliases and host-only Kafka listener.
 
-Run migrations `0001` through `0008`, then apply `seed-node2-native-identity.sql` with the exact public issuer:
+Run migrations `0001` through `0028`, then apply `seed-node2-native-identity.sql` with the exact public issuer:
 
 ```bash
 docker exec -i openim-platform-local-postgres-1 \
@@ -80,6 +80,20 @@ docker exec -i openim-platform-local-postgres-1 \
 
 ## Services
 
+Install the pinned local embedding runtime before deploying the latest Agent workers:
+
+```bash
+sudo bash "$DEPLOY_ROOT/ops/install-node2-ollama.sh" \
+  /home/qsyy0921/MFL/staging/ollama-v0.32.1/ollama-linux-amd64.tar.zst \
+  qsyy0921 \
+  /home/qsyy0921/MFL/ollama
+```
+
+The installer verifies the pinned archive digest, runs Ollama only on
+`127.0.0.1:11434`, stores model blobs on the Node2 NVMe-backed MFL path, pulls
+`qwen3-embedding:4b`, and rejects the deployment unless a real embedding has
+dimension `2560`.
+
 The native installer verifies the release, creates or verifies TLS material, configures the existing Keycloak client without deleting its volume, runs migrations and fixtures, and invokes the generalized deployment scripts. Nginx routes the exact `/auth/callback` path to the Web SPA before forwarding the remaining `/auth/` namespace to Keycloak:
 
 ```bash
@@ -87,12 +101,35 @@ sudo bash "$DEPLOY_ROOT/ops/install-node2-native-runtime.sh" \
   "$DEPLOY_ROOT" "$RELEASE_ROOT" qsyy0921 <public-host>
 ```
 
-Provision the DeepSeek key only through standard input into `/etc/openim-platform/credentials/deepseek-api-key`, owned by `root:root` with mode `0400`. Do not place it in shell arguments, environment files, Compose YAML, release bundles, screenshots, or logs.
+Native services bind loopback, so start monitoring with the Node2 host-network override rather than the portable bridge-mode Compose file:
+
+```bash
+docker compose \
+  -f "$DEPLOY_ROOT/platform/compose.yaml" \
+  -f "$DEPLOY_ROOT/platform/compose.node2-observability.yaml" \
+  --env-file "$DEPLOY_ROOT/platform/.env" \
+  up -d prometheus grafana
+
+bash "$DEPLOY_ROOT/ops/accept-node2-observability.sh"
+```
+
+If Docker still points at the retired loopback proxy or NetworkManager accepts only unusable public resolvers, use the bounded recovery scripts after inspecting their preconditions:
+
+```bash
+sudo bash "$DEPLOY_ROOT/ops/disable-stale-node2-docker-proxy.sh"
+sudo bash "$DEPLOY_ROOT/ops/configure-node2-dns.sh"
+```
+
+Both scripts create a backup under `/home/qsyy0921/MFL/staging` and fail when the observed host state does not match the expected stale configuration.
+
+The installer creates hardened systemd units for Platform API, OpenIM ingress, Intelligence Worker, Agent Runtime, Action Executor, Telegram ingress, channel delivery, Memory extraction/projection, and proactive dispatch. It verifies that each running Go unit resolves to the selected immutable release directory.
+
+Provision the DeepSeek key only through standard input into `/etc/openim-platform/credentials/deepseek-api-key`, owned by `root:root` with mode `0400`. Provision the Telegram Bot Token through standard input to `ops/install-node2-telegram-credential.sh`, which validates `getMe` before installing `/etc/openim-platform/credentials/telegram-bot-token` with the same ownership and mode. Do not place either credential in shell arguments, environment files, Compose YAML, release bundles, screenshots, or logs.
 
 ## Acceptance
 
 1. Check OpenIM Server and Chat health plus a real admin-token envelope.
-2. Check PostgreSQL, Keycloak, Nginx, Platform API, Ingress, Intelligence Worker, Agent Runtime, and Action Executor.
+2. Check PostgreSQL, Keycloak, Nginx, Platform API, OpenIM/Telegram ingress, Intelligence Worker, Agent Runtime, channel Delivery, Memory workers, Proactive Runtime, and Action Executor.
 3. Complete a real OIDC PKCE login and OpenIM WebSocket connection.
 4. Send and receive real single/group messages and media.
 5. Run an authorized cited enterprise-knowledge query and a no-evidence query.

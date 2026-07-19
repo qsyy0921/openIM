@@ -1,0 +1,614 @@
+[
+  {
+    "operation_id": "enterprise.knowledge.search",
+    "name": "检索企业知识",
+    "summary": "在企业协作平台中检索企业知识，并遵守当前身份、权限、审计和幂等约束",
+    "parameter_terms": [
+      "制度检索",
+      "检索企业知识",
+      "enterprise knowledge search"
+    ],
+    "examples": [
+      "查询差旅报销制度"
+    ],
+    "output_kinds": [
+      "text",
+      "data"
+    ]
+  },
+  {
+    "operation_id": "enterprise.knowledge.summarize",
+    "name": "总结知识文档",
+    "summary": "在企业协作平台中总结知识文档，并遵守当前身份、权限、审计和幂等约束",
+    "parameter_terms": [
+      "文档归纳",
+      "总结知识文档",
+      "enterprise knowledge summarize"
+    ],
+    "examples": [
+      "总结安全响应规范"
+    ],
+    "output_kinds": [
+      "text",
+      "data"
+    ]
+  },
+  {
+    "operation_id": "enterprise.knowledge.compare_versions",
+    "name": "比较文档版本",
+    "summary": "在企业协作平台中比较文档版本，并遵守当前身份、权限、审计和幂等约束",
+    "parameter_terms": [
+      "版本差异",
+      "比较文档版本",
+      "enterprise knowledge compare_versions"
+    ],
+    "examples": [
+      "比较采购制度两个版本"
+    ],
+    "output_kinds": [
+      "text",
+      "data"
+    ]
+  },
+  {
+    "operation_id": "enterprise.knowledge.find_owner",
+    "name": "查找知识负责人",
+    "summary": "在企业协作平台中查找知识负责人，并遵守当前身份、权限、审计和幂等约束",
+    "parameter_terms": [
+      "制度负责人",
+      "查找知识负责人",
+      "enterprise knowledge find_owner"
+    ],
+    "examples": [
+      "谁负责数据分级制度"
+    ],
+    "output_kinds": [
+      "text",
+      "data"
+    ]
+  },
+  {
+    "operation_id": "enterprise.knowledge.list_sources",
+    "name": "列出知识来源",
+    "summary": "在企业协作平台中列出知识来源，并遵守当前身份、权限、审计和幂等约束",
+    "parameter_terms": [
+      "来源清单",
+      "列出知识来源",
+      "enterprise knowledge list_sources"
+    ],
+    "examples": [
+      "列出答案对应的制度来源"
+    ],
+    "output_kinds": [
+      "text",
+      "data"
+    ]
+  },
+  {
+    "operation_id": "calendar.event.create",
+    "name": "创建日程",
+    "summary": "在企业协作平台中创建日程，并遵守当前身份、权限、审计和幂等约束",
+    "parameter_terms": [
+      "新建会议日程",
+      "创建日程",
+      "calendar event create"
+    ],
+    "examples": [
+      "创建明天下午的项目例会"
+    ],
+    "output_kinds": [
+      "text",
+      "data"
+    ]
+  },
+  {
+    "operation_id": "calendar.event.list",
+    "name": "查询日程",
+    "summary": "在企业协作平台中查询日程，并遵守当前身份、权限、审计和幂等约束",
+    "parameter_terms": [
+      "日程列表",
+      "查询日程",
+      "calendar event list"
+    ],
+    "examples": [
+      "查看本周日程"
+    ],
+    "output_kinds": [
+      "text",
+      "data"
+    ]
+  },
+  {
+    "operation_id": "calendar.event.reschedule",
+    "name": "调整日程",
+    "summary": "在企业协作平台中调整日程，并遵守当前身份、权限、审计和幂等约束",
+    "parameter_terms": [
+      "改期",
+      "调整日程",
+      "calendar event reschedule"
+    ],
+    "examples": [
+      "把项目例会改到周五"
+    ],
+    "output_kinds": [
+      "text",
+      "data"
+    ]
+  },
+  {
+    "operation_id": "calendar.availability.find",
+    "name": "查询忙闲",
+    "summary": "在企业协作平台中查询忙闲，并遵守当前身份、权限、审计和幂等约束",
+    "parameter_terms": [
+      "空闲时间",
+      "查询忙闲",
+      "calendar availability find"
+    ],
+    "examples": [
+      "查找三个人共同空闲时间"
+    ],
+    "output_kinds": [
+      "text",
+      "data"
+    ]
+  },
+  {
+    "operation_id": "calendar.room.reserve",
+    "name": "预订会议室",
+    "summary": "在企业协作平台中预订会议室，并遵守当前身份、权限、审计和幂等约束",
+    "parameter_terms": [
+      "会议室预订",
+      "预订会议室",
+      "calendar room reserve"
+    ],
+    "examples": [
+      "预订八楼会议室"
+    ],
+    "output_kinds": [
+      "text",
+      "data"
+    ]
+  },
+  {
+    "operation_id": "collaboration.task.create",
+    "name": "创建任务",
+    "summary": "在企业协作平台中创建任务，并遵守当前身份、权限、审计和幂等约束",
+    "parameter_terms": [
+      "新增待办",
+      "创建任务",
+      "collaboration task create"
+    ],
+    "examples": [
+      "创建一项发布检查任务"
+    ],
+    "output_kinds": [
+      "text",
+      "data"
+    ]
+  },
+  {
+    "operation_id": "collaboration.task.list",
+    "name": "查询任务",
+    "summary": "在企业协作平台中查询任务，并遵守当前身份、权限、审计和幂等约束",
+    "parameter_terms": [
+      "待办列表",
+      "查询任务",
+      "collaboration task list"
+    ],
+    "examples": [
+      "列出我未完成的任务"
+    ],
+    "output_kinds": [
+      "text",
+      "data"
+    ]
+  },
+  {
+    "operation_id": "collaboration.task.update",
+    "name": "更新任务",
+    "summary": "在企业协作平台中更新任务，并遵守当前身份、权限、审计和幂等约束",
+    "parameter_terms": [
+      "修改待办",
+      "更新任务",
+      "collaboration task update"
+    ],
+    "examples": [
+      "更新发布任务截止日期"
+    ],
+    "output_kinds": [
+      "text",
+      "data"
+    ]
+  },
+  {
+    "operation_id": "collaboration.task.assign",
+    "name": "分配任务",
+    "summary": "在企业协作平台中分配任务，并遵守当前身份、权限、审计和幂等约束",
+    "parameter_terms": [
+      "任务负责人",
+      "分配任务",
+      "collaboration task assign"
+    ],
+    "examples": [
+      "把测试任务分配给质量负责人"
+    ],
+    "output_kinds": [
+      "text",
+      "data"
+    ]
+  },
+  {
+    "operation_id": "collaboration.task.complete",
+    "name": "完成任务",
+    "summary": "在企业协作平台中完成任务，并遵守当前身份、权限、审计和幂等约束",
+    "parameter_terms": [
+      "标记完成",
+      "完成任务",
+      "collaboration task complete"
+    ],
+    "examples": [
+      "将发布检查标记完成"
+    ],
+    "output_kinds": [
+      "text",
+      "data"
+    ]
+  },
+  {
+    "operation_id": "collaboration.ticket.create",
+    "name": "创建协作工单",
+    "summary": "在企业协作平台中创建协作工单，并遵守当前身份、权限、审计和幂等约束",
+    "parameter_terms": [
+      "新建工单",
+      "创建协作工单",
+      "collaboration ticket create"
+    ],
+    "examples": [
+      "创建工单：复核迁移计划"
+    ],
+    "output_kinds": [
+      "text",
+      "data"
+    ]
+  },
+  {
+    "operation_id": "collaboration.ticket.get",
+    "name": "查询工单",
+    "summary": "在企业协作平台中查询工单，并遵守当前身份、权限、审计和幂等约束",
+    "parameter_terms": [
+      "工单详情",
+      "查询工单",
+      "collaboration ticket get"
+    ],
+    "examples": [
+      "查看工单当前状态"
+    ],
+    "output_kinds": [
+      "text",
+      "data"
+    ]
+  },
+  {
+    "operation_id": "collaboration.ticket.comment",
+    "name": "评论工单",
+    "summary": "在企业协作平台中评论工单，并遵守当前身份、权限、审计和幂等约束",
+    "parameter_terms": [
+      "工单备注",
+      "评论工单",
+      "collaboration ticket comment"
+    ],
+    "examples": [
+      "给迁移工单添加复核意见"
+    ],
+    "output_kinds": [
+      "text",
+      "data"
+    ]
+  },
+  {
+    "operation_id": "collaboration.ticket.close",
+    "name": "关闭工单",
+    "summary": "在企业协作平台中关闭工单，并遵守当前身份、权限、审计和幂等约束",
+    "parameter_terms": [
+      "工单关闭",
+      "关闭工单",
+      "collaboration ticket close"
+    ],
+    "examples": [
+      "关闭已经处理完的工单"
+    ],
+    "output_kinds": [
+      "text",
+      "data"
+    ]
+  },
+  {
+    "operation_id": "docs.document.create",
+    "name": "创建云文档",
+    "summary": "在企业协作平台中创建云文档，并遵守当前身份、权限、审计和幂等约束",
+    "parameter_terms": [
+      "新建文档",
+      "创建云文档",
+      "docs document create"
+    ],
+    "examples": [
+      "创建项目复盘文档"
+    ],
+    "output_kinds": [
+      "text",
+      "data"
+    ]
+  },
+  {
+    "operation_id": "docs.document.search",
+    "name": "搜索云文档",
+    "summary": "在企业协作平台中搜索云文档，并遵守当前身份、权限、审计和幂等约束",
+    "parameter_terms": [
+      "文档搜索",
+      "搜索云文档",
+      "docs document search"
+    ],
+    "examples": [
+      "搜索季度规划文档"
+    ],
+    "output_kinds": [
+      "text",
+      "data"
+    ]
+  },
+  {
+    "operation_id": "docs.document.summarize",
+    "name": "总结云文档",
+    "summary": "在企业协作平台中总结云文档，并遵守当前身份、权限、审计和幂等约束",
+    "parameter_terms": [
+      "文档摘要",
+      "总结云文档",
+      "docs document summarize"
+    ],
+    "examples": [
+      "总结项目复盘文档"
+    ],
+    "output_kinds": [
+      "text",
+      "data"
+    ]
+  },
+  {
+    "operation_id": "docs.document.share",
+    "name": "共享云文档",
+    "summary": "在企业协作平台中共享云文档，并遵守当前身份、权限、审计和幂等约束",
+    "parameter_terms": [
+      "文档权限",
+      "共享云文档",
+      "docs document share"
+    ],
+    "examples": [
+      "把复盘文档共享给项目组"
+    ],
+    "output_kinds": [
+      "text",
+      "data"
+    ]
+  },
+  {
+    "operation_id": "docs.document.export",
+    "name": "导出云文档",
+    "summary": "在企业协作平台中导出云文档，并遵守当前身份、权限、审计和幂等约束",
+    "parameter_terms": [
+      "文档导出",
+      "导出云文档",
+      "docs document export"
+    ],
+    "examples": [
+      "把复盘文档导出为 PDF"
+    ],
+    "output_kinds": [
+      "text",
+      "data"
+    ]
+  },
+  {
+    "operation_id": "meeting.schedule",
+    "name": "安排视频会议",
+    "summary": "在企业协作平台中安排视频会议，并遵守当前身份、权限、审计和幂等约束",
+    "parameter_terms": [
+      "会议安排",
+      "安排视频会议",
+      "meeting schedule"
+    ],
+    "examples": [
+      "安排一次线上评审会议"
+    ],
+    "output_kinds": [
+      "text",
+      "data"
+    ]
+  },
+  {
+    "operation_id": "meeting.join",
+    "name": "加入视频会议",
+    "summary": "在企业协作平台中加入视频会议，并遵守当前身份、权限、审计和幂等约束",
+    "parameter_terms": [
+      "进入会议",
+      "加入视频会议",
+      "meeting join"
+    ],
+    "examples": [
+      "加入正在进行的评审会议"
+    ],
+    "output_kinds": [
+      "text",
+      "data"
+    ]
+  },
+  {
+    "operation_id": "meeting.transcript.get",
+    "name": "获取会议转写",
+    "summary": "在企业协作平台中获取会议转写，并遵守当前身份、权限、审计和幂等约束",
+    "parameter_terms": [
+      "会议逐字稿",
+      "获取会议转写",
+      "meeting transcript get"
+    ],
+    "examples": [
+      "读取今天评审会的逐字稿"
+    ],
+    "output_kinds": [
+      "text",
+      "data"
+    ]
+  },
+  {
+    "operation_id": "meeting.summary.generate",
+    "name": "生成会议纪要",
+    "summary": "在企业协作平台中生成会议纪要，并遵守当前身份、权限、审计和幂等约束",
+    "parameter_terms": [
+      "会议总结",
+      "生成会议纪要",
+      "meeting summary generate"
+    ],
+    "examples": [
+      "生成评审会议纪要"
+    ],
+    "output_kinds": [
+      "text",
+      "data"
+    ]
+  },
+  {
+    "operation_id": "meeting.action_items.extract",
+    "name": "提取会议待办",
+    "summary": "在企业协作平台中提取会议待办，并遵守当前身份、权限、审计和幂等约束",
+    "parameter_terms": [
+      "会议行动项",
+      "提取会议待办",
+      "meeting action_items extract"
+    ],
+    "examples": [
+      "从会议纪要提取行动项"
+    ],
+    "output_kinds": [
+      "text",
+      "data"
+    ]
+  },
+  {
+    "operation_id": "directory.people.search",
+    "name": "搜索企业成员",
+    "summary": "在企业协作平台中搜索企业成员，并遵守当前身份、权限、审计和幂等约束",
+    "parameter_terms": [
+      "员工搜索",
+      "搜索企业成员",
+      "directory people search"
+    ],
+    "examples": [
+      "查找平台研发负责人"
+    ],
+    "output_kinds": [
+      "text",
+      "data"
+    ]
+  },
+  {
+    "operation_id": "directory.department.list",
+    "name": "查询部门",
+    "summary": "在企业协作平台中查询部门，并遵守当前身份、权限、审计和幂等约束",
+    "parameter_terms": [
+      "部门目录",
+      "查询部门",
+      "directory department list"
+    ],
+    "examples": [
+      "列出研发中心的部门"
+    ],
+    "output_kinds": [
+      "text",
+      "data"
+    ]
+  },
+  {
+    "operation_id": "directory.profile.get",
+    "name": "查看成员资料",
+    "summary": "在企业协作平台中查看成员资料，并遵守当前身份、权限、审计和幂等约束",
+    "parameter_terms": [
+      "员工资料",
+      "查看成员资料",
+      "directory profile get"
+    ],
+    "examples": [
+      "查看质量负责人的企业资料"
+    ],
+    "output_kinds": [
+      "text",
+      "data"
+    ]
+  },
+  {
+    "operation_id": "agent.delegate",
+    "name": "委派后台 Agent",
+    "summary": "在企业协作平台中委派后台 Agent，并遵守当前身份、权限、审计和幂等约束",
+    "parameter_terms": [
+      "后台委派",
+      "委派后台 Agent",
+      "agent delegate"
+    ],
+    "examples": [
+      "委派知识助手汇总安全制度"
+    ],
+    "output_kinds": [
+      "text",
+      "data"
+    ]
+  },
+  {
+    "operation_id": "agent.catalog.list",
+    "name": "查询 Agent 目录",
+    "summary": "在企业协作平台中查询 Agent 目录，并遵守当前身份、权限、审计和幂等约束",
+    "parameter_terms": [
+      "助手列表",
+      "查询 Agent 目录",
+      "agent catalog list"
+    ],
+    "examples": [
+      "列出可用的企业 Agent"
+    ],
+    "output_kinds": [
+      "text",
+      "data"
+    ]
+  },
+  {
+    "operation_id": "agent.run.status",
+    "name": "查询 Agent 运行",
+    "summary": "在企业协作平台中查询 Agent 运行，并遵守当前身份、权限、审计和幂等约束",
+    "parameter_terms": [
+      "运行状态",
+      "查询 Agent 运行",
+      "agent run status"
+    ],
+    "examples": [
+      "查看后台 Agent 任务状态"
+    ],
+    "output_kinds": [
+      "text",
+      "data"
+    ]
+  },
+  {
+    "operation_id": "agent.memory.forget",
+    "name": "删除 Agent 记忆",
+    "summary": "在企业协作平台中删除 Agent 记忆，并遵守当前身份、权限、审计和幂等约束",
+    "parameter_terms": [
+      "遗忘记忆",
+      "删除 Agent 记忆",
+      "agent memory forget"
+    ],
+    "examples": [
+      "删除关于通知偏好的记忆"
+    ],
+    "output_kinds": [
+      "text",
+      "data"
+    ]
+  }
+]

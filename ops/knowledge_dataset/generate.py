@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Any
 
 
-GENERATOR_VERSION = "1.0.0"
+GENERATOR_VERSION = "1.0.1"
 DATASET_VERSION = "1.0.0"
 RELEASE_DATE = "2026-07-14"
 SEED = 20260714
@@ -547,6 +547,12 @@ def write_postgres_sql(path: Path, documents: list[dict[str, Any]], versions: li
         "-- Generated synthetic single-enterprise knowledge fixture; not a production migration.",
         f"-- dataset={DATASET_VERSION} generator={GENERATOR_VERSION}",
         "BEGIN;",
+        "INSERT INTO identity.tenants (id, external_id, display_name, status) VALUES "
+        f"({sql_literal(TENANT_ID)}::uuid, 'dataset-xinglan', '星澜智协科技有限公司', 'active') "
+        "ON CONFLICT (id) DO UPDATE SET display_name=EXCLUDED.display_name, status='active';",
+        "INSERT INTO identity.members (id, tenant_id, issuer, subject, display_name, status) VALUES "
+        f"({sql_literal(MEMBER_ID)}::uuid, {sql_literal(TENANT_ID)}::uuid, 'dataset://local', 'enterprise-rag-evaluator', '企业知识评测员', 'active') "
+        "ON CONFLICT (id) DO UPDATE SET display_name=EXCLUDED.display_name, status='active';",
     ]
     for row in documents:
         lines.append(
@@ -599,7 +605,7 @@ def dataset_readme(stats: dict[str, Any]) -> str:
 - `chunks.jsonl`：对应 `knowledge.chunks`。
 - `qa.jsonl`：标准问题、答案、证据和 split。
 - `raw/`：每个版本的 Markdown 原文。
-- `postgres_import.sql`：映射现有本地 schema 的幂等开发导入脚本。
+- `postgres_import.sql`：映射现有本地 schema 的幂等开发导入脚本，包含固定的合成 tenant/member 身份种子，因此可在完成迁移的空库中直接执行。
 - `statistics.json`、`manifest.json`、`validation-report.json`：统计、哈希和质量门禁。
 
 ## 生成与验证

@@ -100,6 +100,21 @@ WHERE member_id = $1::uuid AND provisioning_state = 'ready'`
 	return userID, nil
 }
 
+func (s *PostgresStore) ReadyTelegramUserID(ctx context.Context, tenantID, memberID string) (string, error) {
+	const query = `
+SELECT telegram_user_id::text
+FROM channel.telegram_principals
+WHERE tenant_id = $1::uuid AND member_id = $2::uuid AND enabled`
+	var userID string
+	if err := s.pool.QueryRow(ctx, query, tenantID, memberID).Scan(&userID); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return "", ErrIdentityLinkNotReady
+		}
+		return "", fmt.Errorf("read ready Telegram identity link: %w", err)
+	}
+	return userID, nil
+}
+
 func (s *PostgresStore) AcquireLink(
 	ctx context.Context,
 	member Member,

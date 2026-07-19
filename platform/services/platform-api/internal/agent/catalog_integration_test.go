@@ -33,10 +33,11 @@ func TestCatalogPinsSwitchesAndRollsBackVersions(t *testing.T) {
 	}
 	defer func() { _ = tx.Rollback(context.Background()) }()
 
-	var agentID, versionOneID, deploymentID, triggerID, senderID string
+	var agentID, versionOneID, deploymentID, triggerID, senderID, capabilitySnapshotID string
 	var revision int64
 	if err := tx.QueryRow(ctx, `
-SELECT d.id::text, v.id::text, dep.id::text, tr.id::text, dep.revision, l.openim_user_id
+SELECT d.id::text, v.id::text, dep.id::text, tr.id::text, dep.revision, l.openim_user_id,
+       v.capability_snapshot_id
 FROM agent.definitions d
 JOIN agent.deployments dep
   ON dep.tenant_id = d.tenant_id AND dep.agent_id = d.id AND dep.slot = 'production'
@@ -47,7 +48,7 @@ JOIN agent.triggers tr
 JOIN identity.identity_links l
   ON l.tenant_id = d.tenant_id AND l.member_id = $2::uuid AND l.provisioning_state = 'ready'
 WHERE d.tenant_id = $1::uuid AND d.slug = 'knowledge-agent'`, catalogTestTenant, catalogTestMember).Scan(
-		&agentID, &versionOneID, &deploymentID, &triggerID, &revision, &senderID,
+		&agentID, &versionOneID, &deploymentID, &triggerID, &revision, &senderID, &capabilitySnapshotID,
 	); err != nil {
 		t.Fatal(err)
 	}
@@ -60,7 +61,7 @@ WHERE d.tenant_id = $1::uuid AND d.slug = 'knowledge-agent'`, catalogTestTenant,
 		AllowedActionTypes: []string{"create_ticket"},
 		MaxModelAttempts:   3,
 	}
-	versionTwo, err := publishVersionTx(ctx, tx, catalogTestTenant, agentID, catalogTestMember, 2, versionTwoSpec)
+	versionTwo, err := publishVersionTx(ctx, tx, catalogTestTenant, agentID, catalogTestMember, 2, capabilitySnapshotID, versionTwoSpec)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -68,7 +69,8 @@ WHERE d.tenant_id = $1::uuid AND d.slug = 'knowledge-agent'`, catalogTestTenant,
 	eventPrefix := "catalog-integration-" + time.Now().Format("20060102150405.000000000")
 	newTrigger := func(suffix, alias, prompt string) Trigger {
 		return Trigger{
-			EventID: eventPrefix + "-" + suffix, TenantID: catalogTestTenant,
+			EventID: eventPrefix + "-" + suffix, TenantID: catalogTestTenant, MemberID: catalogTestMember,
+			SourceChannel:  "openim",
 			ConversationID: "si_catalog_test", SenderID: senderID, SessionType: 1,
 			Mentions: []Mention{{Alias: alias, Prompt: prompt}},
 		}

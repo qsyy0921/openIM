@@ -10,12 +10,21 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/qsyy0921/openim/platform/services/platform-api/internal/action"
+	"github.com/qsyy0921/openim/platform/services/platform-api/internal/admincontrol"
 	"github.com/qsyy0921/openim/platform/services/platform-api/internal/agent"
+	"github.com/qsyy0921/openim/platform/services/platform-api/internal/agentcontrol"
 	"github.com/qsyy0921/openim/platform/services/platform-api/internal/app"
 	"github.com/qsyy0921/openim/platform/services/platform-api/internal/config"
+	"github.com/qsyy0921/openim/platform/services/platform-api/internal/delegation"
 	"github.com/qsyy0921/openim/platform/services/platform-api/internal/httpserver"
 	"github.com/qsyy0921/openim/platform/services/platform-api/internal/identity"
+	"github.com/qsyy0921/openim/platform/services/platform-api/internal/memory"
+	"github.com/qsyy0921/openim/platform/services/platform-api/internal/observe"
 	openimclient "github.com/qsyy0921/openim/platform/services/platform-api/internal/openim"
+	"github.com/qsyy0921/openim/platform/services/platform-api/internal/proactive"
+	"github.com/qsyy0921/openim/platform/services/platform-api/internal/remotea2a"
+	"github.com/qsyy0921/openim/platform/services/platform-api/internal/runtimecontrol"
+	"github.com/qsyy0921/openim/platform/services/platform-api/internal/toolruntime"
 )
 
 func main() {
@@ -63,7 +72,25 @@ func main() {
 	agentStore := agent.NewStore(pool)
 	workspace := agent.NewWorkspaceService(verifier, identityStore, agentStore, openIM)
 	catalog := agent.NewCatalogService(verifier, identityStore, agentStore)
-	handler := httpserver.NewHandler(cfg.Version, sessions, devices, approvals, workspace, catalog)
+	control := agentcontrol.NewService(verifier, identityStore, memory.NewStore(pool), proactive.NewStore(pool), toolruntime.NewStore(pool), observe.NewStore(pool), delegation.NewStore(pool))
+	control.SetGroupAccess(openIM)
+	admin := admincontrol.NewService(verifier, identityStore, runtimecontrol.NewStore(pool), observe.NewStore(pool))
+	if err := observe.RegisterOperationalCollector(pool); err != nil {
+		slog.Error("register operational metrics failed", "error", err)
+		os.Exit(1)
+	}
+	admin.SetCatalogStore(admincontrol.NewCatalogStore(pool))
+	if len(cfg.A2AAllowedHosts) > 0 {
+		a2aClient, err := remotea2a.NewClient(remotea2a.Config{
+			AllowedHosts: cfg.A2AAllowedHosts, AllowedPrivateCIDRs: cfg.A2AAllowedPrivateCIDRs, Timeout: cfg.A2ATimeout,
+		}, os.LookupEnv)
+		if err != nil {
+			slog.Error("configure remote A2A client failed", "error", err)
+			os.Exit(1)
+		}
+		admin.SetRemoteA2AStore(remotea2a.NewStore(pool, a2aClient))
+	}
+	handler := httpserver.NewHandlerWithAgentControls(cfg.Version, sessions, devices, approvals, workspace, catalog, control, admin)
 
 	listener, err := net.Listen("tcp", cfg.HTTPAddr)
 	if err != nil {

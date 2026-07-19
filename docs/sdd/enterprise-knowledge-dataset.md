@@ -55,7 +55,7 @@ Generation writes to a temporary sibling directory and only replaces the release
 
 ## Security
 
-The dataset uses a named fictional company and role titles instead of real individuals. Source URIs use the `knowledge://xinglan/` namespace. The generated SQL grants read access only to the fixed local test member and is explicitly a development import, not a production migration. No model key or OpenIM token is read by generation or validation.
+The dataset uses a named fictional company and role titles instead of real individuals. Source URIs use the `knowledge://xinglan/` namespace. The generated SQL idempotently creates one fixed synthetic tenant and member before loading documents and ACL grants, grants read access only to that member, and is explicitly a self-contained development import rather than a production migration. No model key or OpenIM token is read by generation or validation.
 
 ## Observability
 
@@ -88,12 +88,13 @@ The dataset uses a named fictional company and role titles instead of real indiv
 - Published source text totals 486,966 Chinese characters; current documents range from 854 to 1,118 characters.
 - The QA suite contains 1,040 answerable cases and 80 explicit-abstention cases; every answerable evidence span resolves exactly to a current chunk.
 - Exact document-body and question uniqueness are both 100%; maximum same-form character 5-gram Jaccard similarity is `0.719577` after scenario diversification.
-- Two consecutive generations produced release hash `d9a31899246bfa9077be3d42d3dd0b54737a3fa50461ffd628ad4c5ae68059c9`.
+- Generator version `1.0.1` produces release hash `7a8cd3e3a979865104ae128256e0f61703bec5f703bbbf235f22e3e4e0db9432`; two consecutive generations must reproduce it exactly.
+- The generated PostgreSQL import succeeded against a fresh database migrated through `0028`, loading 520 documents, 3,224 chunks, and 520 ACL grants without external identity seed data.
 - `python ops/knowledge_dataset/validate.py`, `python ops/validate-repository.py`, Python compilation, and `git diff --check` passed.
 
 ## Open questions
 
 - A later Goal must implement document ingestion instead of relying on generated SQL.
 - Embedding model revision, vector dimension, normalization, batching, and `pgvector` index parameters require a measured contract.
-- Retrieval evaluation must establish Recall@K, MRR/nDCG, citation correctness, abstention quality, latency, and cost against a real running stack.
+- Production release policy must set retrieval and generation thresholds, latency, and cost limits against the admitted model stack; the current local reports validate the harness but do not admit a production generation model.
 - Multi-turn conversational memory remains a separate dataset and runtime slice.

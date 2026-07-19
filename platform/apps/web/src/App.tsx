@@ -1,10 +1,39 @@
 import { AlertTriangle, Bot, ContactRound, LogIn, LogOut, MessageCircle, MessageSquare, MonitorSmartphone, RefreshCw, Wifi } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { User, UserManager } from "oidc-client-ts";
-import { ApplicationHandleResult } from "@openim/wasm-client-sdk";
+import { ApplicationHandleResult, SessionType } from "@openim/wasm-client-sdk";
 
 import type { WebConfig } from "./config";
 import { AgentWorkspace } from "./AgentWorkspace";
+import { AgentControlController, initialAgentControlState, type AgentControlState } from "./agent-control";
+import {
+  acknowledgeAgentEvent,
+  createCatalogAgent,
+  createAgentSubscription,
+  decideAgentToolApproval,
+  deleteAgentMemoryFact,
+  feedbackAgentMemory,
+  getAgentMemory,
+  getAgentGroupMemory,
+  getAgentAdminSnapshot,
+  getAgentAdminCatalog,
+  getAgentDelegations,
+  getAgentProactive,
+  getAgentReplay,
+  getAgentToolApprovals,
+  setAgentSubscriptionEnabled,
+  setAgentRuntimeControl,
+  setCatalogMCPEnabled,
+  setCatalogMemberRole,
+  publishCapabilitySnapshot,
+  publishCatalogSkill,
+  publishCatalogTool,
+  registerRemoteA2AAgent,
+  verifyRemoteA2AAgent,
+  setRemoteA2AAgentEnabled,
+  reviewAgentGroupMemory,
+  updateAgentProactivePreference
+} from "./agent-control-api";
 import { AgentController, createOpenIMAgentTransport, initialAgentState, type AgentState } from "./agent";
 import { approveAgentIntent, getAgentCatalog, getAgentWorkspace } from "./agent-api";
 import { ChatWorkspace } from "./ChatWorkspace";
@@ -41,6 +70,7 @@ export function App({ config, userManager }: AppProps) {
   const [messageSearchState, setMessageSearchState] = useState<MessageSearchState>(initialMessageSearchState);
   const [deviceState, setDeviceState] = useState<DeviceState>(initialDeviceState);
   const [agentState, setAgentState] = useState<AgentState>(initialAgentState);
+  const [agentControlState, setAgentControlState] = useState<AgentControlState>(initialAgentControlState);
   const [activeModule, setActiveModule] = useState("messages");
   const detachRef = useRef<(() => void) | null>(null);
   const chatControllerRef = useRef<ConversationController | null>(null);
@@ -54,6 +84,8 @@ export function App({ config, userManager }: AppProps) {
   const deviceStartedRef = useRef(false);
   const agentControllerRef = useRef<AgentController | null>(null);
   const unsubscribeAgentRef = useRef<(() => void) | null>(null);
+  const agentControlControllerRef = useRef<AgentControlController | null>(null);
+  const unsubscribeAgentControlRef = useRef<(() => void) | null>(null);
   const agentStartedRef = useRef(false);
 
   const connect = useCallback(
@@ -81,7 +113,10 @@ export function App({ config, userManager }: AppProps) {
               });
             }
             if (agentStartedRef.current) {
-              void agentControllerRef.current?.start().catch((cause) => setError(messageOf(cause)));
+              void Promise.all([
+                agentControllerRef.current?.start(),
+                agentControlControllerRef.current?.start()
+              ]).catch((cause) => setError(messageOf(cause)));
             }
             return;
           }
@@ -95,6 +130,7 @@ export function App({ config, userManager }: AppProps) {
             messageSearchControllerRef.current?.close();
             deviceControllerRef.current?.close();
             agentControllerRef.current?.stop();
+            agentControlControllerRef.current?.stop();
             setSession(null);
             setError(update.message ?? update.state);
             setPhase("error");
@@ -140,6 +176,38 @@ export function App({ config, userManager }: AppProps) {
         }, createOpenIMAgentTransport());
         agentControllerRef.current = agentController;
         unsubscribeAgentRef.current = agentController.subscribe(setAgentState);
+        agentControlControllerRef.current?.stop();
+        unsubscribeAgentControlRef.current?.();
+        const agentControlController = new AgentControlController({
+          memory: () => getAgentMemory(config.platformAPIBaseURL, identity.id_token!, config.deviceID),
+          groupMemory: (conversationID) => getAgentGroupMemory(config.platformAPIBaseURL, identity.id_token!, config.deviceID, conversationID),
+          reviewGroupMemory: (conversationID, proposalID, decision) => reviewAgentGroupMemory(config.platformAPIBaseURL, identity.id_token!, config.deviceID, conversationID, proposalID, decision),
+          deleteMemory: (factID, key) => deleteAgentMemoryFact(config.platformAPIBaseURL, identity.id_token!, config.deviceID, factID, key),
+          feedbackMemory: (exposureID, signal) => feedbackAgentMemory(config.platformAPIBaseURL, identity.id_token!, config.deviceID, exposureID, signal),
+          proactive: () => getAgentProactive(config.platformAPIBaseURL, identity.id_token!, config.deviceID),
+          createSubscription: (input) => createAgentSubscription(config.platformAPIBaseURL, identity.id_token!, config.deviceID, input),
+          setSubscriptionEnabled: (subscriptionID, enabled) => setAgentSubscriptionEnabled(config.platformAPIBaseURL, identity.id_token!, config.deviceID, subscriptionID, enabled),
+          updatePreference: (preference) => updateAgentProactivePreference(config.platformAPIBaseURL, identity.id_token!, config.deviceID, preference),
+          acknowledge: (eventID, signal) => acknowledgeAgentEvent(config.platformAPIBaseURL, identity.id_token!, config.deviceID, eventID, signal),
+          toolApprovals: () => getAgentToolApprovals(config.platformAPIBaseURL, identity.id_token!, config.deviceID),
+          decideToolApproval: (approvalID, digest, decision) => decideAgentToolApproval(config.platformAPIBaseURL, identity.id_token!, config.deviceID, approvalID, digest, decision),
+          replay: (runID) => getAgentReplay(config.platformAPIBaseURL, identity.id_token!, config.deviceID, runID),
+          delegations: () => getAgentDelegations(config.platformAPIBaseURL, identity.id_token!, config.deviceID),
+          adminOperations: () => getAgentAdminSnapshot(config.platformAPIBaseURL, identity.id_token!, config.deviceID),
+          adminCatalog: () => getAgentAdminCatalog(config.platformAPIBaseURL, identity.id_token!, config.deviceID),
+          setRuntimeControl: (control, paused, reason) => setAgentRuntimeControl(config.platformAPIBaseURL, identity.id_token!, config.deviceID, control, paused, reason),
+          createAgent: (input) => createCatalogAgent(config.platformAPIBaseURL, identity.id_token!, config.deviceID, input),
+          publishSkill: (input) => publishCatalogSkill(config.platformAPIBaseURL, identity.id_token!, config.deviceID, input),
+          publishTool: (input) => publishCatalogTool(config.platformAPIBaseURL, identity.id_token!, config.deviceID, input),
+          publishCapabilitySnapshot: (tools) => publishCapabilitySnapshot(config.platformAPIBaseURL, identity.id_token!, config.deviceID, tools),
+          setMCPEnabled: (slug, enabled) => setCatalogMCPEnabled(config.platformAPIBaseURL, identity.id_token!, config.deviceID, slug, enabled),
+          setMemberRole: (memberID, role, enabled) => setCatalogMemberRole(config.platformAPIBaseURL, identity.id_token!, config.deviceID, memberID, role, enabled),
+          registerRemoteAgent: (input) => registerRemoteA2AAgent(config.platformAPIBaseURL, identity.id_token!, config.deviceID, input),
+          verifyRemoteAgent: (slug, expectedRevision) => verifyRemoteA2AAgent(config.platformAPIBaseURL, identity.id_token!, config.deviceID, slug, expectedRevision),
+          setRemoteAgentEnabled: (slug, enabled, expectedRevision) => setRemoteA2AAgentEnabled(config.platformAPIBaseURL, identity.id_token!, config.deviceID, slug, enabled, expectedRevision)
+        });
+        agentControlControllerRef.current = agentControlController;
+        unsubscribeAgentControlRef.current = agentControlController.subscribe(setAgentControlState);
         agentStartedRef.current = false;
         setConnection({ state: "connected" });
         setPhase("connected");
@@ -187,6 +255,8 @@ export function App({ config, userManager }: AppProps) {
       unsubscribeDeviceRef.current?.();
       agentControllerRef.current?.stop();
       unsubscribeAgentRef.current?.();
+      agentControlControllerRef.current?.stop();
+      unsubscribeAgentControlRef.current?.();
     };
   }, [config.oidcRedirectURI, connect, userManager]);
 
@@ -237,12 +307,17 @@ export function App({ config, userManager }: AppProps) {
       agentControllerRef.current = null;
       unsubscribeAgentRef.current?.();
       unsubscribeAgentRef.current = null;
+      agentControlControllerRef.current?.stop();
+      agentControlControllerRef.current = null;
+      unsubscribeAgentControlRef.current?.();
+      unsubscribeAgentControlRef.current = null;
       agentStartedRef.current = false;
       setChatState(initialChatState);
       setContactState(initialContactState);
       setMessageSearchState(initialMessageSearchState);
       setDeviceState(initialDeviceState);
       setAgentState(initialAgentState);
+      setAgentControlState(initialAgentControlState);
       setActiveModule("messages");
       await userManager.signoutRedirect();
     } catch (cause) {
@@ -288,7 +363,7 @@ export function App({ config, userManager }: AppProps) {
     if (moduleID === "agent" && !agentStartedRef.current) {
       agentStartedRef.current = true;
       try {
-        await agentControllerRef.current?.start();
+        await Promise.all([agentControllerRef.current?.start(), agentControlControllerRef.current?.start()]);
       } catch {
         // AgentState contains the explicit initialization error.
       }
@@ -333,8 +408,8 @@ export function App({ config, userManager }: AppProps) {
           <ContactsWorkspace controller={contactControllerRef.current} state={contactState} onOpenChat={openContactChat} />
         ) : activeModule === "devices" ? (
           <DeviceWorkspace controller={deviceControllerRef.current} state={deviceState} />
-        ) : agentControllerRef.current ? (
-          <AgentWorkspace controller={agentControllerRef.current} state={agentState} />
+        ) : agentControllerRef.current && agentControlControllerRef.current ? (
+          <AgentWorkspace controller={agentControllerRef.current} state={agentState} controlController={agentControlControllerRef.current} controlState={agentControlState} groups={chatState.conversations.filter((item) => item.conversationType === SessionType.Group && item.groupID).map((item) => ({ conversationID: item.conversationID, name: item.showName || item.groupID }))} />
         ) : null}
       </WorkspaceShell>
     );

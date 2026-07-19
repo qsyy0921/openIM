@@ -1,0 +1,55 @@
+groups:
+  - name: openim-agent-platform
+    rules:
+      - alert: OpenIMAgentTargetDown
+        expr: up{job=~"openim-platform-api|openim-intelligence-worker"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "OpenIM Agent service metrics target is down"
+          description: "{{ $labels.job }} has not been scraped for two minutes."
+
+      - alert: OpenIMAgentQueueStalled
+        expr: openim_platform_queue_oldest_ready_seconds > 300
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "OpenIM Agent durable queue is stalled"
+          description: "Queue {{ $labels.queue }} oldest ready item is {{ $value }} seconds old."
+
+      - alert: OpenIMAgentQueueFailedItems
+        expr: openim_platform_queue_items{state=~"failed|unknown|dead_letter"} > 0
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "OpenIM Agent queue contains failed or uncertain work"
+          description: "Queue {{ $labels.queue }} has {{ $value }} items in {{ $labels.state }}."
+
+      - alert: OpenIMAgentMetricCollectionErrors
+        expr: increase(openim_platform_metrics_collection_errors_total[5m]) > 0
+        labels:
+          severity: critical
+        annotations:
+          summary: "OpenIM Agent PostgreSQL metrics collection failed"
+          description: "The operational collector failed during the last five minutes."
+
+      - alert: OpenIMAgentMCPDegraded
+        expr: openim_platform_mcp_servers{state!="healthy"} > 0
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "An MCP server is not healthy"
+          description: "{{ $value }} MCP registrations are in state {{ $labels.state }}."
+
+      - alert: OpenIMAgentRAGErrorRate
+        expr: sum(rate(openim_platform_rag_queries_total{outcome="error"}[5m])) / clamp_min(sum(rate(openim_platform_rag_queries_total[5m])), 0.001) > 0.05
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Enterprise RAG error rate is elevated"
+          description: "More than five percent of RAG requests failed during the last five minutes."

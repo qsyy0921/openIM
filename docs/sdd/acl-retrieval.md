@@ -57,6 +57,12 @@ The effective read permission is the intersection of Run tenant, triggering memb
 
 Record Run ID, tenant, member, purpose, candidate count, authorized result count, document/version IDs, duration, and deny/zero-result counts without logging query or chunk content.
 
+Retrieval evaluation and generation evaluation are separate contracts:
+
+- Retrieval runs all frozen QA cases and reports Recall@K, MRR, retrieval precision@K, provenance integrity, and the unanswerable-query empty-result rate.
+- Generation evaluation uses a deterministic frozen answerable/unanswerable sample, the same authorized retrieval path, and the production Candidate schema. It reports explicit abstention accuracy, required-fact coverage, generated citation precision/recall, citation syntax integrity, and provider/schema failures.
+- The report records the exact generation model. A local evaluation model is evidence for the harness and that model only; it is not a production provider fallback or a DeepSeek quality claim.
+
 ## Acceptance criteria
 
 - Cross-tenant documents are never returned even if IDs or text match.
@@ -64,6 +70,8 @@ Record Run ID, tenant, member, purpose, candidate count, authorized result count
 - Deleting a grant prevents access on the immediately following query.
 - Run citations exactly reference the authorized chunks supplied to the model.
 - Empty or failed retrieval never sends unfiltered context to Python.
+- A retrieved but insufficient context can produce an explicit `insufficient_evidence` candidate without an invented citation.
+- Generated citation correctness is calculated from cited IDs mapped back to frozen gold chunk IDs; retrieval candidate precision is not mislabeled as generated citation correctness.
 
 ## Source evidence
 
