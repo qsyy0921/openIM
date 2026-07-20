@@ -40,17 +40,22 @@ func run() error {
 		BaseURL: cfg.OpenIMAPIURL, Secret: cfg.OpenIMSecret,
 		AdminUser: cfg.OpenIMAdminUserID, Timeout: cfg.DependencyTimeout,
 	})
-	telegramClient, err := telegram.NewClient(cfg.TelegramAPIURL, cfg.TelegramBotToken, cfg.TelegramTimeout)
-	if err != nil {
-		return err
-	}
 	openIMSender, err := delivery.NewOpenIMSender(agent.NewStore(pool), openIMClient, agent.BotUserID)
 	if err != nil {
 		return err
 	}
-	telegramSender, err := delivery.NewTelegramSender(telegramClient)
-	if err != nil {
-		return err
+	channels := []string{"openim"}
+	var telegramSender *delivery.TelegramSender
+	if cfg.TelegramEnabled {
+		telegramClient, err := telegram.NewClient(cfg.TelegramAPIURL, cfg.TelegramBotToken, cfg.TelegramTimeout)
+		if err != nil {
+			return err
+		}
+		telegramSender, err = delivery.NewTelegramSender(telegramClient)
+		if err != nil {
+			return err
+		}
+		channels = append(channels, "telegram")
 	}
 	router, err := delivery.NewRouter(openIMSender, telegramSender)
 	if err != nil {
@@ -59,6 +64,6 @@ func run() error {
 	worker := delivery.NewWorker(delivery.NewStore(pool), router, cfg.Poll, cfg.Lease, cfg.MaxAttempts)
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	slog.Info("agent-delivery started", "channels", []string{"openim", "telegram"})
+	slog.Info("agent-delivery started", "channels", channels)
 	return worker.Run(ctx)
 }

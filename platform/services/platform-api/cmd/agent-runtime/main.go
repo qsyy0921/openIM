@@ -145,12 +145,25 @@ func (b deliveryBridge) Prepare(ctx context.Context, request agent.DeliveryReque
 }
 
 func (b operationBridge) SearchKnowledge(ctx context.Context, _ agent.Run, snapshot capability.Snapshot, query agent.RetrievalQuery) ([]agent.Evidence, error) {
-	_, raw, err := b.service.Execute(ctx, snapshot, toolruntime.CallRequest{
+	prepared, raw, err := b.service.Execute(ctx, snapshot, toolruntime.CallRequest{
 		CallID: "knowledge-search", OperationID: "enterprise.knowledge.search",
 		Arguments: map[string]any{"query": query.Text, "limit": query.Limit},
 	})
 	if err != nil {
 		return nil, err
+	}
+	return decodeKnowledgeResult(prepared, raw)
+}
+
+func decodeKnowledgeResult(prepared toolruntime.PreparedCall, raw any) ([]agent.Evidence, error) {
+	if prepared.State == "denied" {
+		return []agent.Evidence{}, nil
+	}
+	if prepared.State != "succeeded" {
+		return nil, fmt.Errorf("enterprise knowledge tool did not succeed: state=%s", prepared.State)
+	}
+	if raw == nil {
+		return nil, errors.New("enterprise knowledge tool succeeded without a result")
 	}
 	encoded, err := json.Marshal(raw)
 	if err != nil {

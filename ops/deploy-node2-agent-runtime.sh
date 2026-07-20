@@ -22,7 +22,8 @@ embedding_base_url="${OPENIM_INTELLIGENCE_EMBEDDING_BASE_URL:-http://127.0.0.1:1
 embedding_api_key="${OPENIM_INTELLIGENCE_EMBEDDING_API_KEY:-local-only}"
 embedding_model="${OPENIM_INTELLIGENCE_EMBEDDING_MODEL:-qwen3-embedding:4b}"
 embedding_dimension="${OPENIM_INTELLIGENCE_EMBEDDING_DIMENSION:-2560}"
-embedding_timeout="${OPENIM_INTELLIGENCE_EMBEDDING_TIMEOUT_SECONDS:-60}"
+embedding_timeout="${OPENIM_INTELLIGENCE_EMBEDDING_TIMEOUT_SECONDS:-180}"
+knowledge_index_batch_size="${OPENIM_KNOWLEDGE_INDEX_BATCH_SIZE:-32}"
 routing_dense_min_similarity="${OPENIM_INTELLIGENCE_ROUTING_DENSE_MIN_SIMILARITY:-0.2}"
 
 [[ "$(id -u)" -eq 0 ]] || {
@@ -41,13 +42,23 @@ getent group "$runtime_group" >/dev/null 2>&1 || {
   echo "runtime group does not exist: $runtime_group" >&2
   exit 1
 }
+command -v runuser >/dev/null 2>&1 || {
+  echo "runuser is required" >&2
+  exit 1
+}
 [[ "$install_dependencies" == "true" || "$install_dependencies" == "false" ]] || {
   echo "OPENIM_INTELLIGENCE_INSTALL_DEPENDENCIES must be true or false" >&2
+  exit 1
+}
+[[ "$knowledge_index_batch_size" =~ ^[0-9]+$ ]] && \
+  ((knowledge_index_batch_size >= 1 && knowledge_index_batch_size <= 128)) || {
+  echo "knowledge index batch size must be between 1 and 128" >&2
   exit 1
 }
 runtime_binaries=(
   agent-runtime
   agent-delivery
+  knowledge-rag-admin
   telegram-ingress
   memory-extractor
   memory-projector
@@ -71,6 +82,9 @@ for binary in "${runtime_binaries[@]}"; do
   chmod 0755 "$bin_dir/$binary"
 done
 install -d -m 0750 -o root -g "$runtime_group" "$config_dir" "$config_dir/credentials"
+if [[ ! -e "$telegram_credential_file" ]]; then
+  install -m 0400 -o root -g root /dev/null "$telegram_credential_file"
+fi
 install -d -m 0750 -o "$runtime_user" -g "$runtime_group" "$(dirname "$venv")"
 
 if [[ ! -x "$venv/bin/python" ]]; then
@@ -281,6 +295,33 @@ WantedBy=multi-user.target
 EOF
 }
 
+write_delivery_worker_unit() {
+  cat >"/etc/systemd/system/openim-agent-delivery.service" <<EOF
+[Unit]
+Description=OpenIM Agent channel delivery
+Requires=docker.service
+After=docker.service network-online.target
+
+[Service]
+Type=simple
+User=$runtime_user
+Group=$runtime_group
+EnvironmentFile=$config_dir/platform.env
+LoadCredential=telegram_bot_token:$telegram_credential_file
+ExecStart=/bin/sh -ec 'if [ -s "\$CREDENTIALS_DIRECTORY/telegram_bot_token" ]; then export PLATFORM_TELEGRAM_DELIVERY_ENABLED=true; export PLATFORM_TELEGRAM_BOT_TOKEN="\$(cat "\$CREDENTIALS_DIRECTORY/telegram_bot_token")"; else export PLATFORM_TELEGRAM_DELIVERY_ENABLED=false; unset PLATFORM_TELEGRAM_BOT_TOKEN; fi; exec $bin_dir/agent-delivery'
+Restart=on-failure
+RestartSec=3s
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target
+EOF
+}
+
 write_platform_worker_unit \
   openim-memory-projector "OpenIM Agent Memory projector" memory-projector \
   docker.service docker.service
@@ -294,8 +335,7 @@ write_platform_worker_unit \
   "docker.service openim-intelligence-worker.service"
 write_telegram_worker_unit \
   openim-telegram-ingress "OpenIM Telegram ingress" telegram-ingress
-write_telegram_worker_unit \
-  openim-agent-delivery "OpenIM Agent channel delivery" agent-delivery
+write_delivery_worker_unit
 
 systemctl daemon-reload
 systemctl enable openim-action-executor.service openim-memory-projector.service
@@ -323,9 +363,10 @@ assert_running_binary() {
 assert_running_binary openim-action-executor.service "$bin_dir/action-executor"
 assert_running_binary openim-memory-projector.service "$bin_dir/memory-projector"
 
-if [[ -f "$credential_file" ]]; then
+if [[ -s "$credential_file" ]]; then
   systemctl enable openim-intelligence-worker.service openim-agent-runtime.service \
     openim-memory-extractor.service openim-proactive-runtime.service
+  systemctl stop openim-agent-runtime.service openim-memory-extractor.service openim-proactive-runtime.service
   systemctl restart openim-intelligence-worker.service
   for _ in $(seq 1 60); do
     if curl --fail --silent --show-error http://127.0.0.1:18082/healthz >/dev/null; then
@@ -363,6 +404,36 @@ if not all(isinstance(value, (int, float)) for value in vectors[0]):
 PY
   rm -f "$embedding_probe"
   trap - EXIT
+  database_url="$(sed -n 's/^PLATFORM_DATABASE_URL=//p' "$config_dir/platform.env" | tail -1 | tr -d '\r')"
+  [[ "$database_url" =~ ^postgres(ql)?://[^[:space:]]+$ ]] || {
+    unset database_url
+    echo "platform database URL is missing or malformed" >&2
+    exit 1
+  }
+  index_report="$(mktemp)"
+  trap 'rm -f "$index_report"' EXIT
+  runuser -u "$runtime_user" -- env \
+    PLATFORM_DATABASE_URL="$database_url" \
+    PLATFORM_INTELLIGENCE_URL=http://127.0.0.1:18082 \
+    PLATFORM_RETRIEVAL_EMBEDDING_MODEL="$embedding_model" \
+    PLATFORM_RETRIEVAL_EMBEDDING_DIMENSION="$embedding_dimension" \
+    "$bin_dir/knowledge-rag-admin" \
+      -mode index -batch-size "$knowledge_index_batch_size" \
+      -timeout "$((embedding_timeout * 2))s" >"$index_report"
+  unset database_url
+  "$venv/bin/python" - "$index_report" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as handle:
+    body = json.load(handle)
+indexed = body.get("indexed")
+if not isinstance(indexed, int) or indexed < 0:
+    raise SystemExit("knowledge embedding index report is invalid")
+print(f"knowledge_embeddings_indexed={indexed}")
+PY
+  rm -f "$index_report"
+  trap - EXIT
   systemctl restart openim-agent-runtime.service openim-memory-extractor.service openim-proactive-runtime.service
   systemctl is-active openim-intelligence-worker.service openim-agent-runtime.service \
     openim-memory-extractor.service openim-proactive-runtime.service
@@ -371,16 +442,23 @@ PY
   assert_running_binary openim-proactive-runtime.service "$bin_dir/proactive-runtime"
   echo "deepseek_credential=present"
 else
+  systemctl disable --now openim-intelligence-worker.service openim-agent-runtime.service \
+    openim-memory-extractor.service openim-proactive-runtime.service
   echo "deepseek_credential=required"
 fi
-if [[ -f "$telegram_credential_file" ]]; then
-  systemctl enable openim-telegram-ingress.service openim-agent-delivery.service
-  systemctl restart openim-telegram-ingress.service openim-agent-delivery.service
-  systemctl is-active openim-telegram-ingress.service openim-agent-delivery.service
+systemctl enable openim-agent-delivery.service
+systemctl restart openim-agent-delivery.service
+systemctl is-active openim-agent-delivery.service
+assert_running_binary openim-agent-delivery.service "$bin_dir/agent-delivery"
+if [[ -s "$telegram_credential_file" ]]; then
+  systemctl enable openim-telegram-ingress.service
+  systemctl restart openim-telegram-ingress.service
+  systemctl is-active openim-telegram-ingress.service
   assert_running_binary openim-telegram-ingress.service "$bin_dir/telegram-ingress"
-  assert_running_binary openim-agent-delivery.service "$bin_dir/agent-delivery"
   echo "telegram_credential=present"
 else
+  systemctl disable --now openim-telegram-ingress.service >/dev/null 2>&1 || true
+  echo "telegram_delivery=disabled"
   echo "telegram_credential=required"
 fi
 echo "agent_runtime_binaries=verified"

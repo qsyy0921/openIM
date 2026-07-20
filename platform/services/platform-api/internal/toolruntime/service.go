@@ -18,6 +18,11 @@ import (
 
 var callIDPattern = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_-]{0,127}$`)
 
+var (
+	ErrToolCallFailed         = errors.New("tool call previously failed")
+	ErrToolCallOutcomeUnknown = errors.New("tool call outcome is unknown")
+)
+
 type CallRequest struct {
 	CallID      string
 	OperationID string
@@ -95,7 +100,10 @@ func (s *Service) Execute(ctx context.Context, snapshot capability.Snapshot, req
 	if err != nil {
 		return PreparedCall{}, nil, err
 	}
-	if decision.Outcome == "deny" || (decision.Outcome == "require_approval" && prepared.State != "prepared") {
+	if decision.Outcome == "deny" {
+		prepared.State = "denied"
+		prepared.PolicyReason = decision.Reason
+		prepared.Result = nil
 		return prepared, nil, nil
 	}
 	if prepared.State == "succeeded" {
@@ -108,8 +116,18 @@ func (s *Service) Execute(ctx context.Context, snapshot capability.Snapshot, req
 		}
 		return prepared, result, nil
 	}
-	if prepared.State != "prepared" {
+	switch prepared.State {
+	case "denied", "waiting_approval":
 		return prepared, nil, nil
+	case "failed":
+		return prepared, nil, ErrToolCallFailed
+	case "unknown":
+		return prepared, nil, ErrToolCallOutcomeUnknown
+	case "prepared":
+	case "executing":
+		return prepared, nil, errors.New("tool call is already executing")
+	default:
+		return prepared, nil, fmt.Errorf("tool call has unsupported state %q", prepared.State)
 	}
 	if err := s.ledger.Start(ctx, prepared); err != nil {
 		return prepared, nil, err

@@ -3,7 +3,7 @@ unit: akashic-openim-goal-state
 status: draft
 branch: codex/akashic-openim-integration
 worktree: E:\development\OPENIM-akashic
-updated: 2026-07-19
+updated: 2026-07-20
 ---
 
 # Akashic integration Goal state
@@ -39,14 +39,14 @@ This unit records slice state, durable evidence, and the next idempotent action.
 | DDD and SDD boundary | verified | `akashic-openim-integration.md` | preserve bounded-context ownership |
 | Migrations 0009-0028 | node2_verified | Node2 reached `28|sql/0028_remote_a2a.sql`; fresh and restored-0021 upgrade chains also reached 0028 idempotently | preserve the 0022 compatibility fix and rerun the fresh-chain gate after migration edits |
 | Routing 36/190 | local_verified | `platform/services/intelligence-worker/eval/routing-gate-report.json` | rerun deterministic evaluator in final gate |
-| Enterprise RAG | local_verified | schema-v3 retrieval report plus deterministic generation-harness report; strict Candidate grounding contract and tests | admit a production model and thresholds in a later release gate; preserve no-fallback routing |
+| Enterprise RAG | node2_verified | schema-v3 local report plus Node2 `2704/2704` current-chunk index and real authorized/revoked/no-match OpenIM Runs | preserve pinned embedding revision, strict Candidate schema, ACL-first retrieval, and no-fallback routing |
 | Group Memory review | local_verified | migration 0026, API, Web panel, tests | include in full Go/Web gates |
 | Catalog Web administration | local_verified | migration 0027, admin API/UI/tests | include in full Go/Web gates |
 | Remote A2A | local_verified | migration 0028, bounded client/store/API/UI/tests | include in full Go/Web gates; no broad federation claim |
 | Prometheus/Grafana | node2_verified | Node2 reported three healthy targets, six loaded rules, the `Prometheus` datasource, and the `openim-agent-platform` dashboard | preserve the Node2 host-network override and repeat after monitoring changes |
 | Full repository gates | local_verified | Go `./...`, Python 26, Web typecheck/94 tests/build, dataset and repository validators, formatting, diff, and credential-shape checks passed | preserve on subsequent changes |
-| Node2 runtime and OpenIM ingress | blocked_external | release runtime, real Ollama embedding, OpenIM ingress, Outbox publication, and a direct DeepSeek/citation turn were accepted; the full Agent ACL E2E exposed a pgx retry-parameter bug that is fixed, tested, and packaged locally but cannot be redeployed while both Node2 addresses are unreachable | after physical/network recovery, verify host identity, stage `akashic-node2-20260719-pgxfix1` once, deploy it, and rerun runtime plus OpenIM Agent ACL acceptance |
-| Telegram channel E2E | blocked_external | Telegram units correctly stayed disabled because no validated root-only Bot Token was present; Node2 is also unreachable and no Telegram round trip is claimed | after Node2 recovery, provision a validated Token through stdin, bind one test identity, run inbound/outbound E2E, and clean the fixture |
+| Node2 runtime and OpenIM ingress | node2_verified | `akashic-node2-20260720-candidatefix1`; migration 0028, immutable binaries, OpenIM delivery, `2704/2704` embeddings, real DeepSeek/citations, ACL revocation, abstention, and observability accepted | preserve release hashes and repeat after runtime, retrieval, Candidate, or delivery changes |
+| Telegram channel E2E | blocked_external | OpenIM delivery runs independently; Telegram ingress is disabled and Telegram intents fail permanently because no validated root-only Bot Token is installed | provision a validated Token through stdin, bind one isolated test identity, run inbound/outbound E2E, and clean the fixture |
 
 ## Resume protocol
 
@@ -91,7 +91,7 @@ Progress is observable through this table, generated evaluation reports, test ou
 
 ## Open questions
 
-- When will Node2 become reachable for the final remote acceptance?
+- When will a validated Telegram Bot Token be provisioned for the remaining channel acceptance?
 - Which production generation model and release thresholds will be admitted after the harness rejects the local `qwen2.5:3b` baseline?
 
 ## Automation
@@ -119,3 +119,9 @@ The current Codex task has a 15-minute heartbeat named `OpenIM Akashic Goal å¿ƒè
 - The locally accepted implementation is committed as `9366636` and pushed to `origin/codex/akashic-openim-integration`. Draft PR `#14` remains explicitly gated on the final Node2 OpenIM/Telegram acceptance; its Go, Python/docs, and Web CI jobs all passed. The branch is not merged into `main`.
 - The next Goal continuation after Node2's brief recovery found neither `172.31.50.2` nor `192.168.0.38` reachable by SSH, and a complete scan of both `/24` networks found no alternate Node2 SSH or HTTPS address. This is the second consecutive Goal audit after the newest outage; no archive transfer, migration, credential action, or business message was attempted.
 - The third consecutive Goal continuation after that recovery again found both known Node2 addresses unreachable by SSH. The local implementation, immutable release, full local gates, pushed branch, Draft PR, and CI were already complete, so no remaining work can progress without physical/network recovery and a separately provisioned Telegram Bot Token. The strict repeated-external-blocker threshold is met; no transfer, migration, credential write, or channel message was attempted, and the heartbeat must be paused until the user resumes the Goal after recovery.
+- Node2 recovered as `qsyy0921-Default-string`. OpenIM delivery was separated from optional Telegram delivery: `openim-agent-delivery` runs with the OpenIM adapter when Telegram is explicitly disabled, while Telegram intents fail permanently on their own channel and are never rerouted.
+- The deployment built all 2,704 missing `qwen3-embedding:4b` vectors. Runtime acceptance now requires `28|sql/0028_remote_a2a.sql|520|624|3224|520|2704|2704`; endpoint health alone is rejected. The initial index completed as one process and the deployment restored the stopped consumers only after the final count was reached.
+- Real OpenIM acceptance exposed two fail-closed defects rather than hiding them: a failed read ToolCall had previously been decoded as an empty result, and a nil Go `tool_results` slice had been sent as JSON `null` to the strict Python Candidate contract. Safe read retries now preserve the same durable call and add `retry_prepared`; `unknown` and side-effect calls remain terminal. Candidate collection fields are normalized to JSON arrays without weakening the Python schema.
+- Release `akashic-node2-20260720-candidatefix1` has 695 verified manifest entries; archive SHA-256 is `f5d0558610c74c95a01c884da416100e893502df92a0e9d092dbc6f9e4cd5a01`, and the platform archive contains no `.env`. A no-migration narrow deployment switched Platform, Agent workers, Delivery, and Web; runtime and observability acceptance passed afterward.
+- Final OpenIM ACL-RAG acceptance produced authorized grounded Run `c136aae2-474c-4e89-8681-3016c2b5f130` with five persisted citations, revoked Run `f22ac73e-2157-415f-9bd1-abe9c63365d7` with zero target-document Tool results and zero target-document citations, and explicit-abstention Run `961499af-0a1c-4530-9694-1cfffb21d461` with zero citations. The removed document grant was restored before completion.
+- A disposable PostgreSQL 18.4 database reached migration `0028`, received the deterministic Node2 identity/catalog seed, and passed `TestStoreRetriesOnlyFailedSafeReadWithSameDurableCall` on 2026-07-20. The temporary container was removed after the test.

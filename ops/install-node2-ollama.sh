@@ -8,6 +8,8 @@ version="${OPENIM_OLLAMA_VERSION:-v0.32.1}"
 archive_sha256="${OPENIM_OLLAMA_ARCHIVE_SHA256:-83b1f22841eb7f6c4900c6797f960ebaa09466874442ea5b8ae3da6980d3914c}"
 embedding_model="${OPENIM_OLLAMA_EMBEDDING_MODEL:-qwen3-embedding:4b}"
 embedding_dimension="${OPENIM_OLLAMA_EMBEDDING_DIMENSION:-2560}"
+parallelism="${OPENIM_OLLAMA_NUM_PARALLEL:-8}"
+llm_library="${OPENIM_OLLAMA_LLM_LIBRARY:-cpu_avx2}"
 version_root="$install_root/$version"
 current_root="$install_root/current"
 models_root="$install_root/models"
@@ -31,6 +33,14 @@ id "$runtime_user" >/dev/null 2>&1 || {
 }
 [[ "$embedding_dimension" =~ ^[0-9]+$ ]] || {
   echo "embedding dimension is malformed" >&2
+  exit 1
+}
+[[ "$parallelism" =~ ^[0-9]+$ ]] && ((parallelism >= 1 && parallelism <= 16)) || {
+  echo "Ollama parallelism must be between 1 and 16" >&2
+  exit 1
+}
+[[ "$llm_library" =~ ^[A-Za-z0-9._-]+$ ]] || {
+  echo "Ollama LLM library override is malformed" >&2
   exit 1
 }
 
@@ -63,6 +73,8 @@ Group=$runtime_group
 Environment=OLLAMA_HOST=127.0.0.1:11434
 Environment=OLLAMA_MODELS=$models_root
 Environment=OLLAMA_KEEP_ALIVE=5m
+Environment=OLLAMA_NUM_PARALLEL=$parallelism
+Environment=OLLAMA_LLM_LIBRARY=$llm_library
 Environment=HOME=$state_root
 ExecStart=$current_root/bin/ollama serve
 Restart=on-failure
@@ -79,7 +91,8 @@ WantedBy=multi-user.target
 EOF
 
 systemctl daemon-reload
-systemctl enable --now ollama.service
+systemctl enable ollama.service
+systemctl restart ollama.service
 for _ in $(seq 1 60); do
   if curl --fail --silent --show-error http://127.0.0.1:11434/api/version >/dev/null; then
     break
@@ -140,4 +153,6 @@ systemctl is-active --quiet ollama.service
 echo "ollama_version=$version"
 echo "embedding_model=$embedding_model"
 echo "embedding_dimension=$embedding_dimension"
+echo "ollama_parallelism=$parallelism"
+echo "ollama_llm_library=$llm_library"
 echo "node2_ollama=installed"

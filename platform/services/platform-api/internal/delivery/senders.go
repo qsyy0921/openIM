@@ -29,8 +29,8 @@ type Router struct {
 }
 
 func NewRouter(openIM *OpenIMSender, telegramSender *TelegramSender) (*Router, error) {
-	if openIM == nil || telegramSender == nil {
-		return nil, errors.New("OpenIM and Telegram delivery senders are required")
+	if openIM == nil {
+		return nil, errors.New("OpenIM delivery sender is required")
 	}
 	return &Router{openIM: openIM, telegram: telegramSender}, nil
 }
@@ -40,6 +40,9 @@ func (r *Router) Send(ctx context.Context, record Record) (string, error) {
 	case "openim":
 		return r.openIM.Send(ctx, record)
 	case "telegram":
+		if r.telegram == nil {
+			return "", Permanent(errors.New("Telegram delivery channel is disabled"))
+		}
 		return r.telegram.Send(ctx, record)
 	default:
 		return "", Permanent(fmt.Errorf("unsupported delivery channel %q", record.Channel))

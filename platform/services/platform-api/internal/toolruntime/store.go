@@ -154,7 +154,8 @@ FROM agent.tool_calls AS call_record
 JOIN capability.tool_descriptors AS descriptor
   ON descriptor.tenant_id = call_record.tenant_id AND descriptor.id = call_record.tool_id
 LEFT JOIN agent.tool_approvals AS approval ON approval.tool_call_id = call_record.id
-WHERE call_record.run_id = $1::uuid AND call_record.call_id = $2`
+WHERE call_record.run_id = $1::uuid AND call_record.call_id = $2
+FOR UPDATE OF call_record`
 		var existingDigest string
 		if err := tx.QueryRow(ctx, existing, execution.RunID, request.CallID).Scan(
 			&prepared.ID, &prepared.State, &prepared.PolicyReason, &existingDigest,
@@ -164,6 +165,25 @@ WHERE call_record.run_id = $1::uuid AND call_record.call_id = $2`
 		}
 		if existingDigest != argumentsDigest || prepared.OperationID != request.OperationID {
 			return PreparedCall{}, errors.New("duplicate tool call ID has different operation or arguments")
+		}
+		if prepared.State == "failed" && descriptor.Risk == "read" && descriptor.RetrySemantics == "safe" && decision.Outcome == "allow" {
+			const retryRead = `
+UPDATE agent.tool_calls
+SET state = 'prepared', result = NULL, error_code = NULL,
+    completed_at = NULL, updated_at = now()
+WHERE id = $1::uuid AND state = 'failed'`
+			result, err := tx.Exec(ctx, retryRead, prepared.ID)
+			if err != nil {
+				return PreparedCall{}, fmt.Errorf("prepare failed read tool retry: %w", err)
+			}
+			if result.RowsAffected() != 1 {
+				return PreparedCall{}, errors.New("prepare failed read tool retry: call state changed")
+			}
+			if err := insertToolLifecycleEvent(ctx, tx, prepared.ID, "retry_prepared", "", false); err != nil {
+				return PreparedCall{}, err
+			}
+			prepared.State = "prepared"
+			prepared.Result = nil
 		}
 		if err := tx.Commit(ctx); err != nil {
 			return PreparedCall{}, fmt.Errorf("commit duplicate tool call read: %w", err)

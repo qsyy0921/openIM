@@ -6,7 +6,7 @@
 | Identity session | [identity-session.md](identity-session.md) | verified | preserve identity/device invariants during client work |
 | OpenIM adapter | [openim-adapter.md](openim-adapter.md) | verified | run protocol compatibility tests before upstream upgrade |
 | Agent Runtime | [agent-runtime.md](agent-runtime.md) | verified | preserve bounded read/intent scope during later tools work |
-| Akashic integration | [akashic-openim-integration.md](akashic-openim-integration.md) | verification in progress | finish local gates; run Node2 migrations and dual-channel acceptance only when reachable |
+| Akashic integration | [akashic-openim-integration.md](akashic-openim-integration.md) | Node2/OpenIM verified | provision a validated root-only Telegram credential and complete the isolated Telegram E2E |
 | Akashic Goal state | [goal-state.md](goal-state.md) | active checkpoint | heartbeat resumes the first non-verified slice without inferring success |
 | Agent Catalog | [agent-catalog.md](agent-catalog.md) | verified | preserve immutable versions, atomic Run pinning, host-only mutation, and fail-closed execution |
 | Intelligence worker | [intelligence-worker.md](intelligence-worker.md) | verified | preserve DeepSeek JSON/action protocol during future model changes |

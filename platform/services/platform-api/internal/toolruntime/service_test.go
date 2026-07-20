@@ -14,9 +14,11 @@ import (
 )
 
 type ledgerStub struct {
-	grants  []string
-	state   string
-	unknown bool
+	grants         []string
+	state          string
+	preparedState  string
+	preparedResult json.RawMessage
+	unknown        bool
 }
 
 func (s *ledgerStub) MemberGrants(context.Context, string, string) ([]string, error) {
@@ -30,8 +32,11 @@ func (s *ledgerStub) Prepare(_ context.Context, _ agent.ExecutionContext, _ capa
 	if decision.Outcome == "require_approval" {
 		state = "waiting_approval"
 	}
+	if s.preparedState != "" {
+		state = s.preparedState
+	}
 	s.state = state
-	return PreparedCall{ID: "call-1", CallID: request.CallID, OperationID: request.OperationID, State: state}, nil
+	return PreparedCall{ID: "call-1", CallID: request.CallID, OperationID: request.OperationID, State: state, Result: s.preparedResult}, nil
 }
 func (s *ledgerStub) Start(context.Context, PreparedCall) error { s.state = "executing"; return nil }
 func (s *ledgerStub) Succeed(context.Context, PreparedCall, any) error {
@@ -105,6 +110,45 @@ func TestServiceMarksSideEffectFailureUnknown(t *testing.T) {
 	})
 	if err == nil || !ledger.unknown {
 		t.Fatalf("err=%v unknown=%v", err, ledger.unknown)
+	}
+}
+
+func TestServiceDoesNotTreatFailedCallAsSuccess(t *testing.T) {
+	snapshot, execution := testSnapshotAndExecution(t, "read", "native")
+	ledger := &ledgerStub{grants: []string{"knowledge:read"}, preparedState: "failed"}
+	service, _ := NewService(ledger, invokerStub{}, time.Minute)
+	ctx, _ := agent.BindExecutionContext(context.Background(), execution)
+	prepared, result, err := service.Execute(ctx, snapshot, CallRequest{
+		CallID: "search-1", OperationID: "enterprise.knowledge.search", Arguments: map[string]any{"query": "policy"},
+	})
+	if !errors.Is(err, ErrToolCallFailed) || prepared.State != "failed" || result != nil {
+		t.Fatalf("prepared=%#v result=%#v err=%v", prepared, result, err)
+	}
+}
+
+func TestServiceDoesNotRetryUnknownCall(t *testing.T) {
+	snapshot, execution := testSnapshotAndExecution(t, "write", "keyed")
+	ledger := &ledgerStub{grants: []string{"knowledge:read"}, preparedState: "unknown"}
+	service, _ := NewService(ledger, invokerStub{}, time.Minute)
+	ctx, _ := agent.BindExecutionContext(context.Background(), execution)
+	prepared, result, err := service.Execute(ctx, snapshot, CallRequest{
+		CallID: "write-1", OperationID: "enterprise.knowledge.search", Arguments: map[string]any{"query": "policy"},
+	})
+	if !errors.Is(err, ErrToolCallOutcomeUnknown) || prepared.State != "unknown" || result != nil {
+		t.Fatalf("prepared=%#v result=%#v err=%v", prepared, result, err)
+	}
+}
+
+func TestServiceDoesNotReplaySucceededReadAfterPermissionRevocation(t *testing.T) {
+	snapshot, execution := testSnapshotAndExecution(t, "read", "native")
+	ledger := &ledgerStub{preparedState: "succeeded", preparedResult: json.RawMessage(`{"secret":true}`)}
+	service, _ := NewService(ledger, invokerStub{}, time.Minute)
+	ctx, _ := agent.BindExecutionContext(context.Background(), execution)
+	prepared, result, err := service.Execute(ctx, snapshot, CallRequest{
+		CallID: "search-1", OperationID: "enterprise.knowledge.search", Arguments: map[string]any{"query": "policy"},
+	})
+	if err != nil || prepared.State != "denied" || prepared.PolicyReason != "permission_missing" || result != nil {
+		t.Fatalf("prepared=%#v result=%#v err=%v", prepared, result, err)
 	}
 }
 

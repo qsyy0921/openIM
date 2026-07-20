@@ -15,14 +15,15 @@ func TestCandidateClientUsesStructuredContract(t *testing.T) {
 			t.Fatalf("path = %q", r.URL.Path)
 		}
 		var body struct {
-			RunID             string              `json:"run_id"`
-			AgentVersionID    string              `json:"agent_version_id"`
-			AgentSpecChecksum string              `json:"agent_spec_checksum"`
-			ModelRoute        string              `json:"model_route"`
-			Content           string              `json:"content"`
-			Evidence          []Evidence          `json:"evidence"`
-			Memory            []MemoryFact        `json:"memory"`
-			ToolResults       []ToolResultContext `json:"tool_results"`
+			RunID             string          `json:"run_id"`
+			AgentVersionID    string          `json:"agent_version_id"`
+			AgentSpecChecksum string          `json:"agent_spec_checksum"`
+			ModelRoute        string          `json:"model_route"`
+			Content           string          `json:"content"`
+			Evidence          []Evidence      `json:"evidence"`
+			Memory            []MemoryFact    `json:"memory"`
+			ToolResults       json.RawMessage `json:"tool_results"`
+			Skills            json.RawMessage `json:"skills"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			t.Fatal(err)
@@ -30,6 +31,9 @@ func TestCandidateClientUsesStructuredContract(t *testing.T) {
 		if body.RunID != "run-1" || body.AgentVersionID != "version-1" || body.AgentSpecChecksum != seedAgentSpecChecksum ||
 			body.ModelRoute != DeepSeekV4ProRoute || body.Content != "question" || len(body.Evidence) != 1 || len(body.Memory) != 1 {
 			t.Fatalf("body = %#v", body)
+		}
+		if string(body.ToolResults) != "[]" || string(body.Skills) != "[]" {
+			t.Fatalf("empty collections must be JSON arrays: tool_results=%s skills=%s", body.ToolResults, body.Skills)
 		}
 		_ = json.NewEncoder(w).Encode(Candidate{Text: "answer [C1]", Model: "model", ProviderResponseID: "resp-1", CitationIDs: []string{"C1"}, GroundingStatus: GroundingGrounded})
 	}))

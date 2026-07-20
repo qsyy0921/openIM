@@ -86,6 +86,7 @@ Non-goals:
 - PostgreSQL migrations `0009` through `0028` define the Agent channel, runtime, capability, Tool, Skill, MCP, Memory, proactive, approval-continuation, bounded delegation, administrative-role state, tenant-scoped runtime incident controls, knowledge embeddings, group-Memory review, catalog audit, and remote A2A state.
 - Intelligence requests and responses use strict typed JSON contracts; invalid model output fails the Run phase and is never interpreted as a successful answer or ToolCall.
 - OpenIM and Telegram delivery adapters return an external message identifier before an intent can enter `sent` state.
+- OpenIM delivery remains available when Telegram is explicitly disabled. The unified Delivery Worker always starts with the OpenIM adapter; the Telegram adapter is registered only when a validated systemd credential is present. A Telegram intent encountered while that adapter is disabled fails permanently on its own channel and is never rerouted to OpenIM.
 - The Web member API depends on enterprise OIDC verification and active device enrollment. It does not accept tenant, member, reply-target, or administrator identity from request payloads.
 
 ## Invariants
@@ -99,6 +100,7 @@ Non-goals:
 - The intelligence worker receives only authorized evidence and capability schemas; it receives no channel, database, Kafka, or business credentials.
 - Candidate persistence and remote delivery are separate recoverable states.
 - Missing model, embedding, MCP, parser, policy, or channel dependencies fail explicitly. No alternate provider or semantics are selected.
+- Deployment indexes every active, published knowledge chunk with the pinned embedding revision before Agent Runtime starts. Runtime acceptance requires the valid current-chunk embedding count to equal the current published chunk count; an embedding endpoint health probe alone is insufficient.
 - Side effects require policy, approval when configured, an idempotency key, execution audit, and target read-back where supported.
 
 ## Delivery slices
@@ -139,6 +141,8 @@ Each slice must update this document and its owning SDDs, pass targeted and affe
 - Missing or invalid identity binding rejects ingress before model execution.
 - Expired worker leases, phase retries, delivery retries, and approval expiry are explicit durable states with bounded attempts.
 - Invalid model schemas, unavailable MCP processes, authorization failures, and storage failures fail closed; there is no provider or semantic fallback.
+- A failed ToolCall is never decoded as an empty successful result. Only a currently authorized `read` Tool whose pinned descriptor declares `retry_semantics=safe` may move from `failed` back to `prepared`; the durable Run/call ID, operation, argument digest, attempt count, and audit trail are preserved. `unknown` outcomes and side-effect Tools are never automatically reset.
+- Enterprise knowledge retrieval accepts only a `succeeded` ToolCall with a non-null result. A current ACL denial maps to an explicitly empty authorized corpus, while transport, embedding, storage, and Tool lifecycle failures remain errors and consume the Run's bounded retry budget rather than producing the no-evidence answer.
 - A side-effect timeout after dispatch is recorded as `unknown` and is not automatically retried into a success state.
 - Candidate persistence and remote delivery are separate, so a channel outage does not require rerunning model reasoning.
 
@@ -203,7 +207,7 @@ Implemented and locally verified in the current acceptance slice:
 - retrieval and generation are evaluated separately. The schema-v3 retrieval report covers all 1,120 frozen QA cases; the deterministic 40-case local generation baseline records provider/schema rejection, fact coverage, abstention, and generated-citation metrics without changing production provider routing;
 - Prometheus instrumentation and the local Grafana provisioning are source-controlled; local container and full repository verification status is recorded in `goal-state.md`.
 - the native Ubuntu release contract packages every long-running Agent process and host-admin command. Node2 runs Telegram ingress, channel delivery, Memory extraction/projection, and proactive dispatch as separate hardened systemd units; DeepSeek and Telegram credentials are root-only systemd credentials and are never written to the shared platform environment file.
-- Node2 has executed migrations `0009` through `0028`, loaded the enterprise fixture, served real 2560-dimensional `qwen3-embedding:4b` vectors from a loopback-only pinned Ollama runtime, and passed runtime, OpenIM ingress, direct intelligence, and observability probes. The later OpenIM Agent ACL round trip exposed a pgx retry-parameter defect; its tested local fix is not considered remotely accepted until the rebuilt release is deployed.
+- Node2 has executed migrations `0009` through `0028`, loaded the enterprise fixture, and indexed all 2,704 active current-version chunks with checksum-matched normalized 2560-dimensional `qwen3-embedding:4b` vectors from a loopback-only pinned Ollama runtime. Release `akashic-node2-20260720-candidatefix1` passed runtime, OpenIM ingress, real ACL-RAG, DeepSeek candidate, durable citation, OpenIM delivery, and observability acceptance. The accepted cross-language contract serializes every empty Candidate collection as `[]`; Python keeps `extra=forbid` and does not accept JSON `null` as a list fallback.
 
 ## Goal recovery and heartbeat
 

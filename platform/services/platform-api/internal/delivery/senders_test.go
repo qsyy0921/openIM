@@ -99,3 +99,28 @@ func TestRouterRejectsUnknownChannel(t *testing.T) {
 		t.Fatalf("error = %#v", err)
 	}
 }
+
+func TestRouterRunsOpenIMWithoutTelegram(t *testing.T) {
+	api := &openIMAPIStub{}
+	openIMSender, _ := NewOpenIMSender(identityStoreStub{}, api, func(string) string { return "agent-bot" })
+	router, err := NewRouter(openIMSender, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	externalID, err := router.Send(context.Background(), Record{
+		RunID: "run-1", TenantID: "tenant-1", Channel: "openim", TargetID: "user-1", SessionType: 1, Content: "answer",
+	})
+	if err != nil || externalID != "server-1" || api.target.ReceiverID != "user-1" {
+		t.Fatalf("externalID=%q target=%#v err=%v", externalID, api.target, err)
+	}
+}
+
+func TestRouterFailsClosedWhenTelegramIsDisabled(t *testing.T) {
+	openIMSender, _ := NewOpenIMSender(identityStoreStub{}, &openIMAPIStub{}, func(string) string { return "agent-bot" })
+	router, _ := NewRouter(openIMSender, nil)
+	_, err := router.Send(context.Background(), Record{Channel: "telegram", TargetID: "-10001", Content: "answer"})
+	var sendErr *SendError
+	if !errors.As(err, &sendErr) || sendErr.Class != FailurePermanent || sendErr.Error() != "Telegram delivery channel is disabled" {
+		t.Fatalf("error = %#v", err)
+	}
+}

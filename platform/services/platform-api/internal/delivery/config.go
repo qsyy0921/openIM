@@ -15,6 +15,7 @@ type Config struct {
 	OpenIMAPIURL      string
 	OpenIMSecret      string
 	OpenIMAdminUserID string
+	TelegramEnabled   bool
 	TelegramAPIURL    string
 	TelegramBotToken  string
 	DependencyTimeout time.Duration
@@ -41,19 +42,33 @@ func LoadConfig() (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
-	telegramURL, err := httpURL("PLATFORM_TELEGRAM_API_BASE_URL", true)
+	telegramEnabledRaw, err := required("PLATFORM_TELEGRAM_DELIVERY_ENABLED")
 	if err != nil {
 		return Config{}, err
 	}
-	telegramToken, err := required("PLATFORM_TELEGRAM_BOT_TOKEN")
+	telegramEnabled, err := strconv.ParseBool(telegramEnabledRaw)
 	if err != nil {
-		return Config{}, err
+		return Config{}, errors.New("PLATFORM_TELEGRAM_DELIVERY_ENABLED must be true or false")
+	}
+	var telegramURL, telegramToken string
+	var telegramTimeout time.Duration
+	if telegramEnabled {
+		telegramURL, err = httpURL("PLATFORM_TELEGRAM_API_BASE_URL", true)
+		if err != nil {
+			return Config{}, err
+		}
+		telegramToken, err = required("PLATFORM_TELEGRAM_BOT_TOKEN")
+		if err != nil {
+			return Config{}, err
+		}
+		telegramTimeout, err = duration("PLATFORM_TELEGRAM_HTTP_TIMEOUT")
+		if err != nil {
+			return Config{}, err
+		}
+	} else if strings.TrimSpace(os.Getenv("PLATFORM_TELEGRAM_BOT_TOKEN")) != "" {
+		return Config{}, errors.New("PLATFORM_TELEGRAM_BOT_TOKEN must be empty when Telegram delivery is disabled")
 	}
 	dependency, err := duration("PLATFORM_DEPENDENCY_TIMEOUT")
-	if err != nil {
-		return Config{}, err
-	}
-	telegramTimeout, err := duration("PLATFORM_TELEGRAM_HTTP_TIMEOUT")
 	if err != nil {
 		return Config{}, err
 	}
@@ -76,7 +91,8 @@ func LoadConfig() (Config, error) {
 	return Config{
 		DatabaseURL: databaseURL, OpenIMAPIURL: strings.TrimRight(openIMURL, "/"),
 		OpenIMSecret: openIMSecret, OpenIMAdminUserID: openIMAdmin,
-		TelegramAPIURL: strings.TrimRight(telegramURL, "/"), TelegramBotToken: telegramToken,
+		TelegramEnabled: telegramEnabled,
+		TelegramAPIURL:  strings.TrimRight(telegramURL, "/"), TelegramBotToken: telegramToken,
 		DependencyTimeout: dependency, TelegramTimeout: telegramTimeout,
 		Poll: poll, Lease: lease, MaxAttempts: maxAttempts,
 	}, nil

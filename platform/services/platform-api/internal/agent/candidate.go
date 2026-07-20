@@ -81,6 +81,10 @@ func (c *CandidateClient) Generate(ctx context.Context, run Run, version Catalog
 			})
 		}
 	}
+	allowedActions := append([]string{}, version.Spec.AllowedActionTypes...)
+	evidence = append([]Evidence{}, evidence...)
+	memories = append([]MemoryFact{}, memories...)
+	toolResults = append([]ToolResultContext{}, toolResults...)
 	body, err := json.Marshal(struct {
 		RunID             string              `json:"run_id"`
 		TenantID          string              `json:"tenant_id"`
@@ -99,7 +103,7 @@ func (c *CandidateClient) Generate(ctx context.Context, run Run, version Catalog
 		Skills            []SkillContext      `json:"skills"`
 	}{run.ID, run.TenantID, run.ConversationID, run.SenderID, run.AgentID, run.AgentVersionID,
 		run.AgentSpecChecksum, version.Spec.Instructions, version.Spec.ModelRoute,
-		version.Spec.AllowedActionTypes, run.Prompt, evidence, memories, toolResults, skills})
+		allowedActions, run.Prompt, evidence, memories, toolResults, skills})
 	if err != nil {
 		return Candidate{}, err
 	}

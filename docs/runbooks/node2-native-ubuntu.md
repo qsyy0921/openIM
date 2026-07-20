@@ -92,7 +92,25 @@ sudo bash "$DEPLOY_ROOT/ops/install-node2-ollama.sh" \
 The installer verifies the pinned archive digest, runs Ollama only on
 `127.0.0.1:11434`, stores model blobs on the Node2 NVMe-backed MFL path, pulls
 `qwen3-embedding:4b`, and rejects the deployment unless a real embedding has
-dimension `2560`.
+dimension `2560`. Node2 forces the AVX2 CPU runner because its legacy 2 GiB R7
+200 GPU is slower for this model. Ollama has a maximum parallel-request cap of
+8, although the pinned embedding runner currently advertises one active
+sequence. The Agent indexer therefore uses fixed batches of 32 with a
+180-second upstream timeout. Operators may override these bounds explicitly,
+but the deployment never auto-reduces a failed batch or switches embedding
+providers.
+
+The Agent deployment then runs the idempotent `knowledge-rag-admin -mode index`
+job before starting the runtime. Runtime acceptance compares all active,
+published chunks with checksum-matched, normalized `qwen3-embedding:4b`
+records; do not treat an embedding endpoint health response as a completed RAG
+index.
+
+The accepted Node2 corpus currently contains 2,704 active current-version
+chunks and 2,704 valid embeddings. A first full CPU index may take about one
+hour on this host; subsequent checksum-stable deployments report `indexed=0`.
+Keep Agent Runtime, Memory Extractor, and Proactive Runtime stopped during the
+full index so a partially indexed corpus cannot be presented as complete.
 
 The native installer verifies the release, creates or verifies TLS material, configures the existing Keycloak client without deleting its volume, runs migrations and fixtures, and invokes the generalized deployment scripts. Nginx routes the exact `/auth/callback` path to the Web SPA before forwarding the remaining `/auth/` namespace to Keycloak:
 
@@ -126,6 +144,8 @@ The installer creates hardened systemd units for Platform API, OpenIM ingress, I
 
 Provision the DeepSeek key only through standard input into `/etc/openim-platform/credentials/deepseek-api-key`, owned by `root:root` with mode `0400`. Provision the Telegram Bot Token through standard input to `ops/install-node2-telegram-credential.sh`, which validates `getMe` before installing `/etc/openim-platform/credentials/telegram-bot-token` with the same ownership and mode. Do not place either credential in shell arguments, environment files, Compose YAML, release bundles, screenshots, or logs.
 
+`openim-agent-delivery` always runs for OpenIM. Without a non-empty Telegram credential, its Telegram adapter is explicitly disabled and `openim-telegram-ingress` remains stopped; Telegram work fails closed and is never redirected to OpenIM. Installing a validated credential enables the Telegram adapter on the next service restart.
+
 ## Acceptance
 
 1. Check OpenIM Server and Chat health plus a real admin-token envelope.
@@ -134,4 +154,9 @@ Provision the DeepSeek key only through standard input into `/etc/openim-platfor
 4. Send and receive real single/group messages and media.
 5. Run an authorized cited enterprise-knowledge query and a no-evidence query.
 6. Approve one exact-digest action and verify one idempotent business effect.
+
+For ACL revocation, assert the revoked document ID is absent from both the
+durable Tool result and `agent.run_citations`. Do not require the final answer
+to have zero citations when the member still has access to other relevant
+documents; citations to other authorized documents are not an ACL leak.
 7. Restart the host and repeat health plus one real Agent turn.
