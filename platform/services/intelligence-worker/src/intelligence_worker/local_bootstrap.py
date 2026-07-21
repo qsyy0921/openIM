@@ -10,6 +10,8 @@ import yaml
 from .config import GENERATION_MODEL, LOCAL_RESPONSES_BASE_URL, Settings
 from .responses_client import ResponsesClient
 
+LOCAL_EMBEDDING_FORWARD_BASE_URL = "http://127.0.0.1:11435/v1"
+
 
 def _load_cli_proxy_key() -> str:
     default_path = Path.home() / ".cli-proxy-api" / "config.yaml"
@@ -43,7 +45,7 @@ def main() -> None:
     os.environ.setdefault("INTELLIGENCE_MODEL_MAX_OUTPUT_TOKENS", "1536")
     os.environ.setdefault("INTELLIGENCE_MODEL_MAX_RETRIES", "2")
     os.environ.setdefault("INTELLIGENCE_MODEL_RETRY_BASE_SECONDS", "0.25")
-    os.environ.setdefault("INTELLIGENCE_EMBEDDING_BASE_URL", "http://127.0.0.1:11434/v1")
+    os.environ.setdefault("INTELLIGENCE_EMBEDDING_BASE_URL", LOCAL_EMBEDDING_FORWARD_BASE_URL)
     os.environ.setdefault("INTELLIGENCE_EMBEDDING_API_KEY", "local-embedding")
     os.environ.setdefault("INTELLIGENCE_EMBEDDING_MODEL", "qwen3-embedding:4b")
     os.environ.setdefault("INTELLIGENCE_EMBEDDING_DIMENSION", "2560")

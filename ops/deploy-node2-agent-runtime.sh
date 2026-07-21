@@ -16,6 +16,7 @@ postgres_container="${OPENIM_PLATFORM_POSTGRES_CONTAINER:-openim-platform-local-
 install_dependencies="${OPENIM_INTELLIGENCE_INSTALL_DEPENDENCIES:-false}"
 proxy_env="${OPENIM_PLATFORM_PROXY_ENV:-/etc/openim/proxy.env}"
 intelligence_ssh_target="${OPENIM_INTELLIGENCE_SSH_TARGET:-10495@172.31.50.1}"
+windows_embedding_forward_port="${OPENIM_INTELLIGENCE_WINDOWS_EMBEDDING_FORWARD_PORT:-11435}"
 embedding_base_url="${OPENIM_INTELLIGENCE_EMBEDDING_BASE_URL:-http://127.0.0.1:11434/v1}"
 embedding_api_key="${OPENIM_INTELLIGENCE_EMBEDDING_API_KEY:-local-only}"
 embedding_model="${OPENIM_INTELLIGENCE_EMBEDDING_MODEL:-qwen3-embedding:4b}"
@@ -65,6 +66,11 @@ command -v runuser >/dev/null 2>&1 || {
 }
 [[ "$intelligence_ssh_target" =~ ^[A-Za-z0-9._-]+@[A-Za-z0-9.:-]+$ ]] || {
   echo "intelligence SSH target is malformed" >&2
+  exit 1
+}
+[[ "$windows_embedding_forward_port" =~ ^[0-9]+$ ]] && \
+  ((windows_embedding_forward_port >= 1024 && windows_embedding_forward_port <= 65535)) || {
+  echo "Windows embedding forward port must be between 1024 and 65535" >&2
   exit 1
 }
 command -v ssh >/dev/null 2>&1 || {
@@ -194,7 +200,7 @@ Wants=network-online.target
 Type=simple
 User=$runtime_user
 Group=$runtime_group
-ExecStart=/usr/bin/ssh -NT -o BatchMode=yes -o ExitOnForwardFailure=yes -o StrictHostKeyChecking=yes -o ServerAliveInterval=30 -o ServerAliveCountMax=3 -L 127.0.0.1:18082:127.0.0.1:18082 -R 127.0.0.1:11434:127.0.0.1:11434 $intelligence_ssh_target
+ExecStart=/usr/bin/ssh -NT -o BatchMode=yes -o ExitOnForwardFailure=yes -o StrictHostKeyChecking=yes -o ServerAliveInterval=30 -o ServerAliveCountMax=3 -L 127.0.0.1:18082:127.0.0.1:18082 -R 127.0.0.1:$windows_embedding_forward_port:127.0.0.1:11434 $intelligence_ssh_target
 Restart=on-failure
 RestartSec=3s
 NoNewPrivileges=true

@@ -56,7 +56,7 @@ The Worker is stateless. CLIProxyAPI owns its local authentication configuration
 Windows runs CLIProxyAPI on `127.0.0.1:8317` and the Intelligence Worker on `127.0.0.1:18082`. Node2 must not receive the gateway key or expose either port. `openim-intelligence-tunnel.service` is designed to create:
 
 - Node2 `127.0.0.1:18082` -> Windows `127.0.0.1:18082` for Agent Runtime calls;
-- Windows `127.0.0.1:11434` -> Node2 `127.0.0.1:11434` for the Worker's existing embedding dependency.
+- Windows `127.0.0.1:11435` -> Node2 `127.0.0.1:11434` for the Worker's embedding dependency. The dedicated Windows port avoids colliding with a developer-local Ollama listener on `11434` and does not select it as a fallback.
 
 Both forwards are SSH authenticated and loopback-bound. If the tunnel or Windows Worker is unavailable, Node2 Agent operations fail explicitly.
 
