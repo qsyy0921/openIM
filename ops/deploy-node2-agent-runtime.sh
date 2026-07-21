@@ -25,6 +25,8 @@ embedding_dimension="${OPENIM_INTELLIGENCE_EMBEDDING_DIMENSION:-2560}"
 embedding_timeout="${OPENIM_INTELLIGENCE_EMBEDDING_TIMEOUT_SECONDS:-180}"
 knowledge_index_batch_size="${OPENIM_KNOWLEDGE_INDEX_BATCH_SIZE:-32}"
 routing_dense_min_similarity="${OPENIM_INTELLIGENCE_ROUTING_DENSE_MIN_SIMILARITY:-0.2}"
+telegram_proxy_url="${OPENIM_TELEGRAM_PROXY_URL:-http://127.0.0.1:7893}"
+telegram_no_proxy="${OPENIM_TELEGRAM_NO_PROXY:-127.0.0.1,localhost,172.31.50.0/24,192.168.0.0/24}"
 
 [[ "$(id -u)" -eq 0 ]] || {
   echo "run as root" >&2
@@ -55,14 +57,32 @@ command -v runuser >/dev/null 2>&1 || {
   echo "knowledge index batch size must be between 1 and 128" >&2
   exit 1
 }
+[[ "$telegram_proxy_url" =~ ^http://127\.0\.0\.1:[0-9]{1,5}$ ]] || {
+  echo "Telegram proxy URL must be a loopback HTTP proxy" >&2
+  exit 1
+}
+[[ "$telegram_no_proxy" =~ ^[A-Za-z0-9.,:/-]+$ ]] || {
+  echo "Telegram NO_PROXY value is malformed" >&2
+  exit 1
+}
 runtime_binaries=(
+  agent-catalog-admin
   agent-runtime
   agent-delivery
+  capability-admin
+  group-memory-admin
   knowledge-rag-admin
+  mcp-admin
+  member-grant-admin
+  proactive-admin
   telegram-ingress
+  telegram-admin
   memory-extractor
   memory-projector
   proactive-runtime
+  role-admin
+  runtime-control-admin
+  skill-admin
   action-executor
 )
 for path in "$wheel" "$config_dir/platform.env"; do
@@ -280,6 +300,9 @@ Type=simple
 User=$runtime_user
 Group=$runtime_group
 EnvironmentFile=$config_dir/platform.env
+Environment=HTTP_PROXY=$telegram_proxy_url
+Environment=HTTPS_PROXY=$telegram_proxy_url
+Environment=NO_PROXY=$telegram_no_proxy
 LoadCredential=telegram_bot_token:$telegram_credential_file
 ExecStart=/bin/sh -ec 'export PLATFORM_TELEGRAM_BOT_TOKEN="\$(cat "\$CREDENTIALS_DIRECTORY/telegram_bot_token")"; exec $bin_dir/$binary'
 Restart=on-failure
@@ -307,6 +330,9 @@ Type=simple
 User=$runtime_user
 Group=$runtime_group
 EnvironmentFile=$config_dir/platform.env
+Environment=HTTP_PROXY=$telegram_proxy_url
+Environment=HTTPS_PROXY=$telegram_proxy_url
+Environment=NO_PROXY=$telegram_no_proxy
 LoadCredential=telegram_bot_token:$telegram_credential_file
 ExecStart=/bin/sh -ec 'if [ -s "\$CREDENTIALS_DIRECTORY/telegram_bot_token" ]; then export PLATFORM_TELEGRAM_DELIVERY_ENABLED=true; export PLATFORM_TELEGRAM_BOT_TOKEN="\$(cat "\$CREDENTIALS_DIRECTORY/telegram_bot_token")"; else export PLATFORM_TELEGRAM_DELIVERY_ENABLED=false; unset PLATFORM_TELEGRAM_BOT_TOKEN; fi; exec $bin_dir/agent-delivery'
 Restart=on-failure

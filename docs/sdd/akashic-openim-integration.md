@@ -191,10 +191,8 @@ The `codex/akashic-openim-integration` branch currently contains the following s
 
 Not yet accepted as complete:
 
-- real dual-channel OpenIM and Telegram end-to-end acceptance after the current Node2 restart;
 - production-model generation quality and an admitted release threshold. The local `qwen2.5:3b` run validates fail-closed harness behavior only and is not a production quality gate;
 - production-federated A2A interoperability beyond the bounded A2A 1.0 REST Agent Card and `message:send` profile;
-- final Node2 redeployment of the locally tested pgx retry fix and runtime acceptance for the resulting immutable release;
 
 Implemented and locally verified in the current acceptance slice:
 
@@ -208,6 +206,7 @@ Implemented and locally verified in the current acceptance slice:
 - Prometheus instrumentation and the local Grafana provisioning are source-controlled; local container and full repository verification status is recorded in `goal-state.md`.
 - the native Ubuntu release contract packages every long-running Agent process and host-admin command. Node2 runs Telegram ingress, channel delivery, Memory extraction/projection, and proactive dispatch as separate hardened systemd units; DeepSeek and Telegram credentials are root-only systemd credentials and are never written to the shared platform environment file.
 - Node2 has executed migrations `0009` through `0028`, loaded the enterprise fixture, and indexed all 2,704 active current-version chunks with checksum-matched normalized 2560-dimensional `qwen3-embedding:4b` vectors from a loopback-only pinned Ollama runtime. Release `akashic-node2-20260720-candidatefix1` passed runtime, OpenIM ingress, real ACL-RAG, DeepSeek candidate, durable citation, OpenIM delivery, and observability acceptance. The accepted cross-language contract serializes every empty Candidate collection as `[]`; Python keeps `extra=forbid` and does not accept JSON `null` as a list fallback.
+- The same release passed a real Telegram round trip after an explicit enterprise member/chat binding: unbound bootstrap rejection, bound ingress, published Outbox event, one successful DeepSeek Run with five authorized citations, one sent delivery with an external Telegram message ID, `1|1|1` idempotency, visible client receipt, and cleanup of the temporary binding.
 
 ## Goal recovery and heartbeat
 

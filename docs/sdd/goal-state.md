@@ -46,7 +46,7 @@ This unit records slice state, durable evidence, and the next idempotent action.
 | Prometheus/Grafana | node2_verified | Node2 reported three healthy targets, six loaded rules, the `Prometheus` datasource, and the `openim-agent-platform` dashboard | preserve the Node2 host-network override and repeat after monitoring changes |
 | Full repository gates | local_verified | Go `./...`, Python 26, Web typecheck/94 tests/build, dataset and repository validators, formatting, diff, and credential-shape checks passed | preserve on subsequent changes |
 | Node2 runtime and OpenIM ingress | node2_verified | `akashic-node2-20260720-candidatefix1`; migration 0028, immutable binaries, OpenIM delivery, `2704/2704` embeddings, real DeepSeek/citations, ACL revocation, abstention, and observability accepted | preserve release hashes and repeat after runtime, retrieval, Candidate, or delivery changes |
-| Telegram channel E2E | blocked_external | OpenIM delivery runs independently; Telegram ingress is disabled and Telegram intents fail permanently because no validated root-only Bot Token is installed | provision a validated Token through stdin, bind one isolated test identity, run inbound/outbound E2E, and clean the fixture |
+| Telegram channel E2E | node2_verified | A real bound Telegram update at source offset `96338388` produced one published Outbox event, one successful `deepseek-v4-pro` Run with five citations, and one sent Telegram delivery with a non-empty external message ID; idempotency was `1|1|1` and the temporary binding was cleaned to `0|0` | preserve explicit enterprise binding, fail-closed unknown identities, durable delivery, and the fixed text event-ID cardinality check |
 
 ## Resume protocol
 
@@ -91,12 +91,11 @@ Progress is observable through this table, generated evaluation reports, test ou
 
 ## Open questions
 
-- When will a validated Telegram Bot Token be provisioned for the remaining channel acceptance?
 - Which production generation model and release thresholds will be admitted after the harness rejects the local `qwen2.5:3b` baseline?
 
 ## Automation
 
-The current Codex task has a 15-minute heartbeat named `OpenIM Akashic Goal 心跳`. It re-enters this resume protocol. The heartbeat may continue a pending idempotent step; it must not create a second Goal, force a migration, retry an uncertain side effect, or modify `main`.
+The Codex task may use the 15-minute `OpenIM Akashic Goal 心跳` to re-enter this resume protocol while a slice remains pending. It must not create a second Goal, force a migration, retry an uncertain side effect, or modify `main`; after every row is verified it may only report completion and must not extend the scope.
 
 ## Latest local evidence
 
@@ -125,3 +124,8 @@ The current Codex task has a 15-minute heartbeat named `OpenIM Akashic Goal 心�
 - Release `akashic-node2-20260720-candidatefix1` has 695 verified manifest entries; archive SHA-256 is `f5d0558610c74c95a01c884da416100e893502df92a0e9d092dbc6f9e4cd5a01`, and the platform archive contains no `.env`. A no-migration narrow deployment switched Platform, Agent workers, Delivery, and Web; runtime and observability acceptance passed afterward.
 - Final OpenIM ACL-RAG acceptance produced authorized grounded Run `c136aae2-474c-4e89-8681-3016c2b5f130` with five persisted citations, revoked Run `f22ac73e-2157-415f-9bd1-abe9c63365d7` with zero target-document Tool results and zero target-document citations, and explicit-abstention Run `961499af-0a1c-4530-9694-1cfffb21d461` with zero citations. The removed document grant was restored before completion.
 - A disposable PostgreSQL 18.4 database reached migration `0028`, received the deterministic Node2 identity/catalog seed, and passed `TestStoreRetriesOnlyFailedSafeReadWithSameDurableCall` on 2026-07-20. The temporary container was removed after the test.
+- Node2's Telegram dependency was restored without exposing the subscription or Bot Token. The imported Mihomo candidate was SHA-locked, sanitized, constrained to loopback, switched atomically with rollback, and accepted only after Telegram and Google HTTPS probes passed. The active configuration uses TCP resolvers for proxy endpoint bootstrap because Node2's Wi-Fi path showed intermittent UDP DNS loss.
+- The Telegram Bot Token passed the official `getMe` call through the Node2 loopback proxy and was installed as a root-only systemd credential. `openim-telegram-ingress`, `openim-agent-delivery`, and Mihomo are active; Delivery advertises explicit `openim` and `telegram` channels. A later five-request Telegram API probe succeeded, while transient transport failures remain visible in the ingress journal rather than being hidden.
+- The active release still matched all 695 recorded file hashes after `telegram-admin` received the executable mode required by the host-admin binding flow. The initial `ops/accept-node2-telegram.sh snapshot` returned Bot offset `0`, so the acceptance started without a fabricated inbound message or binding.
+- On 2026-07-21, a real Telegram bootstrap message advanced the Bot offset and was durably rejected as an unbound identity. After an explicit isolated member/chat binding, source offset `96338388` produced published event `d6563d40-c2c0-482a-bd16-7d067086460d`, successful `deepseek-v4-pro` Run `81b5f00f-1d01-4d51-a495-335151905efb`, five persisted citations, and sent delivery `de09f2a5-36fa-481a-82fd-995cd5b5e4ac` with external message ID `238`. The Telegram client received the cited answer, idempotency was `1|1|1`, and the temporary principal/chat binding was removed and verified as `0|0`. The acceptance script's final cardinality query was corrected to compare the text `integration.ingress_messages.event_id` without an invalid UUID cast.
+- The 2026-07-21 final local gate passed Go formatting, vet, and all-package tests; Python `26/26`; deterministic routing `190/190`; Web typecheck, `94/94` tests, and the production build with explicit Node2 URLs; dataset validation (`520|624|3224|1120`); repository validation; shell syntax; Python compilation; credential-shape scanning; and `git diff --check`.

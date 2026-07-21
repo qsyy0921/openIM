@@ -4,7 +4,7 @@ set -euo pipefail
 device="${1:-wls6}"
 backup_root="${2:-/home/qsyy0921/MFL/staging/network-backup}"
 primary_dns="${OPENIM_NODE2_PRIMARY_DNS:-223.5.5.5}"
-secondary_dns="${OPENIM_NODE2_SECONDARY_DNS:-119.29.29.29}"
+secondary_dns="${OPENIM_NODE2_SECONDARY_DNS:-223.6.6.6}"
 
 [[ "$(id -u)" -eq 0 ]] || {
   echo "run as root" >&2
@@ -16,16 +16,24 @@ connection="$(nmcli -t -f NAME,DEVICE connection show --active | awk -F: -v devi
   exit 1
 }
 for server in "$primary_dns" "$secondary_dns"; do
-  server_ready=false
+  udp_ready=false
+  tcp_ready=false
   for _ in $(seq 1 5); do
     if dig +short +time=2 +tries=1 "@$server" m.daocloud.io A | grep -Eq '^[0-9]+(\.[0-9]+){3}$'; then
-      server_ready=true
+      udp_ready=true
       break
     fi
     sleep 1
   done
-  [[ "$server_ready" == "true" ]] || {
-    echo "DNS server is not ready: $server" >&2
+  for _ in $(seq 1 3); do
+    if dig +tcp +short +time=3 +tries=1 "@$server" m.daocloud.io A | grep -Eq '^[0-9]+(\.[0-9]+){3}$'; then
+      tcp_ready=true
+      break
+    fi
+    sleep 1
+  done
+  [[ "$udp_ready" == true && "$tcp_ready" == true ]] || {
+    echo "DNS server is not ready over UDP and TCP: $server" >&2
     exit 1
   }
 done
