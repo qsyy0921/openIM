@@ -37,6 +37,7 @@ The Worker owns bounded provider calls, strict structured-output parsing, typed 
 - The model cannot create an action. The explicit `创建工单：<标题>` protocol is parsed deterministically outside the model and still requires downstream approval.
 - Memory output is candidate-only, excludes sensitive material, and remains subject to deterministic projection and review policy.
 - Tool planning can only fill the already selected operation schema; it cannot choose or execute a Tool.
+- Intent analysis receives explicit server-resolved identity, ACL, Tool-permission, and approval-policy context. Those authority-owned values cannot be requested from the user as missing business inputs.
 
 ## Runtime flow
 

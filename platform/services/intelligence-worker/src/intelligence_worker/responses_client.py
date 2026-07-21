@@ -41,6 +41,8 @@ grounding_status 只能是 grounded、insufficient_evidence、not_applicable。�
 
 INTENT_VIEW_INSTRUCTIONS = """你是企业协作平台的意图分析器。只输出符合响应 schema 的对象，不回答用户问题。
 不得输出或猜测注册工具名、operation_id、provider、权限、审批结论、执行计划、最终参数或思维过程。
+租户、成员身份、知识库访问范围、工具权限和审批策略均由服务端解析；不得将它们列入 required_inputs、missing_required_inputs 或 unresolved_references。
+只有用户必须补充且服务端无法推导的业务参数才能进入 missing_required_inputs。
 schema_version 固定为字符串 1。tool_requirement 只能是 required、optional、none。
 所有列表去重，missing_required_inputs 必须是 required_inputs 的子集。"""
 
@@ -139,7 +141,15 @@ class ResponsesClient:
     async def analyze_intent(self, request: RouteRequest) -> tuple[IntentView, str]:
         structured, response_id, _ = await self._responses_json(
             INTENT_VIEW_INSTRUCTIONS,
-            {"message": request.content},
+            {
+                "message": request.content,
+                "server_resolved_context": {
+                    "tenant_and_member_identity": True,
+                    "knowledge_acl_scope": True,
+                    "tool_permissions": True,
+                    "approval_policy": True,
+                },
+            },
             "intent_view",
             _intent_schema(),
             min(self._settings.model_max_output_tokens, 1024),

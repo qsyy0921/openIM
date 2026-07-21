@@ -11,6 +11,7 @@ from intelligence_worker.provider_errors import (
     ModelRouteUnavailable,
     ModelUnavailable,
 )
+from intelligence_worker.models import OperationDiscovery, RouteRequest
 from intelligence_worker.responses_client import ResponsesClient
 
 
@@ -109,3 +110,55 @@ def test_response_requires_completed_exact_model_and_one_output_text() -> None:
         finally:
             await client.close()
     asyncio.run(run())
+
+
+def test_intent_analysis_marks_authority_context_as_server_resolved() -> None:
+    observed: dict[str, object] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content)
+        observed["instructions"] = body["instructions"]
+        observed["input"] = json.loads(body["input"])
+        return httpx.Response(200, json=response_payload(json.dumps({
+            "schema_version": "1",
+            "rewritten_intent": "search enterprise knowledge",
+            "hypothetical_capability": "retrieve an authorized policy",
+            "required_inputs": ["query"],
+            "missing_required_inputs": [],
+            "unresolved_references": [],
+            "desired_outputs": ["text"],
+            "tool_requirement": "required",
+        })))
+
+    request = RouteRequest(
+        run_id="run-intent-context",
+        capability_snapshot_id="capability-v1:" + "a" * 64,
+        content="查询企业制度",
+        operations=[OperationDiscovery(
+            operation_id="enterprise.knowledge.search",
+            name="Enterprise knowledge search",
+            summary="Search authorized enterprise knowledge",
+            parameter_terms=["query"],
+            examples=["search policy"],
+            output_kinds=["text"],
+        )],
+    )
+
+    async def run() -> None:
+        client = ResponsesClient(settings(), httpx.MockTransport(handler))
+        try:
+            await client.analyze_intent(request)
+        finally:
+            await client.close()
+
+    asyncio.run(run())
+    assert observed["input"] == {
+        "message": "查询企业制度",
+        "server_resolved_context": {
+            "tenant_and_member_identity": True,
+            "knowledge_acl_scope": True,
+            "tool_permissions": True,
+            "approval_policy": True,
+        },
+    }
+    assert "知识库访问范围" in str(observed["instructions"])

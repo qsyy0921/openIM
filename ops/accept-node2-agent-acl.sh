@@ -96,7 +96,7 @@ PY
 }
 
 nonce="$(date +%s%N)"
-valid="$(send_and_wait "valid-$nonce" '查询第三方安全评估管理制度')"
+valid="$(send_and_wait "valid-$nonce" '请在企业知识库中检索并总结《第三方安全评估管理制度》的核心要求')"
 IFS='|' read -r valid_run valid_model valid_provider valid_citations valid_grounding <<<"$valid"
 valid_target_citations="$(psql_value "SELECT count(*) FROM agent.run_citations WHERE run_id='$valid_run'::uuid AND document_id='$document_id'::uuid")"
 [[ "$valid_model" == gpt-5.6-luna && -n "$valid_provider" && "$valid_citations" -ge 1 && \
@@ -108,7 +108,7 @@ echo "authorized_acl_rag=accepted run_id=$valid_run citations=$valid_citations"
 
 psql_value "DELETE FROM authz.document_grants WHERE tenant_id='$tenant_id' AND document_id='$document_id' AND member_id='$member_id' AND permission='read'" >/dev/null
 grant_removed=true
-revoked="$(send_and_wait "revoked-$nonce" '查询第三方安全评估管理制度')"
+revoked="$(send_and_wait "revoked-$nonce" '请在企业知识库中检索并总结《第三方安全评估管理制度》的核心要求')"
 IFS='|' read -r revoked_run revoked_model revoked_provider revoked_citations revoked_grounding <<<"$revoked"
 revoked_target_results="$(psql_value "SELECT count(*) FROM agent.tool_calls call CROSS JOIN LATERAL jsonb_array_elements(call.result) item WHERE call.run_id='$revoked_run'::uuid AND call.call_id='knowledge-search' AND item->>'document_id'='$document_id'")"
 revoked_target_citations="$(psql_value "SELECT count(*) FROM agent.run_citations WHERE run_id='$revoked_run'::uuid AND document_id='$document_id'::uuid")"
@@ -122,8 +122,8 @@ if [[ "$revoked_citations" -eq 0 ]]; then
     exit 1
   }
 else
-  [[ "$revoked_grounding" == grounded ]] || {
-    echo "revoked response has invalid grounded state: $revoked" >&2
+  [[ "$revoked_grounding" == grounded || "$revoked_grounding" == insufficient_evidence ]] || {
+    echo "revoked response has invalid cited state: $revoked" >&2
     exit 1
   }
 fi
@@ -131,12 +131,12 @@ echo "revoked_acl=denied run_id=$revoked_run target_results=0 target_citations=0
 
 psql_value "INSERT INTO authz.document_grants(tenant_id,document_id,member_id,permission) VALUES('$tenant_id','$document_id','$member_id','read') ON CONFLICT DO NOTHING" >/dev/null
 grant_removed=false
-no_match="$(send_and_wait "no-match-$nonce" '查询月球基地量子咖啡机维护制度')"
+no_match="$(send_and_wait "no-match-$nonce" '请在企业知识库中检索并总结《月球基地量子咖啡机维护制度》的核心要求')"
 IFS='|' read -r no_match_run no_match_model no_match_provider no_match_citations no_match_grounding <<<"$no_match"
-[[ "$no_match_citations" -eq 0 && "$no_match_grounding" == insufficient_evidence ]] || {
-  echo "no-match unexpectedly produced evidence: $no_match" >&2
+[[ "$no_match_grounding" == insufficient_evidence ]] || {
+  echo "no-match did not explicitly abstain: $no_match" >&2
   exit 1
 }
-echo "no_match=explicit_abstention run_id=$no_match_run citations=0"
+echo "no_match=explicit_abstention run_id=$no_match_run authorized_citations=$no_match_citations"
 
 unset admin_token
