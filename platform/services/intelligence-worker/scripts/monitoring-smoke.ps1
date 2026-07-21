@@ -14,13 +14,8 @@ if (Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyCon
     throw "Port $Port is already in use."
 }
 
-# The smoke never invokes model or embedding endpoints. These values only satisfy
-# fail-closed startup validation and are scoped to this child process.
-$env:INTELLIGENCE_DEEPSEEK_BASE_URL = "https://invalid.local"
-$env:INTELLIGENCE_DEEPSEEK_API_KEY = "metrics-smoke-not-a-credential"
-$env:INTELLIGENCE_DEEPSEEK_MODEL = "metrics-smoke"
-$env:INTELLIGENCE_DEEPSEEK_TIMEOUT_SECONDS = "1"
-$env:INTELLIGENCE_DEEPSEEK_MAX_TOKENS = "64"
+# The smoke still verifies the only configured generation route at startup.
+$env:INTELLIGENCE_HTTP_PORT = [string]$Port
 $env:INTELLIGENCE_EMBEDDING_BASE_URL = "https://invalid.local"
 $env:INTELLIGENCE_EMBEDDING_API_KEY = "metrics-smoke-not-a-credential"
 $env:INTELLIGENCE_EMBEDDING_MODEL = "metrics-smoke"
@@ -33,7 +28,7 @@ $stderr = Join-Path $env:TEMP "openim-intelligence-metrics-smoke.err.log"
 $process = $null
 try {
     $process = Start-Process -FilePath $python `
-        -ArgumentList @("-m", "uvicorn", "intelligence_worker.app:app", "--host", "127.0.0.1", "--port", $Port) `
+        -ArgumentList @("-m", "intelligence_worker.local_bootstrap") `
         -WorkingDirectory $workerRoot `
         -RedirectStandardOutput $stdout `
         -RedirectStandardError $stderr `

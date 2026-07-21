@@ -177,8 +177,8 @@ VALUES (
     md5('agent-definition:aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa')::uuid,
     1,
     1,
-    '{"runtime_kind":"knowledge_ticket_v1","instructions":"Answer only from authorized evidence and abstain when evidence is absent.","model_route":"deepseek-v4-pro","retrieval":{"purpose":"agent_answer","limit":5},"allowed_action_types":["create_ticket"],"max_model_attempts":3}'::jsonb,
-    'sha256:27dcf2cfab60cb915d584127e1524bcda821ce29c8383346adb8f8d2b31bb8d8'
+    '{"runtime_kind":"knowledge_ticket_v1","instructions":"Answer only from authorized evidence and abstain when evidence is absent.","model_route":"gpt-5.6-luna","retrieval":{"purpose":"agent_answer","limit":5},"allowed_action_types":["create_ticket"],"max_model_attempts":3}'::jsonb,
+    'sha256:3264d3cfe96c5d3aada40ccf8be8440b478d8c72c883fac7b78d09df9c1e8cc4'
 )
 ON CONFLICT (agent_id, version_number) DO NOTHING;
 

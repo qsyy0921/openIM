@@ -1,19 +1,25 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import os
 from urllib.parse import urlparse
 
 
+LOCAL_RESPONSES_BASE_URL = "http://127.0.0.1:8317/v1"
+GENERATION_MODEL = "gpt-5.6-luna"
+
+
 @dataclass(frozen=True)
 class Settings:
-    deepseek_base_url: str
-    deepseek_api_key: str
-    deepseek_model: str
-    deepseek_timeout_seconds: float
-    deepseek_max_tokens: int
+    model_base_url: str
+    model_api_key: str = field(repr=False)
+    model: str
+    model_timeout_seconds: float
+    model_max_output_tokens: int
+    model_max_retries: int = 2
+    model_retry_base_seconds: float = 0.25
     embedding_base_url: str = "https://embedding.invalid"
-    embedding_api_key: str = "test-only"
+    embedding_api_key: str = field(default="test-only", repr=False)
     embedding_model: str = "test-embedding"
     embedding_dimension: int = 8
     embedding_timeout_seconds: float = 1
@@ -21,16 +27,27 @@ class Settings:
 
     @classmethod
     def from_env(cls) -> "Settings":
-        base_url = _required("INTELLIGENCE_DEEPSEEK_BASE_URL").rstrip("/")
+        base_url = _required("INTELLIGENCE_MODEL_BASE_URL").rstrip("/")
         parsed = urlparse(base_url)
         if parsed.scheme not in {"http", "https"} or not parsed.netloc:
-            raise ValueError("INTELLIGENCE_DEEPSEEK_BASE_URL must be an HTTP(S) URL")
-        timeout = float(_required("INTELLIGENCE_DEEPSEEK_TIMEOUT_SECONDS"))
+            raise ValueError("INTELLIGENCE_MODEL_BASE_URL must be an HTTP(S) URL")
+        if base_url != LOCAL_RESPONSES_BASE_URL:
+            raise ValueError("INTELLIGENCE_MODEL_BASE_URL must use the fixed loopback Responses gateway")
+        model = _required("INTELLIGENCE_MODEL")
+        if model != GENERATION_MODEL:
+            raise ValueError("INTELLIGENCE_MODEL must use the fixed generation model")
+        timeout = float(_required("INTELLIGENCE_MODEL_TIMEOUT_SECONDS"))
         if timeout <= 0:
-            raise ValueError("INTELLIGENCE_DEEPSEEK_TIMEOUT_SECONDS must be positive")
-        max_tokens = int(_required("INTELLIGENCE_DEEPSEEK_MAX_TOKENS"))
+            raise ValueError("INTELLIGENCE_MODEL_TIMEOUT_SECONDS must be positive")
+        max_tokens = int(_required("INTELLIGENCE_MODEL_MAX_OUTPUT_TOKENS"))
         if max_tokens < 64 or max_tokens > 8192:
-            raise ValueError("INTELLIGENCE_DEEPSEEK_MAX_TOKENS must be between 64 and 8192")
+            raise ValueError("INTELLIGENCE_MODEL_MAX_OUTPUT_TOKENS must be between 64 and 8192")
+        max_retries = int(_required("INTELLIGENCE_MODEL_MAX_RETRIES"))
+        if max_retries < 0 or max_retries > 3:
+            raise ValueError("INTELLIGENCE_MODEL_MAX_RETRIES must be between 0 and 3")
+        retry_base = float(_required("INTELLIGENCE_MODEL_RETRY_BASE_SECONDS"))
+        if retry_base <= 0 or retry_base > 5:
+            raise ValueError("INTELLIGENCE_MODEL_RETRY_BASE_SECONDS must be in (0, 5]")
         embedding_base_url = _required("INTELLIGENCE_EMBEDDING_BASE_URL").rstrip("/")
         embedding_parsed = urlparse(embedding_base_url)
         if embedding_parsed.scheme not in {"http", "https"} or not embedding_parsed.netloc:
@@ -45,11 +62,13 @@ class Settings:
         if dense_min_similarity < -1 or dense_min_similarity > 1:
             raise ValueError("INTELLIGENCE_ROUTING_DENSE_MIN_SIMILARITY must be in [-1, 1]")
         return cls(
-            deepseek_base_url=base_url,
-            deepseek_api_key=_required("INTELLIGENCE_DEEPSEEK_API_KEY"),
-            deepseek_model=_required("INTELLIGENCE_DEEPSEEK_MODEL"),
-            deepseek_timeout_seconds=timeout,
-            deepseek_max_tokens=max_tokens,
+            model_base_url=base_url,
+            model_api_key=_required("INTELLIGENCE_MODEL_API_KEY"),
+            model=model,
+            model_timeout_seconds=timeout,
+            model_max_output_tokens=max_tokens,
+            model_max_retries=max_retries,
+            model_retry_base_seconds=retry_base,
             embedding_base_url=embedding_base_url,
             embedding_api_key=_required("INTELLIGENCE_EMBEDDING_API_KEY"),
             embedding_model=_required("INTELLIGENCE_EMBEDDING_MODEL"),

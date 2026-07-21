@@ -21,7 +21,7 @@ services=(
   ollama.service
   openim-platform-api.service
   openim-platform-ingress.service
-  openim-intelligence-worker.service
+  openim-intelligence-tunnel.service
   openim-agent-runtime.service
   openim-agent-delivery.service
   openim-action-executor.service

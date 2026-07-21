@@ -42,7 +42,7 @@ Activation affects only Runs inserted after its transaction commits. Existing qu
 
 ## Node2 Acceptance
 
-`ops/accept-node2-agent-catalog.sh` publishes the controlled v2 acceptance version if absent, activates it, sends and completes one real OpenIM/ACL-RAG/DeepSeek Run, rolls production back to v1, and completes a second real Run. It verifies the old Run still reports v2 and leaves v2 as inactive immutable release history. A failure after v2 activation triggers a best-effort automatic rollback to v1.
+`ops/accept-node2-agent-catalog.sh` captures the current production version as its baseline, publishes or reuses a checksum-matched acceptance version, activates it, sends and completes one real OpenIM/ACL-RAG generation Run, then rolls production back to the captured baseline and completes a second real Run. It verifies the first Run remains pinned to its immutable acceptance version. A failure after activation triggers a best-effort rollback to the captured baseline; the script never assumes version 1 or 2 is production.
 
 Before a production operation, retain a PostgreSQL backup and verify the exact release `SHA256SUMS`. Do not expose `PLATFORM_DATABASE_URL` to the browser or place it in shell history.
 

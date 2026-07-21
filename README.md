@@ -12,7 +12,7 @@ The first Web vertical slice is also verified: a TypeScript client completes ent
 
 Development proceeds under one root Codex Goal as bounded vertical slices. A slice stops when its acceptance checks pass; optional adjacent features are not added. Production code uses one intended implementation path and does not add silent fallback behavior.
 
-The single production model path uses DeepSeek Chat Completions with `deepseek-v4-pro`. Real local verification covers cited ACL-RAG answers and an approved `create_ticket` action; the test contract service remains isolated from production code.
+The single generation path uses `gpt-5.6-luna` through the Windows-loopback Responses API at `http://127.0.0.1:8317/v1`. The gateway is not exposed to the LAN; Node2 reaches the Windows Intelligence Worker through an authenticated loopback-only SSH tunnel. Model output remains a candidate and cannot bypass ACL retrieval, citation validation, approval, Tool policy, or the separate Action Executor.
 
 ## Source layout
 

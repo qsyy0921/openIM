@@ -208,7 +208,7 @@ LIMIT 1")"
   IFS='|' read -r update_id event_id outbox_state run_id run_state model provider_id \
     delivery_id delivery_state external_message_id citation_count <<<"$row"
   [[ "$outbox_state" == published && "$run_state" == succeeded && \
-     "$model" == deepseek-v4-pro && -n "$provider_id" && \
+     "$model" == gpt-5.6-luna && -n "$provider_id" && \
      "$delivery_state" == sent && -n "$external_message_id" && \
      "$citation_count" -ge "$minimum_citations" ]] || {
     echo "Telegram round trip did not meet the acceptance contract: $row" >&2

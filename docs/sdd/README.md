@@ -9,7 +9,7 @@
 | Akashic integration | [akashic-openim-integration.md](akashic-openim-integration.md) | Node2/OpenIM verified | provision a validated root-only Telegram credential and complete the isolated Telegram E2E |
 | Akashic Goal state | [goal-state.md](goal-state.md) | active checkpoint | heartbeat resumes the first non-verified slice without inferring success |
 | Agent Catalog | [agent-catalog.md](agent-catalog.md) | verified | preserve immutable versions, atomic Run pinning, host-only mutation, and fail-closed execution |
-| Intelligence worker | [intelligence-worker.md](intelligence-worker.md) | verified | preserve DeepSeek JSON/action protocol during future model changes |
+| Intelligence worker | [intelligence-worker.md](intelligence-worker.md) | local verified, Node2 deploy pending | preserve fixed Responses route, typed failure, candidate-only policy, and citation validation |
 | ACL retrieval | [acl-retrieval.md](acl-retrieval.md) | verified | group grants and vector search require separate measured slices |
 | Action Executor | [action-executor.md](action-executor.md) | verified | preserve single-action boundary; external adapters require a new slice |
 | Web client | [web-client.md](web-client.md) | verified | add conversations/messages only in a dedicated IM UI slice |

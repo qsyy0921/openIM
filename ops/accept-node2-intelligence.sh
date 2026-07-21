@@ -23,7 +23,7 @@ payload = {
     "agent_version_id": "node2-acceptance-version-1",
     "agent_spec_checksum": "sha256:" + "a" * 64,
     "instructions": "Answer only from the supplied authorized evidence and cite it.",
-    "model_route": "deepseek-v4-pro",
+    "model_route": "gpt-5.6-luna",
     "allowed_action_types": ["create_ticket"],
     "content": "根据证据说明本次迁移的验收范围。",
     "evidence": [
@@ -61,10 +61,10 @@ with open(sys.argv[2], encoding="utf-8") as stream:
 assert status == "200", {"status": status, "response": payload}
 assert payload.get("citation_ids") == ["C1"], payload
 assert "[C1]" in payload.get("text", ""), payload
-assert isinstance(payload.get("model"), str) and payload["model"], payload
+assert payload.get("model") == "gpt-5.6-luna", payload
 assert isinstance(payload.get("provider_response_id"), str) and payload["provider_response_id"], payload
 assert payload.get("action_intent") is None, payload
-print(f"deepseek_model={payload['model']}")
-print("deepseek_real_call=accepted")
+print(f"generation_model={payload['model']}")
+print("responses_real_call=accepted")
 print("citation_validation=accepted")
 PY

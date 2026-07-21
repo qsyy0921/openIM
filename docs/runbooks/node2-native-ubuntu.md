@@ -7,7 +7,7 @@ Status: executable deployment path for Ubuntu 26.04 on `qsyy0921@172.31.50.2` or
 - Runtime and data stay on the Ubuntu M.2 filesystem.
 - `/home/qsyy0921/MFL/releases/<version>` is immutable release content.
 - `/home/qsyy0921/MFL/deploy/node2-native` contains host-local Compose definitions and ignored environment files.
-- `/etc/openim-platform` contains root-owned service configuration and the DeepSeek systemd credential.
+- `/etc/openim-platform` contains root-owned service configuration and channel credentials. It contains no generation-model credential.
 - OpenIM remains the authoritative IM system. PostgreSQL stores platform identity, Agent, ACL, approval, and collaboration projections.
 - Missing secrets or dependencies fail closed; no alternate model provider or fake success path is enabled.
 
@@ -60,7 +60,7 @@ Copy `platform/deploy/local` into `$DEPLOY_ROOT/platform`. Generate `platform/.e
 
 Apply `node2-native-ubuntu.override.yaml` when starting PostgreSQL and Keycloak. Keycloak listens only on Node2 loopback under `/auth`; Nginx terminates TLS and publishes its canonical issuer. Apply `openim-native-ubuntu.override.yaml` to the pinned OpenIM Compose project to publish the stable aliases and host-only Kafka listener.
 
-Run migrations `0001` through `0028`, then apply `seed-node2-native-identity.sql` with the exact public issuer:
+Run migrations `0001` through `0029`, then apply `seed-node2-native-identity.sql` with the exact public issuer:
 
 ```bash
 docker exec -i openim-platform-local-postgres-1 \
@@ -140,16 +140,18 @@ sudo bash "$DEPLOY_ROOT/ops/configure-node2-dns.sh"
 
 Both scripts create a backup under `/home/qsyy0921/MFL/staging` and fail when the observed host state does not match the expected stale configuration.
 
-The installer creates hardened systemd units for Platform API, OpenIM ingress, Intelligence Worker, Agent Runtime, Action Executor, Telegram ingress, channel delivery, Memory extraction/projection, and proactive dispatch. It verifies that each running Go unit resolves to the selected immutable release directory.
+The installer creates hardened systemd units for Platform API, OpenIM ingress, the loopback-only Intelligence tunnel, Agent Runtime, Action Executor, Telegram ingress, channel delivery, Memory extraction/projection, and proactive dispatch. It verifies that each running Go unit resolves to the selected immutable release directory.
 
-Provision the DeepSeek key only through standard input into `/etc/openim-platform/credentials/deepseek-api-key`, owned by `root:root` with mode `0400`. Provision the Telegram Bot Token through standard input to `ops/install-node2-telegram-credential.sh`, which validates `getMe` before installing `/etc/openim-platform/credentials/telegram-bot-token` with the same ownership and mode. Do not place either credential in shell arguments, environment files, Compose YAML, release bundles, screenshots, or logs.
+Start the Windows Intelligence Worker with `uv run openim-intelligence-local`. It loads the CLIProxyAPI key directly from the Windows user configuration, verifies `gpt-5.6-luna`, and binds only `127.0.0.1:18082`. Node2's `openim-intelligence-tunnel.service` forwards Node2 loopback `18082` to that Worker and reverse-forwards Windows loopback `11434` to Node2 Ollama. The CLIProxyAPI port `8317` is never forwarded or exposed, and no generation credential is copied to Node2.
+
+Provision the Telegram Bot Token through standard input to `ops/install-node2-telegram-credential.sh`, which validates `getMe` before installing `/etc/openim-platform/credentials/telegram-bot-token` as `root:root` mode `0400`. Do not place it in shell arguments, environment files, Compose YAML, release bundles, screenshots, or logs.
 
 `openim-agent-delivery` always runs for OpenIM. Without a non-empty Telegram credential, its Telegram adapter is explicitly disabled and `openim-telegram-ingress` remains stopped; Telegram work fails closed and is never redirected to OpenIM. Installing a validated credential enables the Telegram adapter on the next service restart.
 
 ## Acceptance
 
 1. Check OpenIM Server and Chat health plus a real admin-token envelope.
-2. Check PostgreSQL, Keycloak, Nginx, Platform API, OpenIM/Telegram ingress, Intelligence Worker, Agent Runtime, channel Delivery, Memory workers, Proactive Runtime, and Action Executor.
+2. Check PostgreSQL, Keycloak, Nginx, Platform API, OpenIM/Telegram ingress, Intelligence tunnel and Windows Worker, Agent Runtime, channel Delivery, Memory workers, Proactive Runtime, and Action Executor.
 3. Complete a real OIDC PKCE login and OpenIM WebSocket connection.
 4. Send and receive real single/group messages and media.
 5. Run an authorized cited enterprise-knowledge query and a no-evidence query.

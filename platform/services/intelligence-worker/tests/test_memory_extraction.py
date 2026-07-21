@@ -2,23 +2,24 @@ from fastapi.testclient import TestClient
 import httpx
 
 from intelligence_worker.app import create_app
-from intelligence_worker.config import Settings
-from intelligence_worker.deepseek_client import DeepSeekClient
+from intelligence_worker.config import GENERATION_MODEL, LOCAL_RESPONSES_BASE_URL, Settings
+from intelligence_worker.responses_client import ResponsesClient
 
 
-def _client(content: str) -> DeepSeekClient:
+def _client(content: str) -> ResponsesClient:
     def handler(request: httpx.Request) -> httpx.Response:
-        assert request.url.path == "/chat/completions"
+        assert request.url.path == "/v1/responses"
         body = __import__("json").loads(request.content)
-        assert "API Key" in body["messages"][0]["content"]
+        assert "API Key" in body["instructions"]
         return httpx.Response(200, json={
             "id": "memory-response-1",
-            "model": "test-model",
-            "choices": [{"finish_reason": "stop", "message": {"content": content}}],
+            "model": GENERATION_MODEL,
+            "status": "completed",
+            "output": [{"type": "message", "content": [{"type": "output_text", "text": content}]}],
         })
 
-    return DeepSeekClient(
-        Settings("https://api.deepseek.test", "secret", "test-model", 1, 512),
+    return ResponsesClient(
+        Settings(LOCAL_RESPONSES_BASE_URL, "unit-test-secret", GENERATION_MODEL, 1, 512, model_max_retries=0),
         httpx.MockTransport(handler),
     )
 
@@ -44,4 +45,4 @@ def test_memory_extraction_rejects_sensitive_result() -> None:
             "assistant_response": "不能保存",
         })
     assert response.status_code == 502
-    assert response.json()["detail"] == "required memory extraction provider failed"
+    assert response.json()["detail"] == {"code": "model_output_rejected", "retryable": False}

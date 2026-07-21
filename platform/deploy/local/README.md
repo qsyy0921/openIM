@@ -100,7 +100,7 @@ The real smoke run returned `ready`, issued a non-empty User Token, and opened a
 
 The durable ingress smoke sent a real OpenIM text message, consumed its `toRedis` protobuf with an independent group, committed one ingress plus one Outbox row, recovered from a transient Kafka leader error, and published the same `event_id` on attempt 2. The payload passed `contracts/events/im.message.accepted.v1.schema.json`.
 
-The read-only Agent smoke now uses the real DeepSeek `deepseek-v4-pro` path. A real `@Agent` OpenIM message produced one fenced PostgreSQL Run, persisted authorized `C1` evidence and provider response ID, and received a real OpenIM reply `serverMsgID`; the tenant Bot reply re-entered ingress with the correct tenant and did not create another Run.
+The historical read-only Agent smoke used the then-current DeepSeek route. A real `@Agent` OpenIM message produced one fenced PostgreSQL Run, persisted authorized `C1` evidence and provider response ID, and received a real OpenIM reply `serverMsgID`; this evidence must be rerun after the current `gpt-5.6-luna` Responses migration before it is considered current model acceptance.
 
 The ACL-RAG smoke used the local versioned knowledge fixture and direct-member grant. The Runtime persisted exact `C1` document/version/chunk provenance before sending the cited reply. Integration tests proved cross-tenant, ungranted, `restricted`, and freshly revoked content returned zero chunks. A separate no-match message produced the explicit no-evidence response with zero citations and no model call.
 
@@ -108,4 +108,4 @@ For the approved-action smoke, create a dedicated login role outside migrations 
 
 The real smoke proposed one `create_ticket` Intent from an OpenIM message and confirmed zero tickets before approval. The requesting member approved the exact digest through the OIDC-protected API. The dedicated Executor created one ticket by stable idempotency key, read it back, and converged Execution, Intent, and Run to `succeeded`. Repeating approval returned the same Execution and left one approval and one ticket.
 
-The production model path has no alternate provider. Store `INTELLIGENCE_DEEPSEEK_API_KEY` only in ignored local configuration or a host secret mechanism; never place it in Compose YAML, source, logs, release bundles, or model context.
+The generation path has no alternate provider. Start the Windows Worker through `openim-intelligence-local`, which loads the CLIProxyAPI key directly from the user's local configuration into process memory. Never place that key in Compose YAML, `.env` samples, source, logs, release bundles, databases, or model context.

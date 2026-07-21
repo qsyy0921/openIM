@@ -21,14 +21,15 @@ from .models import (
     ToolPlanRequest,
     ToolPlanResponse,
 )
-from .deepseek_client import DeepSeekClient
+from .provider_errors import ModelProviderError
+from .responses_client import ResponsesClient
 from .routing import IntentRouter, OpenAIEmbeddingClient
 from .proactive import ProactiveRanker
 from .metrics import EMBEDDING_BATCH, metrics_response, observe_request
 
 
 def create_app(
-    client: DeepSeekClient | None = None,
+    client: ResponsesClient | None = None,
     router: IntentRouter | None = None,
     proactive_ranker: ProactiveRanker | None = None,
     embedding_provider: OpenAIEmbeddingClient | None = None,
@@ -39,7 +40,8 @@ def create_app(
         owned_embedding = None
         if client is None:
             settings = Settings.from_env()
-            app.state.candidate_client = DeepSeekClient(settings)
+            app.state.candidate_client = ResponsesClient(settings)
+            await app.state.candidate_client.verify_model()
             owned_embedding = OpenAIEmbeddingClient(settings)
             app.state.embedding_provider = owned_embedding
             app.state.intent_router = router or IntentRouter(
@@ -72,9 +74,11 @@ def create_app(
     async def candidates(body: CandidateRequest, request: Request) -> CandidateResponse:
         try:
             return await request.app.state.candidate_client.generate(body)
+        except ModelProviderError as exc:
+            raise _provider_http_exception("candidate generation", exc) from exc
         except (httpx.HTTPError, ValueError) as exc:
             logging.warning("candidate generation failed: %s", type(exc).__name__)
-            raise HTTPException(status_code=502, detail="required model provider failed") from exc
+            raise HTTPException(status_code=502, detail={"code": "model_output_rejected", "retryable": False}) from exc
 
     @app.post("/v1/routes", response_model=RouteResponse)
     async def routes(body: RouteRequest, request: Request) -> RouteResponse:
@@ -82,6 +86,8 @@ def create_app(
             raise HTTPException(status_code=503, detail="intent router is not configured")
         try:
             return await request.app.state.intent_router.route(body)
+        except ModelProviderError as exc:
+            raise _provider_http_exception("intent routing", exc) from exc
         except (httpx.HTTPError, ValueError) as exc:
             logging.warning("intent routing failed: %s", type(exc).__name__)
             raise HTTPException(status_code=502, detail="required routing dependency failed") from exc
@@ -90,9 +96,11 @@ def create_app(
     async def memory_extractions(body: MemoryExtractionRequest, request: Request) -> MemoryExtractionResponse:
         try:
             return await request.app.state.candidate_client.extract_memory(body)
+        except ModelProviderError as exc:
+            raise _provider_http_exception("memory extraction", exc) from exc
         except (httpx.HTTPError, ValueError) as exc:
             logging.warning("memory extraction failed: %s", type(exc).__name__)
-            raise HTTPException(status_code=502, detail="required memory extraction provider failed") from exc
+            raise HTTPException(status_code=502, detail={"code": "model_output_rejected", "retryable": False}) from exc
 
     @app.post("/v1/proactive-ranks", response_model=ProactiveRankResponse)
     async def proactive_ranks(body: ProactiveRankRequest, request: Request) -> ProactiveRankResponse:
@@ -108,9 +116,11 @@ def create_app(
     async def tool_plans(body: ToolPlanRequest, request: Request) -> ToolPlanResponse:
         try:
             return await request.app.state.candidate_client.plan_tool(body)
+        except ModelProviderError as exc:
+            raise _provider_http_exception("tool planning", exc) from exc
         except (httpx.HTTPError, ValueError) as exc:
             logging.warning("tool planning failed: %s", type(exc).__name__)
-            raise HTTPException(status_code=502, detail="required tool planning provider failed") from exc
+            raise HTTPException(status_code=502, detail={"code": "model_output_rejected", "retryable": False}) from exc
 
     @app.post("/v1/embeddings", response_model=EmbeddingResponse)
     async def embeddings(body: EmbeddingRequest, request: Request) -> EmbeddingResponse:
@@ -126,6 +136,14 @@ def create_app(
             raise HTTPException(status_code=502, detail="required embedding provider failed") from exc
 
     return app
+
+
+def _provider_http_exception(operation: str, exc: ModelProviderError) -> HTTPException:
+    logging.warning("%s failed: %s", operation, exc.code)
+    return HTTPException(
+        status_code=503 if exc.retryable else 502,
+        detail={"code": exc.code, "retryable": exc.retryable},
+    )
 
 
 app = create_app()

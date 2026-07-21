@@ -17,7 +17,7 @@ import (
 const (
 	AgentSpecSchemaV1      = 1
 	KnowledgeTicketRuntime = "knowledge_ticket_v1"
-	DeepSeekV4ProRoute     = "deepseek-v4-pro"
+	GenerationModelRoute   = "gpt-5.6-luna"
 	MentionAliasTrigger    = "mention_alias"
 	ProductionSlot         = "production"
 )
@@ -113,7 +113,7 @@ func validateAgentSpec(spec AgentSpec) error {
 	if spec.Instructions == "" || strings.TrimSpace(spec.Instructions) != spec.Instructions || len(spec.Instructions) > 4000 {
 		return fmt.Errorf("%w: instructions must contain 1 to 4000 trimmed bytes", ErrInvalidCatalog)
 	}
-	if spec.ModelRoute != DeepSeekV4ProRoute {
+	if spec.ModelRoute != GenerationModelRoute {
 		return fmt.Errorf("%w: unsupported model route %q", ErrInvalidCatalog, spec.ModelRoute)
 	}
 	if spec.Retrieval.Purpose != "agent_answer" || spec.Retrieval.Limit < 1 || spec.Retrieval.Limit > 8 {

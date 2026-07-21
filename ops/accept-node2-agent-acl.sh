@@ -99,9 +99,9 @@ nonce="$(date +%s%N)"
 valid="$(send_and_wait "valid-$nonce" '查询第三方安全评估管理制度')"
 IFS='|' read -r valid_run valid_model valid_provider valid_citations valid_grounding <<<"$valid"
 valid_target_citations="$(psql_value "SELECT count(*) FROM agent.run_citations WHERE run_id='$valid_run'::uuid AND document_id='$document_id'::uuid")"
-[[ "$valid_model" == deepseek-v4-pro && -n "$valid_provider" && "$valid_citations" -ge 1 && \
+[[ "$valid_model" == gpt-5.6-luna && -n "$valid_provider" && "$valid_citations" -ge 1 && \
    "$valid_grounding" == grounded && "$valid_target_citations" -ge 1 ]] || {
-  echo "authorized evidence was not processed by DeepSeek: $valid" >&2
+  echo "authorized evidence was not processed by the fixed generation model: $valid" >&2
   exit 1
 }
 echo "authorized_acl_rag=accepted run_id=$valid_run citations=$valid_citations"

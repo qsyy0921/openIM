@@ -167,7 +167,7 @@ func TestWorkerUsesPinnedCatalogPolicyForCandidatePhase(t *testing.T) {
 	version := CatalogVersion{
 		AgentID: "agent-1", VersionID: "version-2", VersionNumber: 2,
 		Spec: AgentSpec{
-			RuntimeKind: KnowledgeTicketRuntime, Instructions: "bounded", ModelRoute: DeepSeekV4ProRoute,
+			RuntimeKind: KnowledgeTicketRuntime, Instructions: "bounded", ModelRoute: GenerationModelRoute,
 			Retrieval: RetrievalSpec{Purpose: "agent_answer", Limit: 3}, MaxModelAttempts: 2,
 		},
 	}
@@ -276,7 +276,7 @@ func TestWorkerUsesModelAndMemoryForGeneralResponse(t *testing.T) {
 	run.RouteStatus = "no_tool"
 	run.RouteOperationID = ""
 	run.Prompt = "你好"
-	version := CatalogVersion{Spec: AgentSpec{ModelRoute: DeepSeekV4ProRoute, MaxModelAttempts: 2}}
+	version := CatalogVersion{Spec: AgentSpec{ModelRoute: GenerationModelRoute, MaxModelAttempts: 2}}
 	store := &runtimeStoreStub{run: run, version: version}
 	candidates := &candidateGeneratorStub{result: Candidate{Text: "你好", Model: "model", ProviderResponseID: "response", GroundingStatus: GroundingNotApplicable}}
 	memoryContext := &memoryContextStub{items: []MemoryFact{{ID: "memory-1", Category: "preference", Content: "concise"}}}

@@ -11,11 +11,13 @@ dependencies = [
   "httpx==0.28.1",
   "pydantic==2.12.5",
   "prometheus-client==0.25.0",
+  "PyYAML==6.0.3",
   "uvicorn==0.44.0",
 ]
 
 [project.scripts]
 openim-agent-routing-eval = "intelligence_worker.evaluation:main"
+openim-intelligence-local = "intelligence_worker.local_bootstrap:main"
 
 [project.optional-dependencies]
 test = ["pytest==9.0.2"]

@@ -1,9 +1,9 @@
 ---
 unit: akashic-openim-goal-state
-status: draft
-branch: codex/akashic-openim-integration
+status: implemented
+branch: codex/local-responses-model-current
 worktree: E:\development\OPENIM-akashic
-updated: 2026-07-20
+updated: 2026-07-21
 ---
 
 # Akashic integration Goal state
@@ -37,16 +37,17 @@ This unit records slice state, durable evidence, and the next idempotent action.
 | Slice | State | Durable evidence | Resume action |
 | --- | --- | --- | --- |
 | DDD and SDD boundary | verified | `akashic-openim-integration.md` | preserve bounded-context ownership |
-| Migrations 0009-0028 | node2_verified | Node2 reached `28|sql/0028_remote_a2a.sql`; fresh and restored-0021 upgrade chains also reached 0028 idempotently | preserve the 0022 compatibility fix and rerun the fresh-chain gate after migration edits |
+| Migrations 0009-0029 | local_verified_node2_pending | `0029_local_responses_model.sql` publishes and activates the fixed model route without mutating historical versions; Node2 remains at 0028 | run fresh/upgrade database gates, then apply 0029 once during the controlled Node2 release |
+| Fixed Responses generation | local_verified_remote_tunnel_verified | real `/models`, `/responses`, local Worker candidate, temporary Node2 candidate, and reverse-forwarded 2560-dimensional Node2 embedding passed; temporary tunnels cleaned | install the permanent loopback tunnel and repeat full OpenIM/Telegram E2E |
 | Routing 36/190 | local_verified | `platform/services/intelligence-worker/eval/routing-gate-report.json` | rerun deterministic evaluator in final gate |
 | Enterprise RAG | node2_verified | schema-v3 local report plus Node2 `2704/2704` current-chunk index and real authorized/revoked/no-match OpenIM Runs | preserve pinned embedding revision, strict Candidate schema, ACL-first retrieval, and no-fallback routing |
 | Group Memory review | local_verified | migration 0026, API, Web panel, tests | include in full Go/Web gates |
 | Catalog Web administration | local_verified | migration 0027, admin API/UI/tests | include in full Go/Web gates |
 | Remote A2A | local_verified | migration 0028, bounded client/store/API/UI/tests | include in full Go/Web gates; no broad federation claim |
 | Prometheus/Grafana | node2_verified | Node2 reported three healthy targets, six loaded rules, the `Prometheus` datasource, and the `openim-agent-platform` dashboard | preserve the Node2 host-network override and repeat after monitoring changes |
-| Full repository gates | local_verified | Go `./...`, Python 26, Web typecheck/94 tests/build, dataset and repository validators, formatting, diff, and credential-shape checks passed | preserve on subsequent changes |
-| Node2 runtime and OpenIM ingress | node2_verified | `akashic-node2-20260720-candidatefix1`; migration 0028, immutable binaries, OpenIM delivery, `2704/2704` embeddings, real DeepSeek/citations, ACL revocation, abstention, and observability accepted | preserve release hashes and repeat after runtime, retrieval, Candidate, or delivery changes |
-| Telegram channel E2E | node2_verified | A real bound Telegram update at source offset `96338388` produced one published Outbox event, one successful `deepseek-v4-pro` Run with five citations, and one sent Telegram delivery with a non-empty external message ID; idempotency was `1|1|1` and the temporary binding was cleaned to `0|0` | preserve explicit enterprise binding, fail-closed unknown identities, durable delivery, and the fixed text event-ID cardinality check |
+| Full repository gates | local_verified | Go vet/all-package tests, Python 33, Web typecheck/94 tests/build, repository validation, shell syntax, compileall, diff, and credential-shape scan pass | repeat after any further source change |
+| Node2 runtime and OpenIM ingress | stale_after_model_change | prior release `akashic-node2-20260720-candidatefix1` remains historical DeepSeek evidence only; temporary current-model tunnel candidate passed | deploy migration 0029 and permanent tunnel, then repeat OpenIM ACL-RAG and delivery acceptance |
+| Telegram channel E2E | stale_after_model_change | prior `deepseek-v4-pro` round trip remains historical channel evidence only | repeat an explicitly bound, cleaned `gpt-5.6-luna` Telegram round trip after deployment |
 
 ## Resume protocol
 
@@ -99,6 +100,7 @@ The Codex task may use the 15-minute `OpenIM Akashic Goal 心跳` to re-enter th
 
 ## Latest local evidence
 
+- The fixed generation migration passed real local model discovery and Responses calls, a real cited Worker candidate, a temporary Node2 candidate forward, and a bidirectional tunnel check that returned a 2560-dimensional Node2 Ollama embedding to the Windows Worker. Empty-database migration reached `0029`; a simulated Node2 upgrade preserved one historical DeepSeek version, activated one `gpt-5.6-luna` version, and wrote one deployment audit event. Go vet/all-package tests, Python `33/33`, Web typecheck/`94/94`/build, repository validation, shell syntax, Python compilation, diff checks, and credential-shape scan passed. Temporary tunnels, files, and PostgreSQL containers were removed.
 - Fresh empty PostgreSQL migration and self-contained dataset-import audit: `28|sql/0028_remote_a2a.sql|520 documents|3224 chunks|520 ACL grants`; the one-time container was removed after the check.
 - Routing regression: 36 operations, 190 cases, 190 passed, Recall@1 1.0.
 - Enterprise retrieval schema v3: 1120 cases, Recall@8 `0.928846`, MRR `0.594903`, retrieval Precision@8 `0.166947`, and provenance integrity `1.0`. Retrieval returned evidence for all 80 unanswerable questions; that zero-result metric is not generation abstention.

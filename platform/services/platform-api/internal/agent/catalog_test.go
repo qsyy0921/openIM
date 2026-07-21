@@ -8,8 +8,8 @@ import (
 	"github.com/qsyy0921/openim/platform/services/platform-api/internal/identity"
 )
 
-const seedAgentSpecJSON = `{"runtime_kind":"knowledge_ticket_v1","instructions":"Answer only from authorized evidence and abstain when evidence is absent.","model_route":"deepseek-v4-pro","retrieval":{"purpose":"agent_answer","limit":5},"allowed_action_types":["create_ticket"],"max_model_attempts":3}`
-const seedAgentSpecChecksum = "sha256:27dcf2cfab60cb915d584127e1524bcda821ce29c8383346adb8f8d2b31bb8d8"
+const seedAgentSpecJSON = `{"runtime_kind":"knowledge_ticket_v1","instructions":"Answer only from authorized evidence and abstain when evidence is absent.","model_route":"gpt-5.6-luna","retrieval":{"purpose":"agent_answer","limit":5},"allowed_action_types":["create_ticket"],"max_model_attempts":3}`
+const seedAgentSpecChecksum = "sha256:3264d3cfe96c5d3aada40ccf8be8440b478d8c72c883fac7b78d09df9c1e8cc4"
 
 func TestParseAgentSpecAcceptsSeedAndVerifiesChecksum(t *testing.T) {
 	spec, err := ParseAgentSpec(AgentSpecSchemaV1, []byte(seedAgentSpecJSON), seedAgentSpecChecksum)
@@ -70,7 +70,7 @@ func TestParseAgentSpecFailsClosed(t *testing.T) {
 		{name: "schema", raw: seedAgentSpecJSON, checksum: seedAgentSpecChecksum, schema: 2},
 		{name: "unknown field", raw: `{"runtime_kind":"knowledge_ticket_v1","unknown":true}`, checksum: seedAgentSpecChecksum, schema: 1},
 		{name: "route", raw: `{"runtime_kind":"knowledge_ticket_v1","instructions":"x","model_route":"other","retrieval":{"purpose":"agent_answer","limit":5},"allowed_action_types":[],"max_model_attempts":3}`, checksum: seedAgentSpecChecksum, schema: 1},
-		{name: "action", raw: `{"runtime_kind":"knowledge_ticket_v1","instructions":"x","model_route":"deepseek-v4-pro","retrieval":{"purpose":"agent_answer","limit":5},"allowed_action_types":["delete_user"],"max_model_attempts":3}`, checksum: seedAgentSpecChecksum, schema: 1},
+		{name: "action", raw: `{"runtime_kind":"knowledge_ticket_v1","instructions":"x","model_route":"gpt-5.6-luna","retrieval":{"purpose":"agent_answer","limit":5},"allowed_action_types":["delete_user"],"max_model_attempts":3}`, checksum: seedAgentSpecChecksum, schema: 1},
 		{name: "checksum", raw: seedAgentSpecJSON, checksum: "sha256:wrong", schema: 1},
 	}
 	for _, test := range tests {

@@ -58,7 +58,7 @@ Migrations `0001` through `0007` and the local identity/knowledge fixtures were 
 
 The clean release wheel is installed in `/home/ubuntu/MFL/venvs/intelligence-worker`. `openim-action-executor.service` runs as the dedicated PostgreSQL login `platform_action_executor`; the role is non-superuser, has no role/database creation, replication, or RLS bypass capability, and receives only the exact table and sequence grants listed above. Direct checks confirmed that ticket update/delete, member reads, and approval reads are denied. The worker and Agent services remain disabled until a credential is installed, so missing model configuration cannot degrade into a false-success path.
 
-DeepSeek uses a systemd credential file at `/etc/openim-platform/credentials/deepseek-api-key`, owned by `root:root` with mode `0400`. The service reads it through `LoadCredential`; it is absent from the unit command line and environment files. Put a newly created key on the `.1` clipboard and run `ops/provision-node2-deepseek-credential.ps1`; the script sends it over strict host-key SSH and standard input, clears the clipboard after success, and starts the worker and Agent only after the worker health check passes. Revoke the prior key only after the real model and end-to-end acceptance checks succeed.
+The current generation key stays inside the Windows CLIProxyAPI configuration and Worker process. Start the Worker with `openim-intelligence-local`; Node2 reaches only the Worker's loopback port through `openim-intelligence-tunnel.service`. Do not copy the generation key or expose CLIProxyAPI port `8317` to Node2, the LAN, or the Internet.
 
 Remaining migration work:
 
@@ -74,7 +74,7 @@ None for the bounded node2 migration slice. By explicit owner decision, the exis
 6. No ticket exists before exact-digest approval. Accepted on node2.
 7. Duplicate approval/execution produces one ticket and one business effect. Accepted on node2.
 8. Read-back mismatch never succeeds; UNKNOWN reconciles by the same idempotency key. Existing and absent outcomes both accepted on node2.
-9. A scoped DeepSeek credential completes a real `deepseek-v4-pro` JSON call and the full OpenIM/ACL-RAG path. Accepted on node2.
+9. The fixed `gpt-5.6-luna` Responses route completes a real cited call and the full OpenIM/ACL-RAG path through the loopback tunnel. Local and temporary-tunnel candidate checks pass; full Node2 OpenIM acceptance is pending the current release deployment.
 
 The current deployment scope is `.1` and `.2` only. Linux artifacts are still built and checksum-verified for portability, but no `.5` host deployment is required by this milestone.
 
