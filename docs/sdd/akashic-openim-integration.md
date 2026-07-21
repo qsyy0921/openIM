@@ -83,7 +83,7 @@ Non-goals:
 ## Contracts and dependencies
 
 - OpenIM message, conversation, group membership, and user-token contracts remain upstream contracts and are consumed through the existing SDK and server APIs.
-- PostgreSQL migrations `0009` through `0028` define the Agent channel, runtime, capability, Tool, Skill, MCP, Memory, proactive, approval-continuation, bounded delegation, administrative-role state, tenant-scoped runtime incident controls, knowledge embeddings, group-Memory review, catalog audit, and remote A2A state.
+- PostgreSQL migrations `0009` through `0029` define the Agent channel, runtime, capability, Tool, Skill, MCP, Memory, proactive, approval-continuation, bounded delegation, administrative-role state, tenant-scoped runtime incident controls, knowledge embeddings, group-Memory review, catalog audit, remote A2A state, and the immutable fixed Responses model route.
 - Intelligence requests and responses use strict typed JSON contracts; invalid model output fails the Run phase and is never interpreted as a successful answer or ToolCall.
 - OpenIM and Telegram delivery adapters return an external message identifier before an intent can enter `sent` state.
 - OpenIM delivery remains available when Telegram is explicitly disabled. The unified Delivery Worker always starts with the OpenIM adapter; the Telegram adapter is registered only when a validated systemd credential is present. A Telegram intent encountered while that adapter is disabled fails permanently on its own channel and is never rerouted to OpenIM.

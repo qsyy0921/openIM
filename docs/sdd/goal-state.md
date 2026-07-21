@@ -77,7 +77,7 @@ Progress is observable through this table, generated evaluation reports, test ou
 ## Acceptance criteria
 
 - Every local slice has current full-gate evidence.
-- A fresh database reaches migration `0028` exactly once.
+- A fresh database reaches migration `0029` exactly once.
 - Routing and RAG reports are regenerated with declared metric semantics.
 - Prometheus rules and Grafana provisioning are loaded and healthy.
 - Node2 migrations and OpenIM plus Telegram E2E are accepted only after real remote round trips.
