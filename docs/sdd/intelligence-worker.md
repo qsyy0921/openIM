@@ -97,7 +97,7 @@ Worker HTTP metrics expose bounded request counts, latency, and embedding batch 
 - Real local `/v1/responses`: exact model, `completed`, response ID present, and one non-empty output text.
 - Real local Worker candidate: exact model, grounded `C1`, matching `[C1]` text, provider response ID, and no action intent.
 - A temporary Node2 `127.0.0.1:28082` forward reached the Windows Worker and passed the real candidate/citation contract. The paired reverse loopback forward also let that Worker obtain a real 2560-dimensional `qwen3-embedding:4b` vector from Node2 Ollama. Temporary forwards and files were removed afterward.
-- Full Node2 OpenIM and Telegram round trips are not current evidence for this model route. They remain pending until migration `0029`, the permanent tunnel unit, and the new release are installed.
+- Node2 release `akashic-node2-20260721-responses3` passed migration `0029`, the permanent bidirectional loopback tunnel, authorized/revoked/no-match OpenIM acceptance, and a real Telegram round trip. The Telegram Run used exact model `gpt-5.6-luna`, persisted four citations, produced a sent delivery with a non-empty external message ID, satisfied `1|1|1` cardinality, and left no test binding.
 
 ## Legacy evidence
 
@@ -105,5 +105,4 @@ Earlier DeepSeek/OpenIM/Telegram Runs remain historical evidence for the surroun
 
 ## Open questions
 
-- The permanent Node2 tunnel and migration require a controlled sudo deployment window.
-- Full OpenIM and Telegram E2E must be repeated after that release; until then the unit remains implemented with remote deployment pending rather than fully verified.
+- No unresolved deployment question remains for the fixed Responses route. Production admission thresholds remain owned by the separate evaluation policy.
