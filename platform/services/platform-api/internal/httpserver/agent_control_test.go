@@ -68,7 +68,7 @@ func (*agentControlStub) ReviewGroupMemory(context.Context, string, string, int3
 
 func controlHandler(service AgentControlService) http.Handler {
 	return newHandler("test-version", stubSessionService{}, stubDeviceService{}, stubApprovalService{},
-		stubAgentWorkspaceService{}, stubAgentCatalogService{}, service)
+		stubAgentWorkspaceService{}, stubAgentCatalogService{}, service, nil)
 }
 
 func TestAgentMemoryUsesAuthenticatedDeviceContext(t *testing.T) {

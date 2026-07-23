@@ -61,13 +61,13 @@ join identity.identity_links l on l.tenant_id=d.tenant_id and l.member_id='$acto
 where d.tenant_id='$tenant_id' and d.slug='knowledge-agent'")"
 IFS='|' read -r agent_id baseline_version_id baseline_version_number revision sender baseline_model <<<"$catalog_row"
 [[ -n "$agent_id" && -n "$baseline_version_id" && "$baseline_version_number" =~ ^[1-9][0-9]*$ && \
-   -n "$revision" && -n "$sender" && "$baseline_model" == gpt-5.6-luna ]] || {
+   -n "$revision" && -n "$sender" && "$baseline_model" == gpt-5.6-terra ]] || {
   echo "seed Agent Catalog or sender identity is missing" >&2
   exit 1
 }
 
 cat >"$spec_file" <<'JSON'
-{"runtime_kind":"knowledge_ticket_v1","instructions":"Answer only from authorized evidence and identify this execution as catalog validation version two.","model_route":"gpt-5.6-luna","retrieval":{"purpose":"agent_answer","limit":5},"allowed_action_types":["create_ticket"],"max_model_attempts":3}
+{"runtime_kind":"knowledge_ticket_v1","instructions":"Answer only from authorized evidence and identify this execution as catalog validation version two.","model_route":"gpt-5.6-terra","retrieval":{"purpose":"agent_answer","limit":5},"allowed_action_types":["create_ticket"],"max_model_attempts":3}
 JSON
 expected_checksum="$(SPEC_FILE="$spec_file" python3 - <<'PY'
 import hashlib

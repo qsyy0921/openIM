@@ -207,6 +207,79 @@ paths:
         "401": { "$ref": "#/components/responses/ErrorResponse" }
         "403": { "$ref": "#/components/responses/ErrorResponse" }
         "502": { "$ref": "#/components/responses/ErrorResponse" }
+  /v1/agent/channels/telegram/link:
+    get:
+      operationId: getTelegramLinkStatus
+      security:
+        - oidcBearer: []
+      parameters:
+        - in: query
+          name: platform_id
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 11
+            not: { const: 10 }
+        - in: query
+          name: device_id
+          required: true
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 128
+      responses:
+        "200":
+          description: Member-owned Telegram binding status without raw Telegram identifiers.
+          headers:
+            Cache-Control:
+              schema: { type: string, const: no-store }
+          content:
+            application/json:
+              schema: { "$ref": "#/components/schemas/TelegramLinkStatus" }
+        "400": { "$ref": "#/components/responses/ErrorResponse" }
+        "401": { "$ref": "#/components/responses/ErrorResponse" }
+        "403": { "$ref": "#/components/responses/ErrorResponse" }
+        "503": { "$ref": "#/components/responses/ErrorResponse" }
+        "500": { "$ref": "#/components/responses/ErrorResponse" }
+  /v1/agent/channels/telegram/link-challenges:
+    post:
+      operationId: issueTelegramLinkChallenge
+      description: Creates a challenge with no request body; tenant and member identity come only from the authenticated device context.
+      security:
+        - oidcBearer: []
+      parameters:
+        - in: query
+          name: platform_id
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 11
+            not: { const: 10 }
+        - in: query
+          name: device_id
+          required: true
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 128
+      responses:
+        "201":
+          description: A new one-time Telegram link challenge. Plaintext is returned only in this response.
+          headers:
+            Cache-Control:
+              schema: { type: string, const: no-store }
+          content:
+            application/json:
+              schema: { "$ref": "#/components/schemas/TelegramLinkChallenge" }
+        "400": { "$ref": "#/components/responses/ErrorResponse" }
+        "401": { "$ref": "#/components/responses/ErrorResponse" }
+        "403": { "$ref": "#/components/responses/ErrorResponse" }
+        "409": { "$ref": "#/components/responses/ErrorResponse" }
+        "429": { "$ref": "#/components/responses/ErrorResponse" }
+        "503": { "$ref": "#/components/responses/ErrorResponse" }
+        "500": { "$ref": "#/components/responses/ErrorResponse" }
 components:
   securitySchemes:
     oidcBearer:
@@ -418,6 +491,37 @@ components:
         execution_id: { type: string }
         execution_state: { type: string, enum: [queued, running, unknown, succeeded, failed] }
         ticket_id: { type: string }
+    TelegramLinkStatus:
+      oneOf:
+        - type: object
+          additionalProperties: false
+          required: [state]
+          properties:
+            state: { type: string, const: unbound }
+        - type: object
+          additionalProperties: false
+          required: [state, expires_at]
+          properties:
+            state: { type: string, const: pending }
+            expires_at: { type: string, format: date-time }
+        - type: object
+          additionalProperties: false
+          required: [state]
+          properties:
+            state: { type: string, const: bound }
+    TelegramLinkChallenge:
+      type: object
+      additionalProperties: false
+      required: [state, code, command, expires_at]
+      properties:
+        state: { type: string, const: pending }
+        code:
+          type: string
+          pattern: "^(?:[A-Z2-7]{4}-){7}[A-Z2-7]{4}$"
+        command:
+          type: string
+          pattern: "^/link (?:[A-Z2-7]{4}-){7}[A-Z2-7]{4}$"
+        expires_at: { type: string, format: date-time }
     Error:
       type: object
       additionalProperties: false

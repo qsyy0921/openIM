@@ -100,7 +100,7 @@ The real smoke run returned `ready`, issued a non-empty User Token, and opened a
 
 The durable ingress smoke sent a real OpenIM text message, consumed its `toRedis` protobuf with an independent group, committed one ingress plus one Outbox row, recovered from a transient Kafka leader error, and published the same `event_id` on attempt 2. The payload passed `contracts/events/im.message.accepted.v1.schema.json`.
 
-The historical read-only Agent smoke used the then-current DeepSeek route. A real `@Agent` OpenIM message produced one fenced PostgreSQL Run, persisted authorized `C1` evidence and provider response ID, and received a real OpenIM reply `serverMsgID`; this evidence must be rerun after the current `gpt-5.6-luna` Responses migration before it is considered current model acceptance.
+The historical read-only Agent smoke used the then-current DeepSeek route. Current acceptance instead uses the fixed Terra/high Responses route: Node2 completed authorized/revoked/no-match OpenIM runs and one cited Telegram delivery while retaining candidate-only, ACL, citation, and no-fallback controls.
 
 The ACL-RAG smoke used the local versioned knowledge fixture and direct-member grant. The Runtime persisted exact `C1` document/version/chunk provenance before sending the cited reply. Integration tests proved cross-tenant, ungranted, `restricted`, and freshly revoked content returned zero chunks. A separate no-match message produced the explicit no-evidence response with zero citations and no model call.
 

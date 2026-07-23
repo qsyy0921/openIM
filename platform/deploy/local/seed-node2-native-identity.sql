@@ -177,8 +177,8 @@ VALUES (
     md5('agent-definition:aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa')::uuid,
     1,
     1,
-    '{"runtime_kind":"knowledge_ticket_v1","instructions":"Answer only from authorized evidence and abstain when evidence is absent.","model_route":"gpt-5.6-luna","retrieval":{"purpose":"agent_answer","limit":5},"allowed_action_types":["create_ticket"],"max_model_attempts":3}'::jsonb,
-    'sha256:3264d3cfe96c5d3aada40ccf8be8440b478d8c72c883fac7b78d09df9c1e8cc4'
+    '{"runtime_kind":"knowledge_ticket_v1","instructions":"Answer only from authorized evidence and abstain when evidence is absent.","model_route":"gpt-5.6-terra","retrieval":{"purpose":"agent_answer","limit":5},"allowed_action_types":["create_ticket"],"max_model_attempts":3}'::jsonb,
+    'sha256:471923cdf65b51bc84007b761fea1488990405a4f1a1a03fa62dced6afdd5cfe'
 )
 ON CONFLICT (agent_id, version_number) DO NOTHING;
 

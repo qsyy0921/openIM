@@ -6,7 +6,7 @@ from urllib.parse import urlparse
 
 
 LOCAL_RESPONSES_BASE_URL = "http://127.0.0.1:8317/v1"
-GENERATION_MODEL = "gpt-5.6-luna"
+GENERATION_MODEL = "gpt-5.6-terra"
 
 
 @dataclass(frozen=True)

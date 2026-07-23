@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-deploy_root="${1:-/home/ubuntu/MFL/deploy/node2-20260711}"
+deploy_root="${1:-/home/qsyy0921/MFL/deploy/node2-native}"
 openim_env="$deploy_root/openim/.env"
 postgres_container=openim-platform-local-postgres-1
 tenant_id=aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa
@@ -99,7 +99,7 @@ nonce="$(date +%s%N)"
 valid="$(send_and_wait "valid-$nonce" '请在企业知识库中检索并总结《第三方安全评估管理制度》的核心要求')"
 IFS='|' read -r valid_run valid_model valid_provider valid_citations valid_grounding <<<"$valid"
 valid_target_citations="$(psql_value "SELECT count(*) FROM agent.run_citations WHERE run_id='$valid_run'::uuid AND document_id='$document_id'::uuid")"
-[[ "$valid_model" == gpt-5.6-luna && -n "$valid_provider" && "$valid_citations" -ge 1 && \
+[[ "$valid_model" == gpt-5.6-terra && -n "$valid_provider" && "$valid_citations" -ge 1 && \
    "$valid_grounding" == grounded && "$valid_target_citations" -ge 1 ]] || {
   echo "authorized evidence was not processed by the fixed generation model: $valid" >&2
   exit 1

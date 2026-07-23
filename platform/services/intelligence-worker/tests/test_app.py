@@ -177,6 +177,24 @@ def test_insufficient_enterprise_evidence_can_abstain_without_fake_citation() ->
     assert response.json()["citation_ids"] == []
 
 
+def test_empty_authorized_corpus_can_abstain_without_fake_citation() -> None:
+    def handler(_: httpx.Request) -> httpx.Response:
+        return _response('{"text":"当前没有可访问的企业证据。","citation_ids":[],"grounding_status":"insufficient_evidence","action_intent":null}', "resp_empty")
+
+    client = ResponsesClient(_settings(), httpx.MockTransport(handler))
+    with TestClient(create_app(client)) as http:
+        response = http.post(
+            "/v1/candidates",
+            json={
+                "run_id": "run-empty", "tenant_id": "tenant-1", "conversation_id": "si_a_b", "sender_id": "user-1",
+                **CATALOG_FIELDS, "content": "查询企业制度", "evidence": [],
+            },
+        )
+    assert response.status_code == 200
+    assert response.json()["grounding_status"] == "insufficient_evidence"
+    assert response.json()["citation_ids"] == []
+
+
 def test_grounded_enterprise_answer_without_citation_fails_closed() -> None:
     def handler(_: httpx.Request) -> httpx.Response:
         return _response('{"text":"没有引用的断言","citation_ids":[],"grounding_status":"grounded","action_intent":null}', "resp_invalid_grounding")

@@ -114,7 +114,7 @@ try {
         )
         if ($Mode -eq "generation") {
             $arguments += @(
-                "-generation-model", "gpt-5.6-luna",
+                "-generation-model", "gpt-5.6-terra",
                 "-generation-seed", "enterprise-rag-generation-v1",
                 "-generation-answerable", $GenerationAnswerableCases,
                 "-generation-unanswerable", $GenerationUnanswerableCases

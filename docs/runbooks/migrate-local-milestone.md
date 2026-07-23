@@ -74,7 +74,7 @@ None for the bounded node2 migration slice. By explicit owner decision, the exis
 6. No ticket exists before exact-digest approval. Accepted on node2.
 7. Duplicate approval/execution produces one ticket and one business effect. Accepted on node2.
 8. Read-back mismatch never succeeds; UNKNOWN reconciles by the same idempotency key. Existing and absent outcomes both accepted on node2.
-9. The fixed `gpt-5.6-luna` Responses route completes a real cited call and the full OpenIM/ACL-RAG path through the loopback tunnel. Local and temporary-tunnel candidate checks pass; full Node2 OpenIM acceptance is pending the current release deployment.
+9. The fixed `gpt-5.6-terra` Responses route with high reasoning effort completes a real cited call and the full OpenIM/ACL-RAG path through the loopback tunnel. Node2 accepted the immutable Terra release, authorized/revoked/no-match OpenIM paths, and the cited Telegram delivery without changing model, provider, or endpoint.
 
 The current deployment scope is `.1` and `.2` only. Linux artifacts are still built and checksum-verified for portability, but no `.5` host deployment is required by this milestone.
 

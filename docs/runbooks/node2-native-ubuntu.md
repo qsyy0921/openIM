@@ -60,7 +60,7 @@ Copy `platform/deploy/local` into `$DEPLOY_ROOT/platform`. Generate `platform/.e
 
 Apply `node2-native-ubuntu.override.yaml` when starting PostgreSQL and Keycloak. Keycloak listens only on Node2 loopback under `/auth`; Nginx terminates TLS and publishes its canonical issuer. Apply `openim-native-ubuntu.override.yaml` to the pinned OpenIM Compose project to publish the stable aliases and host-only Kafka listener.
 
-Run migrations `0001` through `0029`, then apply `seed-node2-native-identity.sql` with the exact public issuer:
+Run migrations `0001` through `0031`, then apply `seed-node2-native-identity.sql` with the exact public issuer:
 
 ```bash
 docker exec -i openim-platform-local-postgres-1 \
@@ -142,7 +142,7 @@ Both scripts create a backup under `/home/qsyy0921/MFL/staging` and fail when th
 
 The installer creates hardened systemd units for Platform API, OpenIM ingress, the loopback-only Intelligence tunnel, Agent Runtime, Action Executor, Telegram ingress, channel delivery, Memory extraction/projection, and proactive dispatch. It verifies that each running Go unit resolves to the selected immutable release directory.
 
-Start the Windows Intelligence Worker with `uv run openim-intelligence-local`. It loads the CLIProxyAPI key directly from the Windows user configuration, verifies `gpt-5.6-luna`, and binds only `127.0.0.1:18082`. Node2's `openim-intelligence-tunnel.service` forwards Node2 loopback `18082` to that Worker and reverse-forwards dedicated Windows loopback `11435` to Node2 Ollama `11434`. A developer-local Ollama may keep Windows `11434`; the Worker does not use it as a production fallback. The CLIProxyAPI port `8317` is never forwarded or exposed, and no generation credential is copied to Node2.
+Start the Windows Intelligence Worker with `uv run openim-intelligence-local`. It loads the CLIProxyAPI key directly from the Windows user configuration, verifies `gpt-5.6-terra`, and binds only `127.0.0.1:18082`. Node2's `openim-intelligence-tunnel.service` forwards Node2 loopback `18082` to that Worker and reverse-forwards dedicated Windows loopback `11435` to Node2 Ollama `11434`. A developer-local Ollama may keep Windows `11434`; the Worker does not use it as a production fallback. The CLIProxyAPI port `8317` is never forwarded or exposed, and no generation credential is copied to Node2.
 
 Provision the Telegram Bot Token through standard input to `ops/install-node2-telegram-credential.sh`, which validates `getMe` before installing `/etc/openim-platform/credentials/telegram-bot-token` as `root:root` mode `0400`. Do not place it in shell arguments, environment files, Compose YAML, release bundles, screenshots, or logs.
 
@@ -156,9 +156,11 @@ Provision the Telegram Bot Token through standard input to `ops/install-node2-te
 4. Send and receive real single/group messages and media.
 5. Run an authorized cited enterprise-knowledge query and a no-evidence query.
 6. Approve one exact-digest action and verify one idempotent business effect.
+7. Issue a member-scoped Telegram challenge in the Web channel module, consume it in the real private Bot chat, and verify Web `connected` convergence.
+8. Send one cited Telegram knowledge query, verify ingress/Run/delivery `1|1|1`, then use `accept-node2-telegram.sh cleanup` to remove the exact principal/chat/challenge/audit fixture.
 
 For ACL revocation, assert the revoked document ID is absent from both the
 durable Tool result and `agent.run_citations`. Do not require the final answer
 to have zero citations when the member still has access to other relevant
 documents; citations to other authorized documents are not an ACL leak.
-7. Restart the host and repeat health plus one real Agent turn.
+9. Restart the host and repeat health plus one real Agent turn.

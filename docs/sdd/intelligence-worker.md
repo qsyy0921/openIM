@@ -1,6 +1,6 @@
 ---
 unit: intelligence-worker
-status: implemented
+status: verified
 depends_on:
   - adr-0003
 ---
@@ -19,7 +19,7 @@ The Worker owns bounded provider calls, strict structured-output parsing, typed 
 
 - Worker API: `POST /v1/candidates`, `/v1/routes`, `/v1/memory-extractions`, `/v1/tool-plans`, `/v1/embeddings`.
 - Generation provider: Windows-only `http://127.0.0.1:8317/v1`, `GET /v1/models`, and `POST /v1/responses`.
-- Generation model: exactly `gpt-5.6-luna` with `stream=false`, `store=false`, low reasoning effort, and strict JSON schemas.
+- Generation model: exactly `gpt-5.6-terra` with `reasoning={"effort":"high"}`, `stream=false`, `store=false`, and strict JSON schemas.
 - Embedding provider: loopback Ollama `POST /v1/embeddings`, currently `qwen3-embedding:4b` with 2560 dimensions.
 - Agent Runtime owns durable Runs, authoritative ACL retrieval, Catalog versions, citations, approval, Tool policy, and action execution.
 - The Worker is stateless and never owns tenant facts or business side effects.
@@ -34,15 +34,17 @@ The Worker owns bounded provider calls, strict structured-output parsing, typed 
 - Retries are limited to timeout, transport failure, `429`, and `408/500/502/503/504`; authentication, route, request, and protocol failures are not retried.
 - Provider error bodies, prompts, evidence, and credentials are not logged or returned.
 - Enterprise answers can only cite evidence supplied by the trusted Runtime. Declared citations must exactly match citations in the answer text.
+- A request for enterprise knowledge with an empty authorized evidence set may produce only an explicit `insufficient_evidence` candidate with no citations; `grounded` remains invalid and it cannot be recast as ordinary chat.
 - The model cannot create an action. The explicit `创建工单：<标题>` protocol is parsed deterministically outside the model and still requires downstream approval.
 - Memory output is candidate-only, excludes sensitive material, and remains subject to deterministic projection and review policy.
 - Tool planning can only fill the already selected operation schema; it cannot choose or execute a Tool.
 - Intent analysis receives explicit server-resolved identity, ACL, Tool-permission, and approval-policy context. Those authority-owned values cannot be requested from the user as missing business inputs.
+- For enterprise knowledge queries, a user-provided document title, keyword, or question is already the complete query; IntentView must select retrieval rather than request a duplicate document target.
 
 ## Runtime flow
 
 1. Agent Runtime resolves a pinned Agent version, applies tenant/member ACL, and sends bounded evidence and context.
-2. The Worker validates the logical route as `gpt-5.6-luna`.
+2. The Worker validates the logical route as `gpt-5.6-terra`.
 3. The Responses client sends fixed instructions, untrusted input as data, and a strict per-operation JSON schema.
 4. The client validates status, model, response ID, output cardinality, and JSON shape.
 5. Domain validation checks citations, grounding state, memory sensitivity, or Tool arguments.
@@ -85,23 +87,19 @@ Worker HTTP metrics expose bounded request counts, latency, and embedding batch 
 - `platform/services/intelligence-worker/src/intelligence_worker/`
 - `platform/services/intelligence-worker/tests/`
 - `platform/services/platform-api/internal/agent/`
-- `platform/services/platform-api/internal/migrations/sql/0029_local_responses_model.sql`
+- `platform/services/platform-api/internal/migrations/sql/0030_terra_responses_model.sql`
 - `ops/deploy-node2-agent-runtime.sh`
 - `ops/accept-node2-intelligence*.sh`
 
 ## Verification evidence
 
-- `uv run pytest -q`: 33 tests passed, including fixed route validation, Responses payload shape, model discovery, bounded retry, no retry on authentication failure, exact model/output parsing, citation validation, memory filtering, and Tool planning.
-- `go test ./internal/agent ./internal/migrations`: passed with the new Catalog route and migration embedded.
-- Real local `/v1/models`: `gpt-5.6-luna` present.
-- Real local `/v1/responses`: exact model, `completed`, response ID present, and one non-empty output text.
-- Real local Worker candidate: exact model, grounded `C1`, matching `[C1]` text, provider response ID, and no action intent.
-- A temporary Node2 `127.0.0.1:28082` forward reached the Windows Worker and passed the real candidate/citation contract. The paired reverse loopback forward also let that Worker obtain a real 2560-dimensional `qwen3-embedding:4b` vector from Node2 Ollama. Temporary forwards and files were removed afterward.
-- Node2 release `akashic-node2-20260721-responses3` passed migration `0029`, the permanent bidirectional loopback tunnel, authorized/revoked/no-match OpenIM acceptance, and a real Telegram round trip. The Telegram Run used exact model `gpt-5.6-luna`, persisted four citations, produced a sent delivery with a non-empty external message ID, satisfied `1|1|1` cardinality, and left no test binding.
+- `uv run pytest -q`: 37 tests passed, including fixed route validation, high-reasoning Responses payload shape, model discovery, bounded retry, no retry on authentication failure, exact model/output parsing, empty-authorized-corpus semantics, citation validation, memory filtering, and Tool planning.
+- `go test ./...` and `go vet ./...` passed with the Catalog route and migration embedded; Web typecheck, 94 tests, and the production build also passed.
+- Node2 immutable release `akashic-node2-20260723-oidc-renew1` reports migration `0031`; runtime, loopback Worker/embedding topology, and monitoring acceptance pass. An initial high-reasoning request received upstream `server_is_overloaded` (`502` at the gateway and retryable `503` at the Worker); after the bounded retry window, real Terra candidate and route calls plus OpenIM ACL-RAG authorization/revocation/no-match acceptance passed. A later self-service Telegram run produced four authorized citations and one sent delivery with `1|1|1` ingress/Run/delivery cardinality. The transient provider error remained observable and never selected a fallback.
 
 ## Legacy evidence
 
-Earlier DeepSeek/OpenIM/Telegram Runs remain historical evidence for the surrounding ACL, Run, citation, approval, and delivery architecture. They do not verify the current `gpt-5.6-luna` route.
+The earlier `0029` Luna release, its local probes, and its Node2 OpenIM/Telegram Runs remain historical evidence for the surrounding ACL, Run, citation, approval, and delivery architecture. They do not verify the current Terra/high route. Earlier DeepSeek evidence is historical for the same reason.
 
 ## Open questions
 

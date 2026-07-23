@@ -77,6 +77,58 @@ def test_retry_is_bounded_and_never_changes_route_or_model() -> None:
     assert sleeps == [0.001, 0.002]
 
 
+def test_responses_payload_uses_exact_terra_high_contract() -> None:
+    observed: dict[str, object] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        observed["path"] = request.url.path
+        observed["body"] = json.loads(request.content)
+        return httpx.Response(200, json=response_payload('{"value":"accepted"}'))
+
+    async def run() -> None:
+        client = ResponsesClient(settings(), httpx.MockTransport(handler))
+        try:
+            await client._responses_json(
+                "instructions",
+                {"message": "hello"},
+                "test",
+                {
+                    "type": "object",
+                    "properties": {"value": {"type": "string"}},
+                    "required": ["value"],
+                    "additionalProperties": False,
+                },
+                64,
+            )
+        finally:
+            await client.close()
+
+    asyncio.run(run())
+    assert observed["path"] == "/v1/responses"
+    assert observed["body"] == {
+        "model": GENERATION_MODEL,
+        "instructions": "instructions",
+        "input": '{"message": "hello"}',
+        "text": {
+            "format": {
+                "type": "json_schema",
+                "name": "test",
+                "schema": {
+                    "type": "object",
+                    "properties": {"value": {"type": "string"}},
+                    "required": ["value"],
+                    "additionalProperties": False,
+                },
+                "strict": True,
+            }
+        },
+        "reasoning": {"effort": "high"},
+        "max_output_tokens": 64,
+        "stream": False,
+        "store": False,
+    }
+
+
 def test_authentication_failure_is_not_retried() -> None:
     calls = 0
 
@@ -162,3 +214,4 @@ def test_intent_analysis_marks_authority_context_as_server_resolved() -> None:
         },
     }
     assert "知识库访问范围" in str(observed["instructions"])
+    assert "完整的检索 query" in str(observed["instructions"])

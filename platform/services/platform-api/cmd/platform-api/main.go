@@ -24,6 +24,7 @@ import (
 	"github.com/qsyy0921/openim/platform/services/platform-api/internal/proactive"
 	"github.com/qsyy0921/openim/platform/services/platform-api/internal/remotea2a"
 	"github.com/qsyy0921/openim/platform/services/platform-api/internal/runtimecontrol"
+	"github.com/qsyy0921/openim/platform/services/platform-api/internal/telegram"
 	"github.com/qsyy0921/openim/platform/services/platform-api/internal/toolruntime"
 )
 
@@ -80,6 +81,7 @@ func main() {
 		os.Exit(1)
 	}
 	admin.SetCatalogStore(admincontrol.NewCatalogStore(pool))
+	telegramLinks := telegram.NewLinkService(verifier, identityStore, telegram.NewStore(pool))
 	if len(cfg.A2AAllowedHosts) > 0 {
 		a2aClient, err := remotea2a.NewClient(remotea2a.Config{
 			AllowedHosts: cfg.A2AAllowedHosts, AllowedPrivateCIDRs: cfg.A2AAllowedPrivateCIDRs, Timeout: cfg.A2ATimeout,
@@ -90,7 +92,7 @@ func main() {
 		}
 		admin.SetRemoteA2AStore(remotea2a.NewStore(pool, a2aClient))
 	}
-	handler := httpserver.NewHandlerWithAgentControls(cfg.Version, sessions, devices, approvals, workspace, catalog, control, admin)
+	handler := httpserver.NewHandlerWithAgentControlsAndTelegramLinks(cfg.Version, sessions, devices, approvals, workspace, catalog, control, admin, telegramLinks)
 
 	listener, err := net.Listen("tcp", cfg.HTTPAddr)
 	if err != nil {

@@ -10,9 +10,11 @@ The local-first milestone is implemented and source/runtime verified. It include
 
 The first Web vertical slice is also verified: a TypeScript client completes enterprise Authorization Code with PKCE, exchanges an ID Token for a scoped OpenIM User Token, and establishes the official WASM SDK WebSocket connection without exposing tokens in the UI or localStorage.
 
+The Telegram identity-linking slice is verified end to end. An OIDC/device-authorized member can issue a digest-only one-time challenge in the Web channel module, consume it from a private Bot chat, observe `connected` in the Web client, and then use the existing governed Terra Agent pipeline. Node2 accepted the cited Telegram round trip with one ingress, one Run, one delivery, and deterministic fixture cleanup.
+
 Development proceeds under one root Codex Goal as bounded vertical slices. A slice stops when its acceptance checks pass; optional adjacent features are not added. Production code uses one intended implementation path and does not add silent fallback behavior.
 
-The single generation path uses `gpt-5.6-luna` through the Windows-loopback Responses API at `http://127.0.0.1:8317/v1`. The gateway is not exposed to the LAN; Node2 reaches the Windows Intelligence Worker through an authenticated loopback-only SSH tunnel. Model output remains a candidate and cannot bypass ACL retrieval, citation validation, approval, Tool policy, or the separate Action Executor.
+The single generation path uses `gpt-5.6-terra` with `reasoning.effort=high` through the Windows-loopback Responses API at `http://127.0.0.1:8317/v1`. The gateway is not exposed to the LAN; Node2 reaches the Windows Intelligence Worker through an authenticated loopback-only SSH tunnel. Model output remains a candidate and cannot bypass ACL retrieval, citation validation, approval, Tool policy, or the separate Action Executor.
 
 ## Source layout
 

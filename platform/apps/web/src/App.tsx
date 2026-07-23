@@ -1,4 +1,4 @@
-import { AlertTriangle, Bot, ContactRound, LogIn, LogOut, MessageCircle, MessageSquare, MonitorSmartphone, RefreshCw, Wifi } from "lucide-react";
+import { AlertTriangle, Bot, ContactRound, Link2, LogIn, LogOut, MessageCircle, MessageSquare, MonitorSmartphone, RefreshCw, Wifi } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { User, UserManager } from "oidc-client-ts";
 import { ApplicationHandleResult, SessionType } from "@openim/wasm-client-sdk";
@@ -37,15 +37,25 @@ import {
 import { AgentController, createOpenIMAgentTransport, initialAgentState, type AgentState } from "./agent";
 import { approveAgentIntent, getAgentCatalog, getAgentWorkspace } from "./agent-api";
 import { ChatWorkspace } from "./ChatWorkspace";
+import { ChannelWorkspace } from "./ChannelWorkspace";
 import { ConversationController, createOpenIMChatPort, initialChatState, type ChatState } from "./chat";
 import { ContactController, createOpenIMContactPort, initialContactState, type ContactState } from "./contact";
 import { ContactsWorkspace } from "./ContactsWorkspace";
 import { DeviceWorkspace } from "./DeviceWorkspace";
 import { DeviceController, initialDeviceState, type DeviceState } from "./device";
 import { getDevices, logoutPlatform } from "./device-api";
+import {
+  admitCallbackIdentity,
+  EnterpriseSessionController,
+  EnterpriseSessionError,
+  restoreEnterpriseIdentity,
+  type EnterpriseSessionFailure
+} from "./enterprise-session";
 import { createOpenIMMessageSearchPort, initialMessageSearchState, MessageSearchController, type MessageSearchState } from "./message-search";
 import { connectOpenIM, disconnectOpenIM, type ConnectionUpdate } from "./openim";
 import { createIMSession, type IMSession } from "./platform-api";
+import { getTelegramLinkStatus, issueTelegramLinkChallenge } from "./telegram-link-api";
+import { initialTelegramLinkState, TelegramLinkController, type TelegramLinkState } from "./telegram-link";
 import { WorkspaceShell, type WorkspaceModule } from "./WorkspaceShell";
 
 type Phase = "booting" | "signed-out" | "exchanging" | "connecting" | "connected" | "error";
@@ -59,6 +69,12 @@ function messageOf(error: unknown): string {
   return error instanceof Error ? error.message : "unexpected client failure";
 }
 
+function enterpriseSessionMessage(reason: EnterpriseSessionFailure): string {
+  if (reason === "identity-changed") return "企业身份发生变化，请重新登录";
+  if (reason === "session-clear-failed") return "企业会话失效且本地状态未能清除，请关闭此页面后重新登录";
+  return "企业登录已失效，请重新登录";
+}
+
 export function App({ config, userManager }: AppProps) {
   const [phase, setPhase] = useState<Phase>("booting");
   const [user, setUser] = useState<User | null>(null);
@@ -69,6 +85,7 @@ export function App({ config, userManager }: AppProps) {
   const [contactState, setContactState] = useState<ContactState>(initialContactState);
   const [messageSearchState, setMessageSearchState] = useState<MessageSearchState>(initialMessageSearchState);
   const [deviceState, setDeviceState] = useState<DeviceState>(initialDeviceState);
+  const [telegramLinkState, setTelegramLinkState] = useState<TelegramLinkState>(initialTelegramLinkState);
   const [agentState, setAgentState] = useState<AgentState>(initialAgentState);
   const [agentControlState, setAgentControlState] = useState<AgentControlState>(initialAgentControlState);
   const [activeModule, setActiveModule] = useState("messages");
@@ -82,27 +99,93 @@ export function App({ config, userManager }: AppProps) {
   const deviceControllerRef = useRef<DeviceController | null>(null);
   const unsubscribeDeviceRef = useRef<(() => void) | null>(null);
   const deviceStartedRef = useRef(false);
+  const telegramLinkControllerRef = useRef<TelegramLinkController | null>(null);
+  const unsubscribeTelegramLinkRef = useRef<(() => void) | null>(null);
+  const telegramLinkStartedRef = useRef(false);
   const agentControllerRef = useRef<AgentController | null>(null);
   const unsubscribeAgentRef = useRef<(() => void) | null>(null);
   const agentControlControllerRef = useRef<AgentControlController | null>(null);
   const unsubscribeAgentControlRef = useRef<(() => void) | null>(null);
   const agentStartedRef = useRef(false);
+  const enterpriseSessionRef = useRef<EnterpriseSessionController | null>(null);
+  const connectAttemptRef = useRef(0);
+  const openIMConnectedRef = useRef(false);
+
+  const currentIDToken = useCallback(() => {
+    const enterpriseSession = enterpriseSessionRef.current;
+    if (!enterpriseSession) throw new EnterpriseSessionError("identity-unloaded");
+    return enterpriseSession.idToken();
+  }, []);
+
+  const closeWorkspaceRuntime = useCallback(async (resetPresentation = true): Promise<string | null> => {
+    connectAttemptRef.current += 1;
+    detachRef.current?.();
+    detachRef.current = null;
+    chatControllerRef.current?.stop();
+    chatControllerRef.current = null;
+    unsubscribeChatRef.current?.();
+    unsubscribeChatRef.current = null;
+    contactControllerRef.current?.stop();
+    contactControllerRef.current = null;
+    unsubscribeContactRef.current?.();
+    unsubscribeContactRef.current = null;
+    messageSearchControllerRef.current?.close();
+    messageSearchControllerRef.current = null;
+    unsubscribeMessageSearchRef.current?.();
+    unsubscribeMessageSearchRef.current = null;
+    deviceControllerRef.current?.close();
+    deviceControllerRef.current = null;
+    unsubscribeDeviceRef.current?.();
+    unsubscribeDeviceRef.current = null;
+    deviceStartedRef.current = false;
+    telegramLinkControllerRef.current?.close();
+    telegramLinkControllerRef.current = null;
+    unsubscribeTelegramLinkRef.current?.();
+    unsubscribeTelegramLinkRef.current = null;
+    telegramLinkStartedRef.current = false;
+    agentControllerRef.current?.stop();
+    agentControllerRef.current = null;
+    unsubscribeAgentRef.current?.();
+    unsubscribeAgentRef.current = null;
+    agentControlControllerRef.current?.stop();
+    agentControlControllerRef.current = null;
+    unsubscribeAgentControlRef.current?.();
+    unsubscribeAgentControlRef.current = null;
+    agentStartedRef.current = false;
+    if (resetPresentation) {
+      setChatState(initialChatState);
+      setContactState(initialContactState);
+      setMessageSearchState(initialMessageSearchState);
+      setDeviceState(initialDeviceState);
+      setTelegramLinkState(initialTelegramLinkState);
+      setAgentState(initialAgentState);
+      setAgentControlState(initialAgentControlState);
+      setActiveModule("messages");
+      setSession(null);
+    }
+    if (!openIMConnectedRef.current) return null;
+    openIMConnectedRef.current = false;
+    try {
+      await disconnectOpenIM();
+      return null;
+    } catch {
+      return "OpenIM 会话未能确认断开";
+    }
+  }, []);
 
   const connect = useCallback(
-    async (identity: User) => {
-      if (!identity.id_token || identity.expired) {
-        await userManager.removeUser();
-        setPhase("signed-out");
-        return;
-      }
+    async () => {
+      const attempt = ++connectAttemptRef.current;
       setError(null);
       setPhase("exchanging");
       try {
-        const nextSession = await createIMSession(config.platformAPIBaseURL, identity.id_token, config.deviceID);
+        const nextSession = await createIMSession(config.platformAPIBaseURL, currentIDToken(), config.deviceID);
+        if (attempt !== connectAttemptRef.current) return;
         setSession(nextSession);
         setPhase("connecting");
         detachRef.current?.();
-        detachRef.current = await connectOpenIM(config, nextSession, (update: ConnectionUpdate) => {
+        const detach = await connectOpenIM(config, nextSession, (update: ConnectionUpdate) => {
+          if (attempt !== connectAttemptRef.current) return;
           setConnection(update);
           if (update.state === "connected") {
             const controller = chatControllerRef.current;
@@ -125,15 +208,11 @@ export function App({ config, userManager }: AppProps) {
             return;
           }
           if (update.state === "kicked" || update.state === "expired") {
-            chatControllerRef.current?.stop();
-            contactControllerRef.current?.stop();
-            messageSearchControllerRef.current?.close();
-            deviceControllerRef.current?.close();
-            agentControllerRef.current?.stop();
-            agentControlControllerRef.current?.stop();
-            setSession(null);
             setError(update.message ?? update.state);
             setPhase("error");
+            void closeWorkspaceRuntime().then((cleanupError) => {
+              if (cleanupError) setError(`${update.message ?? update.state}; ${cleanupError}`);
+            });
             return;
           }
           if (!chatControllerRef.current) {
@@ -141,6 +220,17 @@ export function App({ config, userManager }: AppProps) {
             setPhase("error");
           }
         });
+        if (attempt !== connectAttemptRef.current) {
+          detach();
+          try {
+            await disconnectOpenIM();
+          } catch {
+            // The terminal path has already closed the workspace.
+          }
+          return;
+        }
+        detachRef.current = detach;
+        openIMConnectedRef.current = true;
         chatControllerRef.current?.stop();
         unsubscribeChatRef.current?.();
         const controller = new ConversationController(createOpenIMChatPort());
@@ -161,50 +251,59 @@ export function App({ config, userManager }: AppProps) {
         deviceControllerRef.current?.close();
         unsubscribeDeviceRef.current?.();
         const deviceController = new DeviceController({
-          list: () => getDevices(config.platformAPIBaseURL, identity.id_token!, config.deviceID),
-          logout: (platformID) => logoutPlatform(config.platformAPIBaseURL, identity.id_token!, config.deviceID, platformID)
+          list: () => getDevices(config.platformAPIBaseURL, currentIDToken(), config.deviceID),
+          logout: (platformID) => logoutPlatform(config.platformAPIBaseURL, currentIDToken(), config.deviceID, platformID)
         });
         deviceControllerRef.current = deviceController;
         unsubscribeDeviceRef.current = deviceController.subscribe(setDeviceState);
         deviceStartedRef.current = false;
+        telegramLinkControllerRef.current?.close();
+        unsubscribeTelegramLinkRef.current?.();
+        const telegramLinkController = new TelegramLinkController({
+          status: () => getTelegramLinkStatus(config.platformAPIBaseURL, currentIDToken(), config.deviceID),
+          issue: () => issueTelegramLinkChallenge(config.platformAPIBaseURL, currentIDToken(), config.deviceID)
+        });
+        telegramLinkControllerRef.current = telegramLinkController;
+        unsubscribeTelegramLinkRef.current = telegramLinkController.subscribe(setTelegramLinkState);
+        telegramLinkStartedRef.current = false;
         agentControllerRef.current?.stop();
         unsubscribeAgentRef.current?.();
         const agentController = new AgentController({
-          catalog: () => getAgentCatalog(config.platformAPIBaseURL, identity.id_token!, config.deviceID),
-          workspace: () => getAgentWorkspace(config.platformAPIBaseURL, identity.id_token!, config.deviceID),
-          approve: (intentID, digest) => approveAgentIntent(config.platformAPIBaseURL, identity.id_token!, config.deviceID, intentID, digest)
+          catalog: () => getAgentCatalog(config.platformAPIBaseURL, currentIDToken(), config.deviceID),
+          workspace: () => getAgentWorkspace(config.platformAPIBaseURL, currentIDToken(), config.deviceID),
+          approve: (intentID, digest) => approveAgentIntent(config.platformAPIBaseURL, currentIDToken(), config.deviceID, intentID, digest)
         }, createOpenIMAgentTransport());
         agentControllerRef.current = agentController;
         unsubscribeAgentRef.current = agentController.subscribe(setAgentState);
         agentControlControllerRef.current?.stop();
         unsubscribeAgentControlRef.current?.();
         const agentControlController = new AgentControlController({
-          memory: () => getAgentMemory(config.platformAPIBaseURL, identity.id_token!, config.deviceID),
-          groupMemory: (conversationID) => getAgentGroupMemory(config.platformAPIBaseURL, identity.id_token!, config.deviceID, conversationID),
-          reviewGroupMemory: (conversationID, proposalID, decision) => reviewAgentGroupMemory(config.platformAPIBaseURL, identity.id_token!, config.deviceID, conversationID, proposalID, decision),
-          deleteMemory: (factID, key) => deleteAgentMemoryFact(config.platformAPIBaseURL, identity.id_token!, config.deviceID, factID, key),
-          feedbackMemory: (exposureID, signal) => feedbackAgentMemory(config.platformAPIBaseURL, identity.id_token!, config.deviceID, exposureID, signal),
-          proactive: () => getAgentProactive(config.platformAPIBaseURL, identity.id_token!, config.deviceID),
-          createSubscription: (input) => createAgentSubscription(config.platformAPIBaseURL, identity.id_token!, config.deviceID, input),
-          setSubscriptionEnabled: (subscriptionID, enabled) => setAgentSubscriptionEnabled(config.platformAPIBaseURL, identity.id_token!, config.deviceID, subscriptionID, enabled),
-          updatePreference: (preference) => updateAgentProactivePreference(config.platformAPIBaseURL, identity.id_token!, config.deviceID, preference),
-          acknowledge: (eventID, signal) => acknowledgeAgentEvent(config.platformAPIBaseURL, identity.id_token!, config.deviceID, eventID, signal),
-          toolApprovals: () => getAgentToolApprovals(config.platformAPIBaseURL, identity.id_token!, config.deviceID),
-          decideToolApproval: (approvalID, digest, decision) => decideAgentToolApproval(config.platformAPIBaseURL, identity.id_token!, config.deviceID, approvalID, digest, decision),
-          replay: (runID) => getAgentReplay(config.platformAPIBaseURL, identity.id_token!, config.deviceID, runID),
-          delegations: () => getAgentDelegations(config.platformAPIBaseURL, identity.id_token!, config.deviceID),
-          adminOperations: () => getAgentAdminSnapshot(config.platformAPIBaseURL, identity.id_token!, config.deviceID),
-          adminCatalog: () => getAgentAdminCatalog(config.platformAPIBaseURL, identity.id_token!, config.deviceID),
-          setRuntimeControl: (control, paused, reason) => setAgentRuntimeControl(config.platformAPIBaseURL, identity.id_token!, config.deviceID, control, paused, reason),
-          createAgent: (input) => createCatalogAgent(config.platformAPIBaseURL, identity.id_token!, config.deviceID, input),
-          publishSkill: (input) => publishCatalogSkill(config.platformAPIBaseURL, identity.id_token!, config.deviceID, input),
-          publishTool: (input) => publishCatalogTool(config.platformAPIBaseURL, identity.id_token!, config.deviceID, input),
-          publishCapabilitySnapshot: (tools) => publishCapabilitySnapshot(config.platformAPIBaseURL, identity.id_token!, config.deviceID, tools),
-          setMCPEnabled: (slug, enabled) => setCatalogMCPEnabled(config.platformAPIBaseURL, identity.id_token!, config.deviceID, slug, enabled),
-          setMemberRole: (memberID, role, enabled) => setCatalogMemberRole(config.platformAPIBaseURL, identity.id_token!, config.deviceID, memberID, role, enabled),
-          registerRemoteAgent: (input) => registerRemoteA2AAgent(config.platformAPIBaseURL, identity.id_token!, config.deviceID, input),
-          verifyRemoteAgent: (slug, expectedRevision) => verifyRemoteA2AAgent(config.platformAPIBaseURL, identity.id_token!, config.deviceID, slug, expectedRevision),
-          setRemoteAgentEnabled: (slug, enabled, expectedRevision) => setRemoteA2AAgentEnabled(config.platformAPIBaseURL, identity.id_token!, config.deviceID, slug, enabled, expectedRevision)
+          memory: () => getAgentMemory(config.platformAPIBaseURL, currentIDToken(), config.deviceID),
+          groupMemory: (conversationID) => getAgentGroupMemory(config.platformAPIBaseURL, currentIDToken(), config.deviceID, conversationID),
+          reviewGroupMemory: (conversationID, proposalID, decision) => reviewAgentGroupMemory(config.platformAPIBaseURL, currentIDToken(), config.deviceID, conversationID, proposalID, decision),
+          deleteMemory: (factID, key) => deleteAgentMemoryFact(config.platformAPIBaseURL, currentIDToken(), config.deviceID, factID, key),
+          feedbackMemory: (exposureID, signal) => feedbackAgentMemory(config.platformAPIBaseURL, currentIDToken(), config.deviceID, exposureID, signal),
+          proactive: () => getAgentProactive(config.platformAPIBaseURL, currentIDToken(), config.deviceID),
+          createSubscription: (input) => createAgentSubscription(config.platformAPIBaseURL, currentIDToken(), config.deviceID, input),
+          setSubscriptionEnabled: (subscriptionID, enabled) => setAgentSubscriptionEnabled(config.platformAPIBaseURL, currentIDToken(), config.deviceID, subscriptionID, enabled),
+          updatePreference: (preference) => updateAgentProactivePreference(config.platformAPIBaseURL, currentIDToken(), config.deviceID, preference),
+          acknowledge: (eventID, signal) => acknowledgeAgentEvent(config.platformAPIBaseURL, currentIDToken(), config.deviceID, eventID, signal),
+          toolApprovals: () => getAgentToolApprovals(config.platformAPIBaseURL, currentIDToken(), config.deviceID),
+          decideToolApproval: (approvalID, digest, decision) => decideAgentToolApproval(config.platformAPIBaseURL, currentIDToken(), config.deviceID, approvalID, digest, decision),
+          replay: (runID) => getAgentReplay(config.platformAPIBaseURL, currentIDToken(), config.deviceID, runID),
+          delegations: () => getAgentDelegations(config.platformAPIBaseURL, currentIDToken(), config.deviceID),
+          adminOperations: () => getAgentAdminSnapshot(config.platformAPIBaseURL, currentIDToken(), config.deviceID),
+          adminCatalog: () => getAgentAdminCatalog(config.platformAPIBaseURL, currentIDToken(), config.deviceID),
+          setRuntimeControl: (control, paused, reason) => setAgentRuntimeControl(config.platformAPIBaseURL, currentIDToken(), config.deviceID, control, paused, reason),
+          createAgent: (input) => createCatalogAgent(config.platformAPIBaseURL, currentIDToken(), config.deviceID, input),
+          publishSkill: (input) => publishCatalogSkill(config.platformAPIBaseURL, currentIDToken(), config.deviceID, input),
+          publishTool: (input) => publishCatalogTool(config.platformAPIBaseURL, currentIDToken(), config.deviceID, input),
+          publishCapabilitySnapshot: (tools) => publishCapabilitySnapshot(config.platformAPIBaseURL, currentIDToken(), config.deviceID, tools),
+          setMCPEnabled: (slug, enabled) => setCatalogMCPEnabled(config.platformAPIBaseURL, currentIDToken(), config.deviceID, slug, enabled),
+          setMemberRole: (memberID, role, enabled) => setCatalogMemberRole(config.platformAPIBaseURL, currentIDToken(), config.deviceID, memberID, role, enabled),
+          registerRemoteAgent: (input) => registerRemoteA2AAgent(config.platformAPIBaseURL, currentIDToken(), config.deviceID, input),
+          verifyRemoteAgent: (slug, expectedRevision) => verifyRemoteA2AAgent(config.platformAPIBaseURL, currentIDToken(), config.deviceID, slug, expectedRevision),
+          setRemoteAgentEnabled: (slug, enabled, expectedRevision) => setRemoteA2AAgentEnabled(config.platformAPIBaseURL, currentIDToken(), config.deviceID, slug, enabled, expectedRevision)
         });
         agentControlControllerRef.current = agentControlController;
         unsubscribeAgentControlRef.current = agentControlController.subscribe(setAgentControlState);
@@ -212,62 +311,73 @@ export function App({ config, userManager }: AppProps) {
         setConnection({ state: "connected" });
         setPhase("connected");
       } catch (cause) {
+        if (attempt !== connectAttemptRef.current) return;
         setError(messageOf(cause));
         setPhase("error");
       }
     },
-    [config, userManager]
+    [closeWorkspaceRuntime, config, currentIDToken]
   );
 
   useEffect(() => {
     let active = true;
+    let lifecycle: EnterpriseSessionController | null = null;
     const initialize = async () => {
       try {
         const callback = window.location.pathname === new URL(config.oidcRedirectURI).pathname;
-        const identity = callback ? await userManager.signinRedirectCallback() : await userManager.getUser();
+        let identity: User | null;
+        if (callback) {
+          const callbackIdentity = await userManager.signinRedirectCallback();
+          identity = await admitCallbackIdentity(userManager, callbackIdentity);
+        } else {
+          identity = await restoreEnterpriseIdentity(userManager);
+        }
         if (callback) {
           window.history.replaceState({}, document.title, "/");
         }
         if (!active) return;
-        setUser(identity);
-        if (!identity || identity.expired) {
+        if (!identity) {
+          setUser(null);
           setPhase("signed-out");
           return;
         }
-        await connect(identity);
+        lifecycle = new EnterpriseSessionController(userManager, identity, {
+          onUserChanged: (nextIdentity) => {
+            if (!active || enterpriseSessionRef.current !== lifecycle) return;
+            setUser(nextIdentity);
+          },
+          onTerminal: async (reason) => {
+            if (!active || enterpriseSessionRef.current !== lifecycle) return;
+            enterpriseSessionRef.current = null;
+            const cleanupError = await closeWorkspaceRuntime();
+            if (!active) return;
+            setUser(null);
+            setConnection({ state: "expired", message: "Enterprise identity unavailable" });
+            setError(cleanupError ? `${enterpriseSessionMessage(reason)}；${cleanupError}` : enterpriseSessionMessage(reason));
+            setPhase("signed-out");
+          }
+        });
+        enterpriseSessionRef.current = lifecycle;
+        lifecycle.start();
+        setUser(identity);
+        await connect();
       } catch (cause) {
         if (!active) return;
-        setError(messageOf(cause));
-        setPhase("error");
+        lifecycle?.close();
+        if (enterpriseSessionRef.current === lifecycle) enterpriseSessionRef.current = null;
+        setUser(null);
+        setError(cause instanceof EnterpriseSessionError ? enterpriseSessionMessage(cause.code) : "企业登录失败，请重新登录");
+        setPhase("signed-out");
       }
     };
     void initialize();
     return () => {
       active = false;
-      detachRef.current?.();
-      chatControllerRef.current?.stop();
-      unsubscribeChatRef.current?.();
-      contactControllerRef.current?.stop();
-      unsubscribeContactRef.current?.();
-      messageSearchControllerRef.current?.close();
-      unsubscribeMessageSearchRef.current?.();
-      deviceControllerRef.current?.close();
-      unsubscribeDeviceRef.current?.();
-      agentControllerRef.current?.stop();
-      unsubscribeAgentRef.current?.();
-      agentControlControllerRef.current?.stop();
-      unsubscribeAgentControlRef.current?.();
+      lifecycle?.close();
+      if (enterpriseSessionRef.current === lifecycle) enterpriseSessionRef.current = null;
+      void closeWorkspaceRuntime(false);
     };
-  }, [config.oidcRedirectURI, connect, userManager]);
-
-  useEffect(() => {
-    const expired = () => {
-      setError("Enterprise identity expired");
-      setPhase("error");
-    };
-    userManager.events.addAccessTokenExpired(expired);
-    return () => userManager.events.removeAccessTokenExpired(expired);
-  }, [userManager]);
+  }, [closeWorkspaceRuntime, config.oidcRedirectURI, connect, userManager]);
 
   const login = async () => {
     setError(null);
@@ -283,42 +393,11 @@ export function App({ config, userManager }: AppProps) {
     setPhase("booting");
     setError(null);
     try {
-      if (session) await disconnectOpenIM();
-      detachRef.current?.();
-      detachRef.current = null;
-      chatControllerRef.current?.stop();
-      chatControllerRef.current = null;
-      unsubscribeChatRef.current?.();
-      unsubscribeChatRef.current = null;
-      contactControllerRef.current?.stop();
-      contactControllerRef.current = null;
-      unsubscribeContactRef.current?.();
-      unsubscribeContactRef.current = null;
-      messageSearchControllerRef.current?.close();
-      messageSearchControllerRef.current = null;
-      unsubscribeMessageSearchRef.current?.();
-      unsubscribeMessageSearchRef.current = null;
-      deviceControllerRef.current?.close();
-      deviceControllerRef.current = null;
-      unsubscribeDeviceRef.current?.();
-      unsubscribeDeviceRef.current = null;
-      deviceStartedRef.current = false;
-      agentControllerRef.current?.stop();
-      agentControllerRef.current = null;
-      unsubscribeAgentRef.current?.();
-      unsubscribeAgentRef.current = null;
-      agentControlControllerRef.current?.stop();
-      agentControlControllerRef.current = null;
-      unsubscribeAgentControlRef.current?.();
-      unsubscribeAgentControlRef.current = null;
-      agentStartedRef.current = false;
-      setChatState(initialChatState);
-      setContactState(initialContactState);
-      setMessageSearchState(initialMessageSearchState);
-      setDeviceState(initialDeviceState);
-      setAgentState(initialAgentState);
-      setAgentControlState(initialAgentControlState);
-      setActiveModule("messages");
+      enterpriseSessionRef.current?.close();
+      enterpriseSessionRef.current = null;
+      const cleanupError = await closeWorkspaceRuntime();
+      if (cleanupError) throw new Error(cleanupError);
+      setUser(null);
       await userManager.signoutRedirect();
     } catch (cause) {
       setError(messageOf(cause));
@@ -327,11 +406,11 @@ export function App({ config, userManager }: AppProps) {
   };
 
   const retry = async () => {
-    if (!user) {
+    if (!user || !enterpriseSessionRef.current) {
       setPhase("signed-out");
       return;
     }
-    await connect(user);
+    await connect();
   };
 
   const displayName = useMemo(() => {
@@ -345,12 +424,13 @@ export function App({ config, userManager }: AppProps) {
       { id: "messages", label: "消息", icon: MessageCircle },
       { id: "contacts", label: "通讯录", icon: ContactRound, badge: pendingContacts },
       { id: "devices", label: "设备", icon: MonitorSmartphone },
+      { id: "channels", label: "渠道", icon: Link2 },
       { id: "agent", label: "智能助手", icon: Bot }
     ];
   }, [contactState.incomingApplications]);
 
   const selectModule = async (moduleID: string) => {
-    if (moduleID !== "messages" && moduleID !== "contacts" && moduleID !== "devices" && moduleID !== "agent") return;
+    if (moduleID !== "messages" && moduleID !== "contacts" && moduleID !== "devices" && moduleID !== "channels" && moduleID !== "agent") return;
     setActiveModule(moduleID);
     if (moduleID === "devices" && !deviceStartedRef.current) {
       deviceStartedRef.current = true;
@@ -358,6 +438,14 @@ export function App({ config, userManager }: AppProps) {
         await deviceControllerRef.current?.start();
       } catch {
         // DeviceState contains the explicit initialization error.
+      }
+    }
+    if (moduleID === "channels" && !telegramLinkStartedRef.current) {
+      telegramLinkStartedRef.current = true;
+      try {
+        await telegramLinkControllerRef.current?.start();
+      } catch {
+        // TelegramLinkState contains the explicit initialization error.
       }
     }
     if (moduleID === "agent" && !agentStartedRef.current) {
@@ -379,6 +467,7 @@ export function App({ config, userManager }: AppProps) {
             <p className="eyebrow">OPENIM WORKSPACE</p>
             <h1 id="sign-in-title">企业协作台</h1>
           </div>
+          {error && <p className="error-text" role="alert">{error}</p>}
           <button className="primary-button" onClick={() => void login()}><LogIn size={18} />企业登录</button>
         </section>
       </main>
@@ -395,7 +484,7 @@ export function App({ config, userManager }: AppProps) {
     );
   }
 
-  if (phase === "connected" && session && chatControllerRef.current && contactControllerRef.current && messageSearchControllerRef.current && deviceControllerRef.current) {
+  if (phase === "connected" && session && chatControllerRef.current && contactControllerRef.current && messageSearchControllerRef.current && deviceControllerRef.current && telegramLinkControllerRef.current) {
     const openContactChat = async (userID: string) => {
       await chatControllerRef.current!.openDirect(userID);
       setActiveModule("messages");
@@ -408,6 +497,8 @@ export function App({ config, userManager }: AppProps) {
           <ContactsWorkspace controller={contactControllerRef.current} state={contactState} onOpenChat={openContactChat} />
         ) : activeModule === "devices" ? (
           <DeviceWorkspace controller={deviceControllerRef.current} state={deviceState} />
+        ) : activeModule === "channels" ? (
+          <ChannelWorkspace controller={telegramLinkControllerRef.current} state={telegramLinkState} />
         ) : agentControllerRef.current && agentControlControllerRef.current ? (
           <AgentWorkspace controller={agentControllerRef.current} state={agentState} controlController={agentControlControllerRef.current} controlState={agentControlState} groups={chatState.conversations.filter((item) => item.conversationType === SessionType.Group && item.groupID).map((item) => ({ conversationID: item.conversationID, name: item.showName || item.groupID }))} />
         ) : null}

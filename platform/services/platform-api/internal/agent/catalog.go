@@ -17,7 +17,7 @@ import (
 const (
 	AgentSpecSchemaV1      = 1
 	KnowledgeTicketRuntime = "knowledge_ticket_v1"
-	GenerationModelRoute   = "gpt-5.6-luna"
+	GenerationModelRoute   = "gpt-5.6-terra"
 	MentionAliasTrigger    = "mention_alias"
 	ProductionSlot         = "production"
 )

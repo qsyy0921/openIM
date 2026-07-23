@@ -83,7 +83,7 @@ Non-goals:
 ## Contracts and dependencies
 
 - OpenIM message, conversation, group membership, and user-token contracts remain upstream contracts and are consumed through the existing SDK and server APIs.
-- PostgreSQL migrations `0009` through `0029` define the Agent channel, runtime, capability, Tool, Skill, MCP, Memory, proactive, approval-continuation, bounded delegation, administrative-role state, tenant-scoped runtime incident controls, knowledge embeddings, group-Memory review, catalog audit, remote A2A state, and the immutable fixed Responses model route.
+- PostgreSQL migrations `0009` through `0031` define the Agent channel, runtime, capability, Tool, Skill, MCP, Memory, proactive, approval-continuation, bounded delegation, administrative-role state, tenant-scoped runtime incident controls, knowledge embeddings, group-Memory review, catalog audit, remote A2A state, immutable fixed Responses model-route transitions, and member-issued Telegram link challenges.
 - Intelligence requests and responses use strict typed JSON contracts; invalid model output fails the Run phase and is never interpreted as a successful answer or ToolCall.
 - OpenIM and Telegram delivery adapters return an external message identifier before an intent can enter `sent` state.
 - OpenIM delivery remains available when Telegram is explicitly disabled. The unified Delivery Worker always starts with the OpenIM adapter; the Telegram adapter is registered only when a validated systemd credential is present. A Telegram intent encountered while that adapter is disabled fails permanently on its own channel and is never rerouted to OpenIM.
@@ -168,6 +168,7 @@ Each slice must update this document and its owning SDDs, pass targeted and affe
 The `codex/akashic-openim-integration` branch currently contains the following source-backed implementation. This list is implementation status, not a production-acceptance claim:
 
 - normalized OpenIM and Telegram ingress identities with explicit member bindings;
+- member-issued, digest-only Telegram link challenges with private-chat atomic consumption and a Web connection module;
 - durable OpenIM/Telegram delivery intents and channel-specific send adapters;
 - conversation lanes, execution contexts, bounded phase attempts, and lifecycle audit events;
 - immutable capability snapshots, tool descriptors, execution-plane policy, approvals, and tool-call ledger;
@@ -208,7 +209,9 @@ Implemented and locally verified in the current acceptance slice:
 - Node2 has executed migrations `0009` through `0028`, loaded the enterprise fixture, and indexed all 2,704 active current-version chunks with checksum-matched normalized 2560-dimensional `qwen3-embedding:4b` vectors from a loopback-only pinned Ollama runtime. Release `akashic-node2-20260720-candidatefix1` passed runtime, OpenIM ingress, real ACL-RAG, DeepSeek candidate, durable citation, OpenIM delivery, and observability acceptance. The accepted cross-language contract serializes every empty Candidate collection as `[]`; Python keeps `extra=forbid` and does not accept JSON `null` as a list fallback.
 - The same release passed a real Telegram round trip after an explicit enterprise member/chat binding: unbound bootstrap rejection, bound ingress, published Outbox event, one successful DeepSeek Run with five authorized citations, one sent delivery with an external Telegram message ID, `1|1|1` idempotency, visible client receipt, and cleanup of the temporary binding.
 
-Current model-route change: generation is fixed to `gpt-5.6-luna` through Windows-loopback `POST /v1/responses`. Release `akashic-node2-20260721-responses3` has applied migration `0029` and passed the permanent loopback SSH tunnel, real OpenIM ACL-RAG/citation/abstention/reply acceptance, and a cleaned Telegram round trip with four citations and `1|1|1` cardinality. Earlier DeepSeek Runs remain historical architecture evidence only and are not used to substantiate the current route.
+Current model-route transition: generation source is fixed to `gpt-5.6-terra` through Windows-loopback `POST /v1/responses` with `reasoning.effort=high`, `stream=false`, and no fallback. Migration `0030` preserves the immutable Luna version, creates an immutable Terra version, copies pinned Skills, audits activation, and changes only canonical Luna production deployments. Node2 release `akashic-node2-20260722-terra2` passed runtime, embedding-topology, and observability acceptance. A transient upstream `server_is_overloaded` response was exposed as `502`/`503`; a bounded retry then passed real Terra candidate, route, and OpenIM ACL-RAG authorization/revocation/no-match E2E. At that checkpoint, Telegram still awaited current-model channel acceptance. Release `responses3` and earlier DeepSeek Runs remain historical architecture evidence only and are not substituted for Terra acceptance.
+
+Migration `0031` and Node2 release `akashic-node2-20260723-telegram-link1` add the member-issued Telegram identity ceremony without changing that model route. A real OIDC Web member completed private-chat binding, the Web module converged to `connected`, and the resulting knowledge query produced one successful Terra Run with four authorized citations, one sent Telegram delivery, and `1|1|1` ingress/Run/delivery cardinality. The isolated principal/chat/challenge/audit fixture was removed after verification. This closes the current-model dual-channel acceptance; earlier DeepSeek and Luna evidence remains historical only.
 
 ## Goal recovery and heartbeat
 
@@ -267,6 +270,7 @@ The Web controller loads Memory and proactive state together, rejects overlappin
 
 ## Open questions
 
-- Telegram production identity provisioning UI is deferred; the first slice uses an explicit host-admin binding command.
+- Telegram unlinking, account recovery, reassignment, group binding, and multi-Bot management remain separate slices; v1 self-service private-chat linking is verified.
+- OIDC silent renewal is verified in its dedicated identity-session slice; it preserves server-side member/device checks and does not change Agent, Telegram, or OpenIM ownership.
 - Public Telegram webhook mode is deferred until the deployment has an approved public TLS endpoint.
 - Distributed scheduler partitioning is deferred until single-node correctness and workload measurements exist.
