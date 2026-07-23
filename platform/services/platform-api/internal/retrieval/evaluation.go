@@ -3,23 +3,30 @@ package retrieval
 import (
 	"bufio"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"os"
 )
 
 type QAEvidence struct {
-	ChunkID string `json:"chunk_id"`
+	ChunkID    string `json:"chunk_id"`
+	DocumentID string `json:"document_id"`
+	VersionID  string `json:"version_id"`
 }
 
 type QACase struct {
-	QAID          string       `json:"qa_id"`
-	Question      string       `json:"question"`
-	Answer        string       `json:"answer"`
-	Answerable    bool         `json:"answerable"`
-	RequiredFacts []string     `json:"required_facts"`
-	Evidence      []QAEvidence `json:"evidence"`
+	QAID               string       `json:"qa_id"`
+	Question           string       `json:"question"`
+	Answer             string       `json:"answer"`
+	Answerable         bool         `json:"answerable"`
+	RequiredFacts      []string     `json:"required_facts"`
+	Evidence           []QAEvidence `json:"evidence"`
+	DomainCode         string       `json:"domain_code"`
+	Type               string       `json:"type"`
+	NegativeVersionIDs []string     `json:"negative_version_ids"`
 }
 
 type EvaluationReport struct {
@@ -27,12 +34,21 @@ type EvaluationReport struct {
 	Cases                 int                 `json:"cases"`
 	AnswerableCases       int                 `json:"answerable_cases"`
 	UnanswerableCases     int                 `json:"unanswerable_cases"`
+	ACLDeniedCases        int                 `json:"acl_denied_cases"`
+	RecallAt5             float64             `json:"recall_at_5"`
+	RecallAt10            float64             `json:"recall_at_10"`
 	RecallAtK             float64             `json:"recall_at_k"`
 	MRR                   float64             `json:"mrr"`
+	NDCGAt10              float64             `json:"ndcg_at_10"`
+	PrecisionAt5          float64             `json:"precision_at_5"`
+	PrecisionAt10         float64             `json:"precision_at_10"`
 	RetrievalPrecisionAtK float64             `json:"retrieval_precision_at_k"`
 	UnanswerableEmptyRate float64             `json:"unanswerable_retrieval_empty_rate"`
+	ACLLeakageRate        float64             `json:"acl_leakage_rate"`
+	StaleVersionLeakage   float64             `json:"stale_version_leakage_rate"`
 	GenerationEvaluated   bool                `json:"generation_abstention_evaluated"`
 	ProvenanceIntegrity   float64             `json:"provenance_integrity"`
+	ChecksumIntegrity     float64             `json:"checksum_integrity"`
 	Failures              []EvaluationFailure `json:"failures"`
 }
 
@@ -77,11 +93,24 @@ func LoadQACases(path string) ([]QACase, error) {
 	return result, nil
 }
 
-func Evaluate(ctx context.Context, store *Store, cases []QACase, tenantID, memberID string, limit int) (EvaluationReport, error) {
-	if store == nil || tenantID == "" || memberID == "" || len(cases) == 0 {
+type EvaluationConfig struct {
+	TenantID       string
+	MemberID       string
+	DeniedMemberID string
+}
+
+func Evaluate(ctx context.Context, store *Store, cases []QACase, config EvaluationConfig) (EvaluationReport, error) {
+	if store == nil || config.TenantID == "" || config.MemberID == "" ||
+		config.DeniedMemberID == "" || config.MemberID == config.DeniedMemberID || len(cases) == 0 {
 		return EvaluationReport{}, errors.New("RAG evaluation dependencies are invalid")
 	}
-	report := EvaluationReport{SchemaVersion: 3, Cases: len(cases), Failures: make([]EvaluationFailure, 0)}
+	if err := store.validateEvaluationMembers(ctx, config); err != nil {
+		return EvaluationReport{}, err
+	}
+	report := EvaluationReport{
+		SchemaVersion: 4, Cases: len(cases), ACLDeniedCases: len(cases),
+		Failures: make([]EvaluationFailure, 0),
+	}
 	vectors := make([][]float32, len(cases))
 	for start := 0; start < len(cases); start += 128 {
 		end := start + 128
@@ -107,16 +136,66 @@ func Evaluate(ctx context.Context, store *Store, cases []QACase, tenantID, membe
 			vectors[start+index] = vector
 		}
 	}
-	var recalls, reciprocalRanks, correctCitations, citations, abstentions, integrity float64
+	var recall5, recall10, reciprocalRanks, ndcg10, precision5, precision10 float64
+	var abstentions, integrity, checksumIntegrity, rankedItems, aclLeaks, staleLeaks float64
+	var staleCases int
 	for caseIndex, item := range cases {
-		query := Query{TenantID: tenantID, MemberID: memberID, Purpose: "agent_answer", Text: item.Question, Limit: limit}
+		query := Query{
+			TenantID: config.TenantID, MemberID: config.MemberID,
+			Purpose: "agent_answer", Text: item.Question, Limit: maxEvidenceItems,
+		}
 		terms := lexicalTerms(item.Question)
 		if len(terms) == 0 {
 			return report, fmt.Errorf("QA case %s has no searchable terms", item.QAID)
 		}
-		results, err := store.searchWithVector(ctx, query, terms, vectors[caseIndex])
+		candidates, err := store.rerankedCandidatesWithVector(ctx, query, terms, vectors[caseIndex])
 		if err != nil {
 			return report, fmt.Errorf("evaluate QA case %s: %w", item.QAID, err)
+		}
+		results := selectEvaluationEvidence(candidates, 10)
+		deniedCandidates, err := store.authorizedCandidates(ctx, Query{
+			TenantID: config.TenantID, MemberID: config.DeniedMemberID,
+			Purpose: "agent_answer", Text: item.Question, Limit: maxEvidenceItems,
+		}, terms, vectors[caseIndex])
+		if err != nil {
+			return report, fmt.Errorf("evaluate denied QA case %s: %w", item.QAID, err)
+		}
+		if len(deniedCandidates) > 0 {
+			aclLeaks++
+			appendEvaluationFailure(&report, item.QAID, "unauthorized member retrieved evidence")
+		}
+		for index, evidence := range results {
+			rankedItems++
+			if evidence.CitationID == fmt.Sprintf("C%d", index+1) &&
+				evidence.DocumentID != "" && evidence.VersionID != "" &&
+				evidence.ChunkID != "" && evidence.Checksum != "" &&
+				evidence.IndexRevision == store.config.ModelRevision {
+				integrity++
+			}
+			checksum := sha256.Sum256([]byte(evidence.Content))
+			if evidence.Checksum == fmt.Sprintf("sha256:%x", checksum[:]) {
+				checksumIntegrity++
+			} else {
+				appendEvaluationFailure(&report, item.QAID, "retrieved evidence checksum mismatch")
+			}
+		}
+		if len(item.NegativeVersionIDs) > 0 {
+			staleCases++
+			negative := make(map[string]struct{}, len(item.NegativeVersionIDs))
+			for _, versionID := range item.NegativeVersionIDs {
+				negative[versionID] = struct{}{}
+			}
+			leaked := false
+			for _, evidence := range results {
+				if _, exists := negative[evidence.VersionID]; exists {
+					leaked = true
+					break
+				}
+			}
+			if leaked {
+				staleLeaks++
+				appendEvaluationFailure(&report, item.QAID, "superseded version retrieved")
+			}
 		}
 		if !item.Answerable {
 			report.UnanswerableCases++
@@ -130,36 +209,108 @@ func Evaluate(ctx context.Context, store *Store, cases []QACase, tenantID, membe
 		for _, evidence := range item.Evidence {
 			expected[evidence.ChunkID] = struct{}{}
 		}
-		firstRank := 0
-		for index, evidence := range results {
-			citations++
-			if evidence.CitationID == fmt.Sprintf("C%d", index+1) && evidence.DocumentID != "" && evidence.VersionID != "" && evidence.Checksum != "" {
-				integrity++
-			}
-			if _, ok := expected[evidence.ChunkID]; ok {
-				correctCitations++
-				if firstRank == 0 {
-					firstRank = index + 1
-				}
-			}
+		firstRank, relevant5, relevant10 := rankedRelevance(results, expected)
+		if firstRank > 0 && firstRank <= 5 {
+			recall5++
 		}
 		if firstRank > 0 {
-			recalls++
+			recall10++
 			reciprocalRanks += 1 / float64(firstRank)
-		} else if len(report.Failures) < 50 {
-			report.Failures = append(report.Failures, EvaluationFailure{QAID: item.QAID, Reason: "expected evidence not retrieved"})
+		} else {
+			appendEvaluationFailure(&report, item.QAID, "expected evidence not retrieved")
 		}
+		precision5 += float64(relevant5) / 5
+		precision10 += float64(relevant10) / 10
+		ndcg10 += normalizedDiscountedGain(results, expected)
 	}
 	if report.AnswerableCases > 0 {
-		report.RecallAtK = recalls / float64(report.AnswerableCases)
+		report.RecallAt5 = recall5 / float64(report.AnswerableCases)
+		report.RecallAt10 = recall10 / float64(report.AnswerableCases)
+		report.RecallAtK = report.RecallAt10
 		report.MRR = reciprocalRanks / float64(report.AnswerableCases)
+		report.NDCGAt10 = ndcg10 / float64(report.AnswerableCases)
+		report.PrecisionAt5 = precision5 / float64(report.AnswerableCases)
+		report.PrecisionAt10 = precision10 / float64(report.AnswerableCases)
+		report.RetrievalPrecisionAtK = report.PrecisionAt10
 	}
-	if citations > 0 {
-		report.RetrievalPrecisionAtK = correctCitations / citations
-		report.ProvenanceIntegrity = integrity / citations
+	if rankedItems > 0 {
+		report.ProvenanceIntegrity = integrity / rankedItems
+		report.ChecksumIntegrity = checksumIntegrity / rankedItems
 	}
 	if report.UnanswerableCases > 0 {
 		report.UnanswerableEmptyRate = abstentions / float64(report.UnanswerableCases)
 	}
+	report.ACLLeakageRate = aclLeaks / float64(report.ACLDeniedCases)
+	if staleCases > 0 {
+		report.StaleVersionLeakage = staleLeaks / float64(staleCases)
+	}
 	return report, nil
+}
+
+func (s *Store) validateEvaluationMembers(ctx context.Context, config EvaluationConfig) error {
+	var authorizedActive, deniedActive, authorizedGrants, deniedGrants int
+	if err := s.pool.QueryRow(ctx, `
+SELECT
+  count(*) FILTER (WHERE id = $2::uuid AND status = 'active')::integer,
+  count(*) FILTER (WHERE id = $3::uuid AND status = 'active')::integer,
+  (SELECT count(*)::integer FROM authz.document_grants
+    WHERE tenant_id = $1::uuid AND member_id = $2::uuid AND permission = 'read'),
+  (SELECT count(*)::integer FROM authz.document_grants
+    WHERE tenant_id = $1::uuid AND member_id = $3::uuid AND permission = 'read')
+FROM identity.members
+WHERE tenant_id = $1::uuid AND id IN ($2::uuid, $3::uuid)`,
+		config.TenantID, config.MemberID, config.DeniedMemberID,
+	).Scan(&authorizedActive, &deniedActive, &authorizedGrants, &deniedGrants); err != nil {
+		return fmt.Errorf("validate evaluation members: %w", err)
+	}
+	if authorizedActive != 1 || deniedActive != 1 || authorizedGrants < 1 || deniedGrants != 0 {
+		return errors.New("evaluation requires one active granted member and one active zero-grant member")
+	}
+	return nil
+}
+
+func rankedRelevance(results []Evidence, expected map[string]struct{}) (firstRank, relevant5, relevant10 int) {
+	for index, evidence := range results {
+		if _, ok := expected[evidence.ChunkID]; !ok {
+			continue
+		}
+		rank := index + 1
+		if firstRank == 0 {
+			firstRank = rank
+		}
+		if rank <= 5 {
+			relevant5++
+		}
+		if rank <= 10 {
+			relevant10++
+		}
+	}
+	return firstRank, relevant5, relevant10
+}
+
+func normalizedDiscountedGain(results []Evidence, expected map[string]struct{}) float64 {
+	if len(expected) == 0 {
+		return 0
+	}
+	var dcg float64
+	for index, evidence := range results {
+		if _, ok := expected[evidence.ChunkID]; ok {
+			dcg += 1 / math.Log2(float64(index+2))
+		}
+	}
+	idealCount := min(len(expected), 10)
+	var ideal float64
+	for index := 0; index < idealCount; index++ {
+		ideal += 1 / math.Log2(float64(index+2))
+	}
+	if ideal == 0 {
+		return 0
+	}
+	return dcg / ideal
+}
+
+func appendEvaluationFailure(report *EvaluationReport, qaID, reason string) {
+	if len(report.Failures) < 200 {
+		report.Failures = append(report.Failures, EvaluationFailure{QAID: qaID, Reason: reason})
+	}
 }

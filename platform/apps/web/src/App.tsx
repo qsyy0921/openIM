@@ -1,4 +1,4 @@
-import { AlertTriangle, Bot, ContactRound, Link2, LogIn, LogOut, MessageCircle, MessageSquare, MonitorSmartphone, RefreshCw, Wifi } from "lucide-react";
+import { AlertTriangle, BookOpen, Bot, ContactRound, Link2, LogIn, LogOut, MessageCircle, MessageSquare, MonitorSmartphone, RefreshCw, Wifi } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { User, UserManager } from "oidc-client-ts";
 import { ApplicationHandleResult, SessionType } from "@openim/wasm-client-sdk";
@@ -56,6 +56,16 @@ import { connectOpenIM, disconnectOpenIM, type ConnectionUpdate } from "./openim
 import { createIMSession, type IMSession } from "./platform-api";
 import { getTelegramLinkStatus, issueTelegramLinkChallenge } from "./telegram-link-api";
 import { initialTelegramLinkState, TelegramLinkController, type TelegramLinkState } from "./telegram-link";
+import {
+  getKnowledgeSnapshot,
+  listKnowledgeVersions,
+  publishKnowledgeVersion,
+  setKnowledgeGrant,
+  unpublishKnowledge,
+  uploadKnowledge
+} from "./knowledge-api";
+import { initialKnowledgeState, KnowledgeController, type KnowledgeState } from "./knowledge";
+import { KnowledgeWorkspace } from "./KnowledgeWorkspace";
 import { WorkspaceShell, type WorkspaceModule } from "./WorkspaceShell";
 
 type Phase = "booting" | "signed-out" | "exchanging" | "connecting" | "connected" | "error";
@@ -88,6 +98,7 @@ export function App({ config, userManager }: AppProps) {
   const [telegramLinkState, setTelegramLinkState] = useState<TelegramLinkState>(initialTelegramLinkState);
   const [agentState, setAgentState] = useState<AgentState>(initialAgentState);
   const [agentControlState, setAgentControlState] = useState<AgentControlState>(initialAgentControlState);
+  const [knowledgeState, setKnowledgeState] = useState<KnowledgeState>(initialKnowledgeState);
   const [activeModule, setActiveModule] = useState("messages");
   const detachRef = useRef<(() => void) | null>(null);
   const chatControllerRef = useRef<ConversationController | null>(null);
@@ -106,6 +117,8 @@ export function App({ config, userManager }: AppProps) {
   const unsubscribeAgentRef = useRef<(() => void) | null>(null);
   const agentControlControllerRef = useRef<AgentControlController | null>(null);
   const unsubscribeAgentControlRef = useRef<(() => void) | null>(null);
+  const knowledgeControllerRef = useRef<KnowledgeController | null>(null);
+  const unsubscribeKnowledgeRef = useRef<(() => void) | null>(null);
   const agentStartedRef = useRef(false);
   const enterpriseSessionRef = useRef<EnterpriseSessionController | null>(null);
   const connectAttemptRef = useRef(0);
@@ -151,6 +164,10 @@ export function App({ config, userManager }: AppProps) {
     agentControlControllerRef.current = null;
     unsubscribeAgentControlRef.current?.();
     unsubscribeAgentControlRef.current = null;
+    knowledgeControllerRef.current?.stop();
+    knowledgeControllerRef.current = null;
+    unsubscribeKnowledgeRef.current?.();
+    unsubscribeKnowledgeRef.current = null;
     agentStartedRef.current = false;
     if (resetPresentation) {
       setChatState(initialChatState);
@@ -160,6 +177,7 @@ export function App({ config, userManager }: AppProps) {
       setTelegramLinkState(initialTelegramLinkState);
       setAgentState(initialAgentState);
       setAgentControlState(initialAgentControlState);
+      setKnowledgeState(initialKnowledgeState);
       setActiveModule("messages");
       setSession(null);
     }
@@ -307,6 +325,19 @@ export function App({ config, userManager }: AppProps) {
         });
         agentControlControllerRef.current = agentControlController;
         unsubscribeAgentControlRef.current = agentControlController.subscribe(setAgentControlState);
+        knowledgeControllerRef.current?.stop();
+        unsubscribeKnowledgeRef.current?.();
+        const knowledgeController = new KnowledgeController({
+          snapshot: (documentID) => getKnowledgeSnapshot(config.platformAPIBaseURL, currentIDToken(), config.deviceID, documentID),
+          versions: (documentID) => listKnowledgeVersions(config.platformAPIBaseURL, currentIDToken(), config.deviceID, documentID),
+          upload: (input) => uploadKnowledge(config.platformAPIBaseURL, currentIDToken(), config.deviceID, input),
+          publish: (documentID, versionID) => publishKnowledgeVersion(config.platformAPIBaseURL, currentIDToken(), config.deviceID, documentID, versionID),
+          unpublish: (documentID) => unpublishKnowledge(config.platformAPIBaseURL, currentIDToken(), config.deviceID, documentID),
+          setGrant: (documentID, memberID, enabled) => setKnowledgeGrant(config.platformAPIBaseURL, currentIDToken(), config.deviceID, documentID, memberID, enabled)
+        });
+        knowledgeControllerRef.current = knowledgeController;
+        unsubscribeKnowledgeRef.current = knowledgeController.subscribe(setKnowledgeState);
+        void knowledgeController.start();
         agentStartedRef.current = false;
         setConnection({ state: "connected" });
         setPhase("connected");
@@ -420,17 +451,28 @@ export function App({ config, userManager }: AppProps) {
 
   const workspaceModules = useMemo<WorkspaceModule[]>(() => {
     const pendingContacts = contactState.incomingApplications.filter((application) => application.handleResult === ApplicationHandleResult.Unprocessed).length;
-    return [
+    const modules: WorkspaceModule[] = [
       { id: "messages", label: "消息", icon: MessageCircle },
       { id: "contacts", label: "通讯录", icon: ContactRound, badge: pendingContacts },
       { id: "devices", label: "设备", icon: MonitorSmartphone },
       { id: "channels", label: "渠道", icon: Link2 },
       { id: "agent", label: "智能助手", icon: Bot }
     ];
-  }, [contactState.incomingApplications]);
+    if (knowledgeState.visibility === "visible") {
+      modules.splice(4, 0, { id: "knowledge", label: "知识库", icon: BookOpen });
+    }
+    return modules;
+  }, [contactState.incomingApplications, knowledgeState.visibility]);
+
+  useEffect(() => {
+    if (activeModule === "knowledge" && knowledgeState.visibility !== "visible") {
+      setActiveModule("messages");
+    }
+  }, [activeModule, knowledgeState.visibility]);
 
   const selectModule = async (moduleID: string) => {
-    if (moduleID !== "messages" && moduleID !== "contacts" && moduleID !== "devices" && moduleID !== "channels" && moduleID !== "agent") return;
+    if (moduleID !== "messages" && moduleID !== "contacts" && moduleID !== "devices" && moduleID !== "channels" && moduleID !== "knowledge" && moduleID !== "agent") return;
+    if (moduleID === "knowledge" && knowledgeState.visibility !== "visible") return;
     setActiveModule(moduleID);
     if (moduleID === "devices" && !deviceStartedRef.current) {
       deviceStartedRef.current = true;
@@ -499,6 +541,25 @@ export function App({ config, userManager }: AppProps) {
           <DeviceWorkspace controller={deviceControllerRef.current} state={deviceState} />
         ) : activeModule === "channels" ? (
           <ChannelWorkspace controller={telegramLinkControllerRef.current} state={telegramLinkState} />
+        ) : activeModule === "knowledge" && knowledgeControllerRef.current ? (
+          <KnowledgeWorkspace
+            controller={knowledgeControllerRef.current}
+            state={knowledgeState}
+            onTestQuestion={async (question) => {
+              if (!agentStartedRef.current) {
+                agentStartedRef.current = true;
+                try {
+                  await Promise.all([agentControllerRef.current?.start(), agentControlControllerRef.current?.start()]);
+                } catch (error) {
+                  agentStartedRef.current = false;
+                  throw error;
+                }
+              }
+              if (!agentControllerRef.current) throw new Error("智能助手尚未就绪");
+              await agentControllerRef.current.sendPrompt(question);
+              setActiveModule("agent");
+            }}
+          />
         ) : agentControllerRef.current && agentControlControllerRef.current ? (
           <AgentWorkspace controller={agentControllerRef.current} state={agentState} controlController={agentControlControllerRef.current} controlState={agentControlState} groups={chatState.conversations.filter((item) => item.conversationType === SessionType.Group && item.groupID).map((item) => ({ conversationID: item.conversationID, name: item.showName || item.groupID }))} />
         ) : null}

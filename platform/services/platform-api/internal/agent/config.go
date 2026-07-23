@@ -26,8 +26,12 @@ type Config struct {
 	MCPReconcileInterval                       time.Duration
 	MaxAttempts                                int
 	IntelligenceURL                            string
+	RetrievalIntelligenceURL                   string
 	RetrievalModelRevision                     string
+	RetrievalRerankerModel                     string
+	RetrievalRerankerRevision                  string
 	RetrievalDimension, RetrievalMaxCandidates int
+	RetrievalHNSWEFSearch                      int
 	RetrievalDenseMinSimilarity                float64
 	A2AAllowedHosts, A2AAllowedPrivateCIDRs    []string
 	A2ATimeout                                 time.Duration
@@ -81,6 +85,15 @@ func LoadConfig() (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	retrievalIntelligence, err := httpURL("PLATFORM_RETRIEVAL_INTELLIGENCE_URL")
+	if err != nil {
+		return Config{}, err
+	}
+	intelligence = strings.TrimRight(intelligence, "/")
+	retrievalIntelligence = strings.TrimRight(retrievalIntelligence, "/")
+	if intelligence == retrievalIntelligence {
+		return Config{}, errors.New("generation and retrieval intelligence URLs must be separate")
+	}
 	openIMAPIURL, err := httpURL("PLATFORM_OPENIM_API_URL")
 	if err != nil {
 		return Config{}, err
@@ -113,6 +126,18 @@ func LoadConfig() (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	retrievalRerankerModel, err := env("PLATFORM_RETRIEVAL_RERANKER_MODEL")
+	if err != nil {
+		return Config{}, err
+	}
+	retrievalRerankerRevision, err := env("PLATFORM_RETRIEVAL_RERANKER_REVISION")
+	if err != nil {
+		return Config{}, err
+	}
+	retrievalHNSWEFSearch, err := intEnv("PLATFORM_RETRIEVAL_HNSW_EF_SEARCH", 32, 1000)
+	if err != nil {
+		return Config{}, err
+	}
 	retrievalDenseMinimum, err := floatEnv("PLATFORM_RETRIEVAL_DENSE_MIN_SIMILARITY", -1, 1)
 	if err != nil {
 		return Config{}, err
@@ -131,12 +156,16 @@ func LoadConfig() (Config, error) {
 	}
 	return Config{DatabaseURL: database, Brokers: brokers, EventTopic: topic, ConsumerGroup: group, TLS: tlsConfig,
 		DependencyTimeout: dependency, Poll: poll, Lease: lease, MaxAttempts: maxAttempts,
-		IntelligenceURL: strings.TrimRight(intelligence, "/"), ToolApprovalTTL: toolApprovalTTL,
-		MCPReconcileInterval: mcpReconcile, OpenIMAPIURL: strings.TrimRight(openIMAPIURL, "/"),
+		IntelligenceURL:          intelligence,
+		RetrievalIntelligenceURL: retrievalIntelligence,
+		ToolApprovalTTL:          toolApprovalTTL,
+		MCPReconcileInterval:     mcpReconcile, OpenIMAPIURL: strings.TrimRight(openIMAPIURL, "/"),
 		OpenIMSecret: openIMSecret, OpenIMAdminUserID: openIMAdminUserID,
 		RetrievalModelRevision: retrievalModel, RetrievalDimension: retrievalDimension,
-		RetrievalMaxCandidates: retrievalCandidates, RetrievalDenseMinSimilarity: retrievalDenseMinimum,
-		A2AAllowedHosts: a2aHosts, A2AAllowedPrivateCIDRs: csvEnv("PLATFORM_A2A_ALLOWED_PRIVATE_CIDRS"), A2ATimeout: a2aTimeout}, nil
+		RetrievalRerankerModel: retrievalRerankerModel, RetrievalRerankerRevision: retrievalRerankerRevision,
+		RetrievalMaxCandidates: retrievalCandidates, RetrievalHNSWEFSearch: retrievalHNSWEFSearch,
+		RetrievalDenseMinSimilarity: retrievalDenseMinimum,
+		A2AAllowedHosts:             a2aHosts, A2AAllowedPrivateCIDRs: csvEnv("PLATFORM_A2A_ALLOWED_PRIVATE_CIDRS"), A2ATimeout: a2aTimeout}, nil
 }
 
 func (c Config) SaramaConfig() *sarama.Config {

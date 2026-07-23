@@ -7,7 +7,13 @@ from pathlib import Path
 import uvicorn
 import yaml
 
-from .config import GENERATION_MODEL, LOCAL_RESPONSES_BASE_URL, Settings
+from .config import (
+    GENERATION_MODEL,
+    LOCAL_RESPONSES_BASE_URL,
+    RERANKER_MODEL,
+    RERANKER_REVISION,
+    Settings,
+)
 from .responses_client import ResponsesClient
 
 LOCAL_EMBEDDING_FORWARD_BASE_URL = "http://127.0.0.1:11435/v1"
@@ -51,6 +57,18 @@ def main() -> None:
     os.environ.setdefault("INTELLIGENCE_EMBEDDING_DIMENSION", "2560")
     os.environ.setdefault("INTELLIGENCE_EMBEDDING_TIMEOUT_SECONDS", "180")
     os.environ.setdefault("INTELLIGENCE_ROUTING_DENSE_MIN_SIMILARITY", "0.2")
+    model_root = Path(
+        os.environ.get("OPENIM_MODEL_ROOT", str(Path.home() / ".cache" / "openim" / "models"))
+    ).expanduser()
+    os.environ.setdefault("INTELLIGENCE_RERANKER_MODEL", RERANKER_MODEL)
+    os.environ.setdefault("INTELLIGENCE_RERANKER_REVISION", RERANKER_REVISION)
+    os.environ.setdefault(
+        "INTELLIGENCE_RERANKER_PATH",
+        str(model_root / f"bge-reranker-v2-m3-{RERANKER_REVISION[:12]}"),
+    )
+    os.environ.setdefault("INTELLIGENCE_RERANKER_DEVICE", "cpu")
+    os.environ.setdefault("INTELLIGENCE_RERANKER_MAX_LENGTH", "512")
+    os.environ.setdefault("INTELLIGENCE_RERANKER_BATCH_SIZE", "8")
     settings = Settings.from_env()
     asyncio.run(_verify(settings))
     uvicorn.run(

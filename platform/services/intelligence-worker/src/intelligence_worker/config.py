@@ -6,7 +6,12 @@ from urllib.parse import urlparse
 
 
 LOCAL_RESPONSES_BASE_URL = "http://127.0.0.1:8317/v1"
+LOCAL_OLLAMA_EMBEDDING_BASE_URL = "http://127.0.0.1:11434/v1"
 GENERATION_MODEL = "gpt-5.6-terra"
+EMBEDDING_MODEL = "qwen3-embedding:4b"
+EMBEDDING_DIMENSION = 2560
+RERANKER_MODEL = "BAAI/bge-reranker-v2-m3"
+RERANKER_REVISION = "953dc6f6f85a1b2dbfca4c34a2796e7dde08d41e"
 
 
 @dataclass(frozen=True)
@@ -24,6 +29,12 @@ class Settings:
     embedding_dimension: int = 8
     embedding_timeout_seconds: float = 1
     routing_dense_min_similarity: float = 0.2
+    reranker_model: str = RERANKER_MODEL
+    reranker_revision: str = RERANKER_REVISION
+    reranker_path: str = ""
+    reranker_device: str = "cpu"
+    reranker_max_length: int = 512
+    reranker_batch_size: int = 8
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -61,6 +72,21 @@ class Settings:
         dense_min_similarity = float(_required("INTELLIGENCE_ROUTING_DENSE_MIN_SIMILARITY"))
         if dense_min_similarity < -1 or dense_min_similarity > 1:
             raise ValueError("INTELLIGENCE_ROUTING_DENSE_MIN_SIMILARITY must be in [-1, 1]")
+        reranker_model = _required("INTELLIGENCE_RERANKER_MODEL")
+        if reranker_model != RERANKER_MODEL:
+            raise ValueError("INTELLIGENCE_RERANKER_MODEL must use the fixed reranker model")
+        reranker_revision = _required("INTELLIGENCE_RERANKER_REVISION")
+        if reranker_revision != RERANKER_REVISION:
+            raise ValueError("INTELLIGENCE_RERANKER_REVISION must use the fixed reranker revision")
+        reranker_device = _required("INTELLIGENCE_RERANKER_DEVICE")
+        if reranker_device != "cpu":
+            raise ValueError("INTELLIGENCE_RERANKER_DEVICE must be cpu")
+        reranker_max_length = int(_required("INTELLIGENCE_RERANKER_MAX_LENGTH"))
+        if reranker_max_length != 512:
+            raise ValueError("INTELLIGENCE_RERANKER_MAX_LENGTH must be 512")
+        reranker_batch_size = int(_required("INTELLIGENCE_RERANKER_BATCH_SIZE"))
+        if reranker_batch_size < 1 or reranker_batch_size > 16:
+            raise ValueError("INTELLIGENCE_RERANKER_BATCH_SIZE must be between 1 and 16")
         return cls(
             model_base_url=base_url,
             model_api_key=_required("INTELLIGENCE_MODEL_API_KEY"),
@@ -75,6 +101,73 @@ class Settings:
             embedding_dimension=embedding_dimension,
             embedding_timeout_seconds=embedding_timeout,
             routing_dense_min_similarity=dense_min_similarity,
+            reranker_model=reranker_model,
+            reranker_revision=reranker_revision,
+            reranker_path=_required("INTELLIGENCE_RERANKER_PATH"),
+            reranker_device=reranker_device,
+            reranker_max_length=reranker_max_length,
+            reranker_batch_size=reranker_batch_size,
+        )
+
+
+@dataclass(frozen=True)
+class RetrievalSettings:
+    embedding_base_url: str
+    embedding_model: str
+    embedding_dimension: int
+    embedding_timeout_seconds: float
+    embedding_api_key: str = field(default="ollama-loopback", repr=False)
+    reranker_model: str = RERANKER_MODEL
+    reranker_revision: str = RERANKER_REVISION
+    reranker_path: str = ""
+    reranker_device: str = "cpu"
+    reranker_max_length: int = 512
+    reranker_batch_size: int = 8
+
+    @classmethod
+    def from_env(cls) -> "RetrievalSettings":
+        base_url = _required("INTELLIGENCE_EMBEDDING_BASE_URL").rstrip("/")
+        if base_url != LOCAL_OLLAMA_EMBEDDING_BASE_URL:
+            raise ValueError(
+                "INTELLIGENCE_EMBEDDING_BASE_URL must use the fixed loopback Ollama endpoint"
+            )
+        model = _required("INTELLIGENCE_EMBEDDING_MODEL")
+        if model != EMBEDDING_MODEL:
+            raise ValueError("INTELLIGENCE_EMBEDDING_MODEL must use the fixed embedding model")
+        dimension = int(_required("INTELLIGENCE_EMBEDDING_DIMENSION"))
+        if dimension != EMBEDDING_DIMENSION:
+            raise ValueError("INTELLIGENCE_EMBEDDING_DIMENSION must use the fixed dimension")
+        timeout = float(_required("INTELLIGENCE_EMBEDDING_TIMEOUT_SECONDS"))
+        if timeout <= 0:
+            raise ValueError("INTELLIGENCE_EMBEDDING_TIMEOUT_SECONDS must be positive")
+        reranker_model = _required("INTELLIGENCE_RERANKER_MODEL")
+        if reranker_model != RERANKER_MODEL:
+            raise ValueError("INTELLIGENCE_RERANKER_MODEL must use the fixed reranker model")
+        reranker_revision = _required("INTELLIGENCE_RERANKER_REVISION")
+        if reranker_revision != RERANKER_REVISION:
+            raise ValueError(
+                "INTELLIGENCE_RERANKER_REVISION must use the fixed reranker revision"
+            )
+        reranker_device = _required("INTELLIGENCE_RERANKER_DEVICE")
+        if reranker_device != "cpu":
+            raise ValueError("INTELLIGENCE_RERANKER_DEVICE must be cpu")
+        reranker_max_length = int(_required("INTELLIGENCE_RERANKER_MAX_LENGTH"))
+        if reranker_max_length != 512:
+            raise ValueError("INTELLIGENCE_RERANKER_MAX_LENGTH must be 512")
+        reranker_batch_size = int(_required("INTELLIGENCE_RERANKER_BATCH_SIZE"))
+        if reranker_batch_size < 1 or reranker_batch_size > 16:
+            raise ValueError("INTELLIGENCE_RERANKER_BATCH_SIZE must be between 1 and 16")
+        return cls(
+            embedding_base_url=base_url,
+            embedding_model=model,
+            embedding_dimension=dimension,
+            embedding_timeout_seconds=timeout,
+            reranker_model=reranker_model,
+            reranker_revision=reranker_revision,
+            reranker_path=_required("INTELLIGENCE_RERANKER_PATH"),
+            reranker_device=reranker_device,
+            reranker_max_length=reranker_max_length,
+            reranker_batch_size=reranker_batch_size,
         )
 
 

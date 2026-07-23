@@ -6,6 +6,7 @@ depends_on:
   - agent-catalog
   - identity-session
   - acl-retrieval
+  - enterprise-knowledge-rag
   - action-executor
   - adr-0001
   - adr-0003
@@ -23,7 +24,7 @@ This integration uses domain boundaries inside the existing deployable services.
 | Identity and tenancy | tenant, member, enrolled device, role binding | OIDC subject and active-device proof | authenticated tenant/member context |
 | Channel ingress and delivery | normalized ingress, delivery intent, channel binding | OpenIM event or bound Telegram update | idempotent Run request and durable channel delivery |
 | Agent runtime | Agent Run, execution context, lifecycle, delegation | pinned catalog/capability snapshot and authorized context | candidate, approval suspension, delivery intent, replay evidence |
-| Knowledge retrieval | versioned document, chunk embedding, ACL grant | member-scoped query and embedding contract | cited authorized evidence only |
+| Knowledge retrieval | immutable source object, versioned document, ingestion job, chunk/vector projection, ACL grant, index generation | member-scoped query, parser/embedding/reranker contract | cited authorized evidence only |
 | Agent Memory | personal events/projections and reviewed group proposals | extraction proposal and explicit review decision | member-authorized derived facts and exposure records |
 | Capability governance | Agent, Skill, Tool, MCP descriptor, immutable snapshot | administrator publication commands | execution-plane-visible pinned capabilities |
 | Remote Agent collaboration | remote Agent registration, Agent Card revision, A2A job | administrator registration/verification and governed delegation | bounded A2A 1.0 REST message result |
@@ -83,7 +84,7 @@ Non-goals:
 ## Contracts and dependencies
 
 - OpenIM message, conversation, group membership, and user-token contracts remain upstream contracts and are consumed through the existing SDK and server APIs.
-- PostgreSQL migrations `0009` through `0031` define the Agent channel, runtime, capability, Tool, Skill, MCP, Memory, proactive, approval-continuation, bounded delegation, administrative-role state, tenant-scoped runtime incident controls, knowledge embeddings, group-Memory review, catalog audit, remote A2A state, immutable fixed Responses model-route transitions, and member-issued Telegram link challenges.
+- PostgreSQL migrations `0009` through `0031` define the verified Agent baseline. The enterprise RAG slice adds forward-only migration `0032` and later for pgvector 0.8.5, immutable source-object metadata, ingestion jobs, active index generations, `halfvec(2560)`/FTS projections, and evaluation runs without rewriting migration `0025`.
 - Intelligence requests and responses use strict typed JSON contracts; invalid model output fails the Run phase and is never interpreted as a successful answer or ToolCall.
 - OpenIM and Telegram delivery adapters return an external message identifier before an intent can enter `sent` state.
 - OpenIM delivery remains available when Telegram is explicitly disabled. The unified Delivery Worker always starts with the OpenIM adapter; the Telegram adapter is registered only when a validated systemd credential is present. A Telegram intent encountered while that adapter is disabled fails permanently on its own channel and is never rerouted to OpenIM.
@@ -101,6 +102,7 @@ Non-goals:
 - Candidate persistence and remote delivery are separate recoverable states.
 - Missing model, embedding, MCP, parser, policy, or channel dependencies fail explicitly. No alternate provider or semantics are selected.
 - Deployment indexes every active, published knowledge chunk with the pinned embedding revision before Agent Runtime starts. Runtime acceptance requires the valid current-chunk embedding count to equal the current published chunk count; an embedding endpoint health probe alone is insufficient.
+- New knowledge publication also requires a complete active pgvector/FTS projection and a reachable exact-revision local reranker. Neither the historical `real[]` projection nor an unreranked RRF list is a production fallback.
 - Side effects require policy, approval when configured, an idempotency key, execution audit, and target read-back where supported.
 
 ## Delivery slices
@@ -110,6 +112,7 @@ Non-goals:
 3. **Capability platform**: Tool/Skill/MCP descriptors, snapshots, process supervision, execution-plane visibility, ToolPolicy, approval, ledger, budgets.
 4. **Passive intelligence**: bounded operation plan, lexical/dense/IntentView routing, deterministic fusion, clarification, tool result grounding.
 5. **Memory**: MemoryEvent, projectors, retrieval, deletion/rebuild, ACL, feedback attribution; enterprise RAG remains a separate evidence source.
+6. **Production enterprise RAG**: MinIO source upload, immutable document versions, leased ingestion, strict four-format parsing, pgvector/FTS indexing, ACL-first fusion, fixed reranking, trusted Citation validation, Web administration, evaluation, and three-channel acceptance.
 6. **Proactive intelligence**: source gateway, candidate envelope, schedule, ranking, disturbance policy, delivery, ACK and explicit feedback.
 7. **arXiv dual-chain plugin**: passive search/subscription plus proactive poll/get/ack, cache and rate contract.
 8. **Product and operations**: Web administration, health/metrics/traces, evaluation gates, fault/replay tests and dual-channel real acceptance.
@@ -133,6 +136,7 @@ Each slice must update this document and its owning SDDs, pass targeted and affe
 - PostgreSQL owns enterprise identity bindings, Agent catalog and versions, immutable capabilities, Runs, Tool ledger and approvals, delivery intents, Memory events/projections, proactive subscriptions/events, and audit records.
 - The intelligence worker is stateless with respect to authority. It receives only the bounded evidence and schemas needed for one phase.
 - Personal Memory is a derived event-sourced store and is not the enterprise RAG corpus.
+- MinIO owns immutable uploaded source bytes; PostgreSQL owns document, version, ingestion, publication, grant, index-generation, and audit facts. OpenIM messages or group members are not copied into either store.
 - Group Memory writes are explicit host-admin event appends through `group-memory-admin`; passive conversations are not automatically promoted into shared memory. OpenIM reads revalidate current group membership, while Telegram reads require an active member/chat binding.
 - Redis, Kafka, MongoDB, and OpenIM SDK local storage retain their existing upstream responsibilities and are not duplicated by this integration.
 
@@ -143,6 +147,7 @@ Each slice must update this document and its owning SDDs, pass targeted and affe
 - Invalid model schemas, unavailable MCP processes, authorization failures, and storage failures fail closed; there is no provider or semantic fallback.
 - A failed ToolCall is never decoded as an empty successful result. Only a currently authorized `read` Tool whose pinned descriptor declares `retry_semantics=safe` may move from `failed` back to `prepared`; the durable Run/call ID, operation, argument digest, attempt count, and audit trail are preserved. `unknown` outcomes and side-effect Tools are never automatically reset.
 - Enterprise knowledge retrieval accepts only a `succeeded` ToolCall with a non-null result. A current ACL denial maps to an explicitly empty authorized corpus, while transport, embedding, storage, and Tool lifecycle failures remain errors and consume the Run's bounded retry budget rather than producing the no-evidence answer.
+- Parser, MinIO, pgvector, FTS, reranker, post-generation authorization, checksum, or citation-support failures remain typed failures. They cannot be converted into a public corpus, the old `real[]` scanner, an unreranked response, or a delivered partial answer.
 - A side-effect timeout after dispatch is recorded as `unknown` and is not automatically retried into a success state.
 - Candidate persistence and remote delivery are separate, so a channel outage does not require rerunning model reasoning.
 
@@ -202,6 +207,7 @@ Implemented and locally verified in the current acceptance slice:
 - remote A2A uses pinned Agent Card digests, exact host/private-CIDR allowlists, bounded response sizes, environment-resolved credentials, idempotent message IDs, and explicit `unknown` outcomes without automatic retry;
 - the frozen routing gate contains 36 Tool descriptors and 190 deterministic cases;
 - enterprise RAG uses real model-revisioned embeddings, ACL-first current-version filtering, bounded hybrid lexical/dense retrieval, reciprocal-rank fusion, and provenance-integrity evaluation;
+- the verified baseline above predates the production enterprise RAG Goal. The proposed next slice replaces its application-memory `real[]` scan with pgvector 0.8.5 `halfvec(2560)` HNSW, PostgreSQL FTS, deterministic RRF, exact-revision local multilingual reranking, immutable MinIO ingestion, explicit publication, and stronger citation reauthorization/checksum/support validation;
 - the Candidate contract exposes `grounded`, `insufficient_evidence`, and `not_applicable` grounding states; grounded output must declare exactly the authorized citation IDs present in the answer text, while insufficient evidence fails closed without inventing a citation;
 - retrieval and generation are evaluated separately. The schema-v3 retrieval report covers all 1,120 frozen QA cases; the deterministic 40-case local generation baseline records provider/schema rejection, fact coverage, abstention, and generated-citation metrics without changing production provider routing;
 - Prometheus instrumentation and the local Grafana provisioning are source-controlled; local container and full repository verification status is recorded in `goal-state.md`.

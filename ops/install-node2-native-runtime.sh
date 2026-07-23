@@ -43,6 +43,8 @@ required_paths=(
   "$deploy_root/native-ubuntu/nginx-openim-platform.conf"
   "$deploy_root/ops/deploy-node2-platform-runtime.sh"
   "$deploy_root/ops/deploy-node2-agent-runtime.sh"
+  "$deploy_root/ops/deploy-node2-knowledge-minio.sh"
+  "$deploy_root/ops/upgrade-node2-postgres-pgvector.sh"
   "$deploy_root/ops/deploy-node2-native-web.sh"
   "$deploy_root/ops/install-node2-native-tls.sh"
   "$deploy_root/ops/configure-node2-native-keycloak.sh"
@@ -65,6 +67,9 @@ docker inspect "$postgres_container" >/dev/null 2>&1 || {
   exit 1
 }
 docker exec "$postgres_container" pg_isready -U platform -d platform >/dev/null
+
+bash "$deploy_root/ops/upgrade-node2-postgres-pgvector.sh" "$deploy_root"
+bash "$deploy_root/ops/deploy-node2-knowledge-minio.sh"
 
 bash "$deploy_root/ops/install-node2-native-tls.sh" \
   "$public_host" \
@@ -119,7 +124,6 @@ export OPENIM_PLATFORM_MFL_ROOT="$(dirname "$(dirname "$release_root")")"
 export OPENIM_PLATFORM_OIDC_ISSUER="$oidc_issuer"
 export OPENIM_PLATFORM_OPENIM_WS_URL="wss://$public_host:3443/openim-ws"
 export OPENIM_PLATFORM_HTTP_ADDR="127.0.0.1:18080"
-export OPENIM_INTELLIGENCE_INSTALL_DEPENDENCIES=true
 export OPENIM_PLATFORM_WEB_HEALTH_URL="$public_origin/"
 
 bash "$deploy_root/ops/deploy-node2-platform-runtime.sh" "$deploy_root" "$release_root"

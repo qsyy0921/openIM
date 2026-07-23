@@ -25,6 +25,7 @@ type ToolPlanner interface {
 
 type OperationExecutor interface {
 	SearchKnowledge(ctx context.Context, run Run, snapshot capability.Snapshot, query RetrievalQuery) ([]Evidence, error)
+	ValidateKnowledgeCitations(ctx context.Context, run Run, answer string, evidence []Evidence) ([]Evidence, error)
 	ExecuteTool(ctx context.Context, run Run, snapshot capability.Snapshot, call ToolCallRequest) (ToolExecution, error)
 }
 
@@ -287,11 +288,7 @@ func (w *Worker) runOnce(ctx context.Context) error {
 		if len(evidence) == 0 {
 			candidate = Candidate{Text: "在你当前有权访问的知识中未找到可引用的证据。", Model: "runtime-policy", ProviderResponseID: "no-evidence:" + run.ID, GroundingStatus: GroundingInsufficientEvidence}
 		} else {
-			memories, memoryErr := w.loadMemory(executionCtx, *run)
-			if memoryErr != nil {
-				return w.retry(executionCtx, *run, fmt.Errorf("retrieve personal memory: %w", memoryErr), version.Spec.MaxModelAttempts)
-			}
-			candidate, err = w.candidates.Generate(executionCtx, *run, version, evidence, memories, nil)
+			candidate, err = w.candidates.Generate(executionCtx, *run, version, evidence, nil, nil)
 			if err != nil {
 				return w.retry(ctx, *run, err, version.Spec.MaxModelAttempts)
 			}
@@ -299,11 +296,14 @@ func (w *Worker) runOnce(ctx context.Context) error {
 			if err != nil {
 				return w.retry(ctx, *run, err, version.Spec.MaxModelAttempts)
 			}
+			if len(cited) > 0 {
+				cited, err = w.operations.ValidateKnowledgeCitations(executionCtx, *run, candidate.Text, cited)
+				if err != nil {
+					return w.retry(ctx, *run, fmt.Errorf("validate knowledge citations: %w", err), version.Spec.MaxModelAttempts)
+				}
+			}
 			if err := validateActionCandidate(candidate.ActionIntent, version.Spec); err != nil {
 				return w.retry(ctx, *run, err, version.Spec.MaxModelAttempts)
-			}
-			if err := w.memory.RecordExposures(executionCtx, *run, memories, "knowledge_response"); err != nil {
-				return w.retry(executionCtx, *run, fmt.Errorf("record personal memory exposure: %w", err), version.Spec.MaxModelAttempts)
 			}
 		}
 		if err := w.store.SaveCandidate(executionCtx, *run, candidate, cited); err != nil {

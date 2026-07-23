@@ -81,7 +81,18 @@ func NewHandlerWithAgentControlsAndTelegramLinks(version string, sessions Sessio
 	return newHandler(version, sessions, devices, approvals, workspace, catalog, control, links, admin)
 }
 
+func NewHandlerWithAgentControlsTelegramLinksAndKnowledge(version string, sessions SessionService, devices DeviceService, approvals ApprovalService, workspace AgentWorkspaceService, catalog AgentCatalogService, control *agentcontrol.Service, admin *admincontrol.Service, links TelegramLinkService, knowledge KnowledgeService) http.Handler {
+	if control == nil || admin == nil || links == nil || knowledge == nil {
+		panic("member, administrator, Telegram link, and knowledge services are required")
+	}
+	return newHandlerWithKnowledge(version, sessions, devices, approvals, workspace, catalog, control, links, knowledge, admin)
+}
+
 func newHandler(version string, sessions SessionService, devices DeviceService, approvals ApprovalService, workspace AgentWorkspaceService, catalog AgentCatalogService, control AgentControlService, links TelegramLinkService, admins ...AdminControlService) http.Handler {
+	return newHandlerWithKnowledge(version, sessions, devices, approvals, workspace, catalog, control, links, nil, admins...)
+}
+
+func newHandlerWithKnowledge(version string, sessions SessionService, devices DeviceService, approvals ApprovalService, workspace AgentWorkspaceService, catalog AgentCatalogService, control AgentControlService, links TelegramLinkService, knowledge KnowledgeService, admins ...AdminControlService) http.Handler {
 	if sessions == nil || devices == nil || approvals == nil || workspace == nil || catalog == nil {
 		panic("session, device, approval, Agent workspace, and Agent catalog services are required")
 	}
@@ -118,6 +129,9 @@ func newHandler(version string, sessions SessionService, devices DeviceService, 
 	if links != nil {
 		mux.Handle("GET /v1/agent/channels/telegram/link", &telegramLinkStatusHandler{service: links})
 		mux.Handle("POST /v1/agent/channels/telegram/link-challenges", &telegramLinkChallengeHandler{service: links})
+	}
+	if knowledge != nil {
+		registerKnowledgeRoutes(mux, knowledge)
 	}
 	return requestLogger(observe.HTTPMetrics(mux))
 }

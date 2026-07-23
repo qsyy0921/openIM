@@ -45,6 +45,7 @@ $commands = @(
     "agent-catalog-admin",
     "capability-admin",
     "group-memory-admin",
+    "knowledge-ingestion",
     "knowledge-rag-admin",
     "mcp-admin",
     "member-grant-admin",

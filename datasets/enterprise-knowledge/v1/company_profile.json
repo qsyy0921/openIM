@@ -16,5 +16,6 @@
   ],
   "release_date": "2026-07-14",
   "tenant_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
-  "local_member_id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+  "local_member_id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+  "local_denied_member_id": "cccccccc-cccc-4ccc-8ccc-cccccccccccc"
 }

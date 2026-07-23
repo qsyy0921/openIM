@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 type HTTPGenerationClient struct {
@@ -19,12 +20,14 @@ type HTTPGenerationClient struct {
 	http    *http.Client
 }
 
+const LockedGenerationModel = "gpt-5.6-terra"
+
 func NewHTTPGenerationClient(baseURL string, timeout time.Duration, model string) (*HTTPGenerationClient, error) {
 	parsed, err := url.Parse(strings.TrimRight(baseURL, "/"))
 	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" {
 		return nil, errors.New("generation evaluation URL is invalid")
 	}
-	if timeout <= 0 || strings.TrimSpace(model) == "" {
+	if timeout <= 0 || strings.TrimSpace(model) != LockedGenerationModel {
 		return nil, errors.New("generation evaluation model contract is invalid")
 	}
 	return &HTTPGenerationClient{baseURL: strings.TrimRight(baseURL, "/"), model: model, http: &http.Client{Timeout: timeout}}, nil
@@ -85,14 +88,59 @@ func (c *HTTPGenerationClient) Generate(ctx context.Context, request GenerationR
 	if err := json.Unmarshal(data, &payload); err != nil {
 		return GenerationCandidate{}, fmt.Errorf("decode generation evaluation candidate: %w", err)
 	}
-	if payload.Text == "" || payload.Model == "" || payload.ProviderResponseID == "" || payload.Model != c.model {
-		return GenerationCandidate{}, errors.New("generation evaluation candidate violates the model contract")
-	}
-	if payload.GroundingStatus != GenerationGrounded && payload.GroundingStatus != GenerationInsufficientEvidence {
-		return GenerationCandidate{}, errors.New("generation evaluation candidate has an invalid grounding status")
-	}
 	if len(payload.ActionIntent) > 0 && string(payload.ActionIntent) != "null" {
 		return GenerationCandidate{}, errors.New("generation evaluation candidate proposed an action")
 	}
+	if err := validateGenerationCandidate(payload.GenerationCandidate, request.Evidence, c.model); err != nil {
+		return GenerationCandidate{}, err
+	}
 	return payload.GenerationCandidate, nil
+}
+
+func validateGenerationCandidate(candidate GenerationCandidate, evidence []Evidence, model string) error {
+	candidate.Text = strings.TrimSpace(candidate.Text)
+	if candidate.Text == "" || len(candidate.Text) > maxCandidateAnswerBytes ||
+		!utf8.ValidString(candidate.Text) || candidate.Model != model ||
+		candidate.ProviderResponseID == "" || len(candidate.ProviderResponseID) > 256 {
+		return errors.New("generation evaluation candidate violates the model contract")
+	}
+	if candidate.GroundingStatus != GenerationGrounded &&
+		candidate.GroundingStatus != GenerationInsufficientEvidence {
+		return errors.New("generation evaluation candidate has an invalid grounding status")
+	}
+	if len(candidate.CitationIDs) > maxEvidenceItems {
+		return errors.New("generation evaluation candidate exceeds the citation bound")
+	}
+	available := make(map[string]struct{}, len(evidence))
+	for _, item := range evidence {
+		if item.CitationID == "" {
+			return errors.New("generation evaluation evidence is missing a citation ID")
+		}
+		available[item.CitationID] = struct{}{}
+	}
+	declared := make(map[string]struct{}, len(candidate.CitationIDs))
+	for _, citationID := range candidate.CitationIDs {
+		if _, ok := available[citationID]; !ok {
+			return errors.New("generation evaluation candidate cited unavailable evidence")
+		}
+		if _, duplicate := declared[citationID]; duplicate {
+			return errors.New("generation evaluation candidate contains duplicate citations")
+		}
+		declared[citationID] = struct{}{}
+		if !strings.Contains(candidate.Text, "["+citationID+"]") {
+			return errors.New("generation evaluation candidate omitted a declared citation")
+		}
+	}
+	for _, match := range generatedCitationPattern.FindAllStringSubmatch(candidate.Text, -1) {
+		if _, ok := declared[match[1]]; !ok {
+			return errors.New("generation evaluation candidate contains an undeclared citation")
+		}
+	}
+	if candidate.GroundingStatus == GenerationGrounded && len(declared) == 0 {
+		return errors.New("grounded generation evaluation candidate requires a citation")
+	}
+	if candidate.GroundingStatus == GenerationInsufficientEvidence && len(declared) != 0 {
+		return errors.New("insufficient-evidence candidate cannot contain a citation")
+	}
+	return nil
 }

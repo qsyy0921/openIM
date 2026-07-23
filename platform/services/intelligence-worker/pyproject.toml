@@ -8,16 +8,21 @@ version = "0.1.0"
 requires-python = ">=3.12"
 dependencies = [
   "fastapi==0.136.0",
+  "huggingface-hub==0.36.0",
   "httpx==0.28.1",
   "pydantic==2.12.5",
   "prometheus-client==0.25.0",
   "PyYAML==6.0.3",
+  "safetensors==0.7.0",
+  "torch==2.11.0",
+  "transformers==4.57.1",
   "uvicorn==0.44.0",
 ]
 
 [project.scripts]
 openim-agent-routing-eval = "intelligence_worker.evaluation:main"
 openim-intelligence-local = "intelligence_worker.local_bootstrap:main"
+openim-retrieval-eval = "intelligence_worker.retrieval_bootstrap:main"
 
 [project.optional-dependencies]
 test = ["pytest==9.0.2"]
@@ -25,6 +30,14 @@ test = ["pytest==9.0.2"]
 [tool.pytest.ini_options]
 pythonpath = ["src"]
 testpaths = ["tests"]
+
+[tool.uv.sources]
+torch = { index = "pytorch-cpu" }
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
 
 [tool.setuptools.packages.find]
 where = ["src"]

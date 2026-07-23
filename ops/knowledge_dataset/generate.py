@@ -21,6 +21,7 @@ RELEASE_DATE = "2026-07-14"
 SEED = 20260714
 TENANT_ID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
 MEMBER_ID = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+DENIED_MEMBER_ID = "cccccccc-cccc-4ccc-8ccc-cccccccccccc"
 NAMESPACE = uuid.UUID("77ae33c3-7664-4e75-b6d4-bf96643f27a1")
 ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_OUTPUT = ROOT / "datasets" / "enterprise-knowledge" / "v1"
@@ -387,6 +388,7 @@ def generate(output: Path) -> dict[str, Any]:
         "release_date": RELEASE_DATE,
         "tenant_id": TENANT_ID,
         "local_member_id": MEMBER_ID,
+        "local_denied_member_id": DENIED_MEMBER_ID,
     }
     topics = build_topics()
     documents: list[dict[str, Any]] = []
@@ -553,6 +555,9 @@ def write_postgres_sql(path: Path, documents: list[dict[str, Any]], versions: li
         "INSERT INTO identity.members (id, tenant_id, issuer, subject, display_name, status) VALUES "
         f"({sql_literal(MEMBER_ID)}::uuid, {sql_literal(TENANT_ID)}::uuid, 'dataset://local', 'enterprise-rag-evaluator', '企业知识评测员', 'active') "
         "ON CONFLICT (id) DO UPDATE SET display_name=EXCLUDED.display_name, status='active';",
+        "INSERT INTO identity.members (id, tenant_id, issuer, subject, display_name, status) VALUES "
+        f"({sql_literal(DENIED_MEMBER_ID)}::uuid, {sql_literal(TENANT_ID)}::uuid, 'dataset://local', 'enterprise-rag-denied-evaluator', '企业知识无授权评测员', 'active') "
+        "ON CONFLICT (id) DO UPDATE SET display_name=EXCLUDED.display_name, status='active';",
     ]
     for row in documents:
         lines.append(
@@ -563,9 +568,9 @@ def write_postgres_sql(path: Path, documents: list[dict[str, Any]], versions: li
     for row in versions:
         published = "NULL" if row["published_at"] is None else f"{sql_literal(row['published_at'])}::timestamptz"
         lines.append(
-            "INSERT INTO knowledge.document_versions (id, tenant_id, document_id, version_number, checksum, status, published_at) VALUES "
-            f"({sql_literal(row['id'])}::uuid, {sql_literal(row['tenant_id'])}::uuid, {sql_literal(row['document_id'])}::uuid, {row['version_number']}, {sql_literal(row['checksum'])}, {sql_literal(row['status'])}, {published}) "
-            "ON CONFLICT (id) DO UPDATE SET checksum=EXCLUDED.checksum, status=EXCLUDED.status, published_at=EXCLUDED.published_at;"
+            "INSERT INTO knowledge.document_versions (id, tenant_id, document_id, version_number, checksum, status, published_at, ingestion_state) VALUES "
+            f"({sql_literal(row['id'])}::uuid, {sql_literal(row['tenant_id'])}::uuid, {sql_literal(row['document_id'])}::uuid, {row['version_number']}, {sql_literal(row['checksum'])}, {sql_literal(row['status'])}, {published}, 'legacy_indexed') "
+            "ON CONFLICT (id) DO UPDATE SET checksum=EXCLUDED.checksum, status=EXCLUDED.status, published_at=EXCLUDED.published_at, ingestion_state='legacy_indexed';"
         )
     for row in chunks:
         lines.append(

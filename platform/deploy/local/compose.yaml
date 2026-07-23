@@ -2,7 +2,7 @@ name: openim-platform-local
 
 services:
   postgres:
-    image: postgres:17.10-alpine3.23@sha256:8189a1f6e40904781fc9e2612687877791d21679866db58b1de996b31fc312e4
+    image: pgvector/pgvector:0.8.5-pg17-bookworm@sha256:d2ef61f42ef767baa5a1475393303cc235bcd92febd9d7014eddb48b41f3bad0
     environment:
       POSTGRES_DB: platform
       POSTGRES_USER: platform
@@ -29,6 +29,24 @@ services:
     volumes:
       - ./keycloak/realm-platform.json:/opt/keycloak/data/import/realm-platform.json:ro
       - platform-keycloak-data:/opt/keycloak/data
+    restart: unless-stopped
+
+  knowledge-minio:
+    image: minio/minio@sha256:796f75ea413b883cec953cb5f0bd2b6050615e36123f36e39aa5555096a07bc1
+    command: ["server", "/data", "--address", ":9000"]
+    environment:
+      MINIO_ROOT_USER: ${PLATFORM_LOCAL_KNOWLEDGE_MINIO_ACCESS_KEY:?required}
+      MINIO_ROOT_PASSWORD: ${PLATFORM_LOCAL_KNOWLEDGE_MINIO_SECRET_KEY:?required}
+      MINIO_BROWSER: "off"
+    ports:
+      - "127.0.0.1:12015:9000"
+    volumes:
+      - platform-knowledge-minio-data:/data
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    pids_limit: 256
     restart: unless-stopped
 
   prometheus:
@@ -80,5 +98,6 @@ services:
 volumes:
   platform-postgres-data:
   platform-keycloak-data:
+  platform-knowledge-minio-data:
   platform-prometheus-data:
   platform-grafana-data:

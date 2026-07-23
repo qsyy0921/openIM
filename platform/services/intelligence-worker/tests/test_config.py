@@ -18,6 +18,12 @@ def _environment() -> dict[str, str]:
         "INTELLIGENCE_EMBEDDING_DIMENSION": "1024",
         "INTELLIGENCE_EMBEDDING_TIMEOUT_SECONDS": "10",
         "INTELLIGENCE_ROUTING_DENSE_MIN_SIMILARITY": "0.2",
+        "INTELLIGENCE_RERANKER_MODEL": "BAAI/bge-reranker-v2-m3",
+        "INTELLIGENCE_RERANKER_REVISION": "953dc6f6f85a1b2dbfca4c34a2796e7dde08d41e",
+        "INTELLIGENCE_RERANKER_PATH": "C:/models/test-reranker",
+        "INTELLIGENCE_RERANKER_DEVICE": "cpu",
+        "INTELLIGENCE_RERANKER_MAX_LENGTH": "512",
+        "INTELLIGENCE_RERANKER_BATCH_SIZE": "8",
     }
 
 
@@ -31,6 +37,7 @@ def test_settings_require_fixed_responses_configuration(monkeypatch: pytest.Monk
     assert settings.model_max_retries == 2
     assert settings.embedding_base_url == "http://127.0.0.1:18083/v1"
     assert settings.embedding_dimension == 1024
+    assert settings.reranker_model == "BAAI/bge-reranker-v2-m3"
     assert "unit-test-secret" not in repr(settings)
     assert "local-only" not in repr(settings)
 

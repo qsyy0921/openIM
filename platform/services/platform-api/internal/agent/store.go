@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -412,6 +413,13 @@ func (s *Store) SaveCandidate(ctx context.Context, run Run, candidate Candidate,
 		return fmt.Errorf("begin save Agent candidate: %w", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
+	lockedEvidence := make([]Evidence, len(evidence))
+	for index, item := range evidence {
+		lockedEvidence[index], err = lockAuthorizedCitation(ctx, tx, run, item)
+		if err != nil {
+			return fmt.Errorf("save Agent citation: %w", err)
+		}
+	}
 	const query = `
 UPDATE agent.runs
 SET state = 'reply_pending', candidate_text = $3, model = $4, provider_response_id = $5,
@@ -429,12 +437,17 @@ WHERE id = $1::uuid AND state = 'running' AND lease_token = $2 AND lease_until >
 	if err := requireOne(result.RowsAffected(), "save Agent candidate"); err != nil {
 		return err
 	}
-	for ordinal, item := range evidence {
+	for ordinal, item := range lockedEvidence {
+		excerpt := citationExcerpt(item.Content)
+		if excerpt == "" {
+			return errors.New("save Agent citation: authorized excerpt is required")
+		}
 		const insert = `
 INSERT INTO agent.run_citations (
-    run_id, citation_id, ordinal, document_id, version_id, chunk_id, title, source_uri, checksum
-) VALUES ($1::uuid, $2, $3, $4::uuid, $5::uuid, $6::uuid, $7, $8, $9)`
-		if _, err := tx.Exec(ctx, insert, run.ID, item.CitationID, ordinal, item.DocumentID, item.VersionID, item.ChunkID, item.Title, item.SourceURI, item.Checksum); err != nil {
+    run_id, citation_id, ordinal, document_id, version_id, chunk_id,
+    title, source_uri, checksum, authorized_excerpt
+) VALUES ($1::uuid, $2, $3, $4::uuid, $5::uuid, $6::uuid, $7, $8, $9, $10)`
+		if _, err := tx.Exec(ctx, insert, run.ID, item.CitationID, ordinal, item.DocumentID, item.VersionID, item.ChunkID, item.Title, item.SourceURI, item.Checksum, excerpt); err != nil {
 			return fmt.Errorf("save Agent citation: %w", err)
 		}
 	}
@@ -447,6 +460,73 @@ INSERT INTO agent.run_citations (
 		return fmt.Errorf("commit Agent candidate: %w", err)
 	}
 	return nil
+}
+
+func lockAuthorizedCitation(ctx context.Context, tx pgx.Tx, run Run, item Evidence) (Evidence, error) {
+	if run.TenantID == "" || run.MemberID == "" || item.CitationID == "" ||
+		item.DocumentID == "" || item.VersionID == "" || item.ChunkID == "" || item.Checksum == "" {
+		return Evidence{}, errors.New("citation persistence identity is incomplete")
+	}
+	const query = `
+SELECT document.id::text, version.id::text, chunk.id::text,
+       document.title, document.source_uri, chunk.checksum, chunk.content
+FROM identity.members AS member
+JOIN knowledge.documents AS document
+  ON document.tenant_id = member.tenant_id
+JOIN authz.document_grants AS document_grant
+  ON document_grant.tenant_id = document.tenant_id
+ AND document_grant.document_id = document.id
+ AND document_grant.member_id = member.id
+ AND document_grant.permission = 'read'
+JOIN knowledge.document_versions AS version
+  ON version.tenant_id = document.tenant_id
+ AND version.document_id = document.id
+ AND version.id = document.current_version_id
+JOIN knowledge.chunks AS chunk
+  ON chunk.tenant_id = version.tenant_id
+ AND chunk.document_id = version.document_id
+ AND chunk.version_id = version.id
+WHERE member.tenant_id = $1::uuid
+  AND member.id = $2::uuid
+  AND member.status = 'active'
+  AND document.id = $3::uuid
+  AND version.id = $4::uuid
+  AND chunk.id = $5::uuid
+  AND chunk.checksum = $6
+  AND document.status = 'active'
+  AND document.classification IN ('public', 'internal')
+  AND version.status = 'published'
+  AND version.ingestion_state IN ('legacy_indexed', 'indexed')
+FOR SHARE OF member, document, document_grant, version, chunk`
+	result := Evidence{CitationID: item.CitationID}
+	err := tx.QueryRow(ctx, query,
+		run.TenantID, run.MemberID, item.DocumentID, item.VersionID, item.ChunkID, item.Checksum,
+	).Scan(
+		&result.DocumentID, &result.VersionID, &result.ChunkID,
+		&result.Title, &result.SourceURI, &result.Checksum, &result.Content,
+	)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Evidence{}, errors.New("citation is no longer authorized or current")
+	}
+	if err != nil {
+		return Evidence{}, fmt.Errorf("lock current citation authorization: %w", err)
+	}
+	return result, nil
+}
+
+func citationExcerpt(content string) string {
+	content = strings.TrimSpace(content)
+	if content == "" {
+		return ""
+	}
+	runes := []rune(content)
+	if len(runes) > 1200 {
+		runes = runes[:1200]
+	}
+	for len(runes) > 0 && len(string(runes)) > 8000 {
+		runes = runes[:len(runes)-1]
+	}
+	return strings.TrimSpace(string(runes))
 }
 
 func (s *Store) WaitForToolApproval(ctx context.Context, run Run, approvalID string) error {

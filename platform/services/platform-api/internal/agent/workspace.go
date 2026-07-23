@@ -10,10 +10,11 @@ import (
 )
 
 type WorkspaceCitation struct {
-	CitationID string `json:"citation_id"`
-	Title      string `json:"title"`
-	SourceURI  string `json:"source_uri"`
-	Checksum   string `json:"checksum"`
+	CitationID        string `json:"citation_id"`
+	Title             string `json:"title"`
+	SourceURI         string `json:"source_uri"`
+	Checksum          string `json:"checksum"`
+	AuthorizedExcerpt string `json:"authorized_excerpt,omitempty"`
 }
 
 type WorkspaceIntent struct {
@@ -113,7 +114,8 @@ WITH recent AS (
     WHERE tenant_id = $1::uuid AND principal_member_id = $2::uuid
     ORDER BY created_at DESC LIMIT $3
 )
-SELECT c.run_id::text, c.citation_id, c.title, c.source_uri, c.checksum
+SELECT c.run_id::text, c.citation_id, c.title, c.source_uri, c.checksum,
+       COALESCE(c.authorized_excerpt, '')
 FROM agent.run_citations c
 JOIN recent r ON r.id = c.run_id
 ORDER BY c.run_id, c.ordinal`
@@ -125,7 +127,7 @@ ORDER BY c.run_id, c.ordinal`
 	for citationRows.Next() {
 		var runID string
 		var citation WorkspaceCitation
-		if err := citationRows.Scan(&runID, &citation.CitationID, &citation.Title, &citation.SourceURI, &citation.Checksum); err != nil {
+		if err := citationRows.Scan(&runID, &citation.CitationID, &citation.Title, &citation.SourceURI, &citation.Checksum, &citation.AuthorizedExcerpt); err != nil {
 			return nil, fmt.Errorf("scan Agent workspace citation: %w", err)
 		}
 		if index, ok := byID[runID]; ok {

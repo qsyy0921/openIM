@@ -16,6 +16,8 @@ from .models import (
     MemoryExtractionResponse,
     ProactiveRankRequest,
     ProactiveRankResponse,
+    RerankRequest,
+    RerankResponse,
     RouteRequest,
     RouteResponse,
     ToolPlanRequest,
@@ -25,7 +27,8 @@ from .provider_errors import ModelProviderError
 from .responses_client import ResponsesClient
 from .routing import IntentRouter, OpenAIEmbeddingClient
 from .proactive import ProactiveRanker
-from .metrics import EMBEDDING_BATCH, metrics_response, observe_request
+from .metrics import EMBEDDING_BATCH, RERANKER_BATCH, metrics_response, observe_request
+from .reranker import LocalCrossEncoderReranker, Reranker
 
 
 def create_app(
@@ -33,6 +36,7 @@ def create_app(
     router: IntentRouter | None = None,
     proactive_ranker: ProactiveRanker | None = None,
     embedding_provider: OpenAIEmbeddingClient | None = None,
+    reranker: Reranker | None = None,
 ) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -48,11 +52,13 @@ def create_app(
                 app.state.candidate_client, owned_embedding, settings.routing_dense_min_similarity
             )
             app.state.proactive_ranker = proactive_ranker or ProactiveRanker(owned_embedding)
+            app.state.reranker = reranker or LocalCrossEncoderReranker(settings)
         else:
             app.state.candidate_client = client
             app.state.intent_router = router
             app.state.proactive_ranker = proactive_ranker
             app.state.embedding_provider = embedding_provider
+            app.state.reranker = reranker
         yield
         if owned:
             await app.state.candidate_client.close()
@@ -134,6 +140,18 @@ def create_app(
         except (httpx.HTTPError, ValueError) as exc:
             logging.warning("embedding generation failed: %s", type(exc).__name__)
             raise HTTPException(status_code=502, detail="required embedding provider failed") from exc
+
+    @app.post("/v1/rerank", response_model=RerankResponse)
+    async def rerank(body: RerankRequest, request: Request) -> RerankResponse:
+        provider = request.app.state.reranker
+        if provider is None:
+            raise HTTPException(status_code=503, detail="reranker is not configured")
+        try:
+            RERANKER_BATCH.observe(len(body.candidates))
+            return await provider.rank(body)
+        except ValueError as exc:
+            logging.warning("reranking failed: %s", type(exc).__name__)
+            raise HTTPException(status_code=502, detail="required reranker failed") from exc
 
     return app
 

@@ -16,10 +16,10 @@
   "files": {
     "canonical_facts.jsonl": "400de1ef0341d1932d587d5ca260d1d98e371c06effea946755213144c8a2a8a",
     "chunks.jsonl": "ffbee954c77e4b74d97ee807480947f518e844a2348469fc8cadfdc77d6173ab",
-    "company_profile.json": "5f9cd9dd766432c5b5f52d9cccf35fefc69e2160e0c51d90f5e546cd0d3336c9",
+    "company_profile.json": "9db446e6c8a1f042b17b90a5a448baf7c2e5514a8f0ab313c78d8b075cd9aa40",
     "document_versions.jsonl": "3dfc56a266bb23cef2dc92821918b26f74e9050cb153d04831efac5b2182580d",
     "documents.jsonl": "d77a41cd6754050d023dd4a47e7eb16fb10a57b7618cf8445fa2f7c035fb860f",
-    "postgres_import.sql": "8c111127fc59739a4c5ab0a2c9fdb860f10e18fea78d1bbf9e15196a945e94b9",
+    "postgres_import.sql": "c432c5a6c2cbfb6a6c56ff2ea17e906ed049fd25af756e7b96ed70e59148ecc1",
     "qa.jsonl": "b9f163665f40c3f2e8392d00aa38080520144cf6dcff2e4236563703e0674c61",
     "raw/adm/08235857-76a0-5df9-b1c8-a9521992aef0-v1.md": "0f8a1b7d7dddde2eda2c75c211620ddbea2ee32d06bd4feec32b4d124bba63d0",
     "raw/adm/168bde16-f923-529b-98c0-e7cdcf8f2fd0-v1.md": "f95cabe0df9e998bb65cc33fab26104272d0de149f87e7f584b1e91c535f0a9d",
@@ -648,5 +648,5 @@
     "README.md": "73515ab917f58ee3f750efd937aa07e4d5a21dce9d8cef68b8eebe2c10f9c285",
     "statistics.json": "1ddfcb1e3fc41c0acd545130dd079ae697ba0b17f6963fa96f466ed4d9fff2bc"
   },
-  "release_hash": "7a8cd3e3a979865104ae128256e0f61703bec5f703bbbf235f22e3e4e0db9432"
+  "release_hash": "35fe1582af8f380cabd5d80f5fd2a19f099055ec2e7056df0a5c521658ffa157"
 }

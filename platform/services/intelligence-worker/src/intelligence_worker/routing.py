@@ -6,7 +6,7 @@ from typing import Protocol
 
 import httpx
 
-from .config import Settings
+from .config import RetrievalSettings, Settings
 from .models import IntentView, OperationDiscovery, RouteCandidate, RouteRequest, RouteResponse
 
 
@@ -19,7 +19,11 @@ class EmbeddingProvider(Protocol):
 
 
 class OpenAIEmbeddingClient:
-    def __init__(self, settings: Settings, transport: httpx.AsyncBaseTransport | None = None):
+    def __init__(
+        self,
+        settings: Settings | RetrievalSettings,
+        transport: httpx.AsyncBaseTransport | None = None,
+    ):
         self._model = settings.embedding_model
         self._dimension = settings.embedding_dimension
         self._client = httpx.AsyncClient(
@@ -27,6 +31,7 @@ class OpenAIEmbeddingClient:
             timeout=settings.embedding_timeout_seconds,
             transport=transport,
             headers={"Authorization": f"Bearer {settings.embedding_api_key}"},
+            trust_env=False,
         )
 
     async def close(self) -> None:

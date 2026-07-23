@@ -5,7 +5,9 @@ This runtime keeps application development on the Windows host while PostgreSQL,
 ## Boundaries
 
 - `platform-api` runs natively from `platform/services/platform-api`.
-- PostgreSQL, Keycloak, Prometheus, and Grafana are defined by `compose.yaml` and use named volumes inside the WSL Docker data root.
+- PostgreSQL, Keycloak, the loopback-only enterprise Knowledge MinIO,
+  Prometheus, and Grafana are defined by `compose.yaml` and use named volumes
+  inside the WSL Docker data root.
 - OpenIM continues to use the pinned upstream Compose file under `deploy/node1-openim-docker-v3.8`.
 - `openim-wsl.override.yaml` replaces only runtime data mounts with clean WSL named volumes. Existing benchmark/runtime data under the root `deploy/` directory is not modified.
 - The override exposes a dedicated Kafka `HOST` listener on `127.0.0.1:19094`; OpenIM containers retain their own `kafka:9094` listener.
@@ -17,10 +19,13 @@ This runtime keeps application development on the Windows host while PostgreSQL,
 
 1. `wsl -d swe-docker -- systemctl start docker`
 2. Docker context data root verified as `/var/lib/docker` inside the `swe-docker` distribution.
-3. Pinned PostgreSQL and Keycloak images from `compose.yaml` are present.
+3. Pinned PostgreSQL, Keycloak, and Knowledge MinIO images from `compose.yaml`
+   are present.
 4. The OpenIM amd64 images from `deploy/openim-images-amd64.tar` are present.
 5. Create ignored `platform/deploy/local/.env` from `.env.example`.
 6. Set a local-only Grafana administrator password in that ignored `.env`; anonymous access and self-registration are disabled.
+7. Generate separate local Knowledge MinIO credentials. Do not reuse the
+   upstream OpenIM MinIO access key.
 
 The Docker daemon pull proxy is maintained in `ops/swe-docker-proxy.conf`. Runtime containers receive no proxy environment because `/root/.docker/config.json` is synchronized from `ops/swe-docker-client-config.json`.
 
@@ -42,6 +47,8 @@ Validate configuration before startup:
 ```powershell
 $env:PLATFORM_LOCAL_POSTGRES_PASSWORD = "check-only"
 $env:PLATFORM_LOCAL_KEYCLOAK_ADMIN_PASSWORD = "check-only"
+$env:PLATFORM_LOCAL_KNOWLEDGE_MINIO_ACCESS_KEY = "check-only-access"
+$env:PLATFORM_LOCAL_KNOWLEDGE_MINIO_SECRET_KEY = "check-only-secret"
 $env:PLATFORM_LOCAL_GRAFANA_ADMIN_PASSWORD = "check-only"
 docker compose -f compose.yaml config --quiet
 docker run --rm --entrypoint=/bin/promtool `

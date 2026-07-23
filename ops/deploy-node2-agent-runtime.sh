@@ -4,26 +4,26 @@ set -euo pipefail
 deploy_root="${1:-/home/ubuntu/MFL/deploy/node2-20260711}"
 release_root="${2:-/home/ubuntu/MFL/releases/d663256}"
 bin_dir="$release_root/linux-amd64"
-wheel="$(find "$release_root/python" -maxdepth 1 -type f -name 'openim_intelligence_worker-*.whl' -print -quit)"
-runtime_user="${OPENIM_PLATFORM_RUNTIME_USER:-ubuntu}"
+python_dir="$release_root/python"
+runtime_user="${OPENIM_PLATFORM_RUNTIME_USER:-qsyy0921}"
 runtime_group="${OPENIM_PLATFORM_RUNTIME_GROUP:-$runtime_user}"
 mfl_root="${OPENIM_PLATFORM_MFL_ROOT:-$(dirname "$(dirname "$release_root")")}"
-venv="${OPENIM_INTELLIGENCE_VENV:-$mfl_root/venvs/intelligence-worker}"
+retrieval_venv="${OPENIM_RETRIEVAL_VENV:-$mfl_root/venvs/intelligence-worker-retrieval}"
 config_dir=/etc/openim-platform
 telegram_credential_file="$config_dir/credentials/telegram-bot-token"
 action_env="$config_dir/action-executor.env"
+retrieval_env="$config_dir/retrieval-worker.env"
 postgres_container="${OPENIM_PLATFORM_POSTGRES_CONTAINER:-openim-platform-local-postgres-1}"
-install_dependencies="${OPENIM_INTELLIGENCE_INSTALL_DEPENDENCIES:-false}"
-proxy_env="${OPENIM_PLATFORM_PROXY_ENV:-/etc/openim/proxy.env}"
 intelligence_ssh_target="${OPENIM_INTELLIGENCE_SSH_TARGET:-10495@172.31.50.1}"
 windows_embedding_forward_port="${OPENIM_INTELLIGENCE_WINDOWS_EMBEDDING_FORWARD_PORT:-11435}"
-embedding_base_url="${OPENIM_INTELLIGENCE_EMBEDDING_BASE_URL:-http://127.0.0.1:11434/v1}"
-embedding_api_key="${OPENIM_INTELLIGENCE_EMBEDDING_API_KEY:-local-only}"
 embedding_model="${OPENIM_INTELLIGENCE_EMBEDDING_MODEL:-qwen3-embedding:4b}"
 embedding_dimension="${OPENIM_INTELLIGENCE_EMBEDDING_DIMENSION:-2560}"
 embedding_timeout="${OPENIM_INTELLIGENCE_EMBEDDING_TIMEOUT_SECONDS:-180}"
-knowledge_index_batch_size="${OPENIM_KNOWLEDGE_INDEX_BATCH_SIZE:-32}"
-routing_dense_min_similarity="${OPENIM_INTELLIGENCE_ROUTING_DENSE_MIN_SIMILARITY:-0.2}"
+knowledge_index_batch_size="${OPENIM_KNOWLEDGE_INDEX_BATCH_SIZE:-4}"
+knowledge_index_embedding_workers="${OPENIM_KNOWLEDGE_INDEX_EMBEDDING_WORKERS:-8}"
+reranker_model="${OPENIM_INTELLIGENCE_RERANKER_MODEL:-BAAI/bge-reranker-v2-m3}"
+reranker_revision="${OPENIM_INTELLIGENCE_RERANKER_REVISION:-953dc6f6f85a1b2dbfca4c34a2796e7dde08d41e}"
+reranker_path="${OPENIM_INTELLIGENCE_RERANKER_PATH:-$mfl_root/models/bge-reranker-v2-m3-${reranker_revision:0:12}}"
 telegram_proxy_url="${OPENIM_TELEGRAM_PROXY_URL:-http://127.0.0.1:7893}"
 telegram_no_proxy="${OPENIM_TELEGRAM_NO_PROXY:-127.0.0.1,localhost,172.31.50.0/24,192.168.0.0/24}"
 
@@ -47,13 +47,44 @@ command -v runuser >/dev/null 2>&1 || {
   echo "runuser is required" >&2
   exit 1
 }
-[[ "$install_dependencies" == "true" || "$install_dependencies" == "false" ]] || {
-  echo "OPENIM_INTELLIGENCE_INSTALL_DEPENDENCIES must be true or false" >&2
+[[ -d "$python_dir" ]] || {
+  echo "release Python directory is missing: $python_dir" >&2
+  exit 1
+}
+mapfile -t intelligence_wheels < <(
+  find "$python_dir" -maxdepth 1 -type f -name 'openim_intelligence_worker-*.whl' -print |
+    sort
+)
+(( ${#intelligence_wheels[@]} == 1 )) || {
+  echo "release must contain exactly one intelligence worker wheel" >&2
+  exit 1
+}
+intelligence_wheel="${intelligence_wheels[0]}"
+[[ -x "$retrieval_venv/bin/python" ]] || {
+  echo "pre-provisioned retrieval Python runtime is missing: $retrieval_venv" >&2
   exit 1
 }
 [[ "$knowledge_index_batch_size" =~ ^[0-9]+$ ]] && \
   ((knowledge_index_batch_size >= 1 && knowledge_index_batch_size <= 128)) || {
   echo "knowledge index batch size must be between 1 and 128" >&2
+  exit 1
+}
+[[ "$knowledge_index_embedding_workers" =~ ^[0-9]+$ ]] && \
+  ((knowledge_index_embedding_workers >= 1 && knowledge_index_embedding_workers <= 8)) || {
+  echo "knowledge index embedding workers must be between 1 and 8" >&2
+  exit 1
+}
+[[ "$embedding_model" == "qwen3-embedding:4b" && "$embedding_dimension" == "2560" ]] || {
+  echo "retrieval embedding model contract is invalid" >&2
+  exit 1
+}
+[[ "$reranker_model" == "BAAI/bge-reranker-v2-m3" && \
+   "$reranker_revision" == "953dc6f6f85a1b2dbfca4c34a2796e7dde08d41e" ]] || {
+  echo "retrieval reranker model contract is invalid" >&2
+  exit 1
+}
+[[ -f "$reranker_path/openim-model-manifest.json" ]] || {
+  echo "locked reranker manifest is missing: $reranker_path" >&2
   exit 1
 }
 [[ "$telegram_proxy_url" =~ ^http://127\.0\.0\.1:[0-9]{1,5}$ ]] || {
@@ -83,6 +114,7 @@ runtime_binaries=(
   agent-delivery
   capability-admin
   group-memory-admin
+  knowledge-ingestion
   knowledge-rag-admin
   mcp-admin
   member-grant-admin
@@ -97,7 +129,7 @@ runtime_binaries=(
   skill-admin
   action-executor
 )
-for path in "$wheel" "$config_dir/platform.env"; do
+for path in "$intelligence_wheel" "$config_dir/platform.env"; do
   [[ -e "$path" ]] || {
     echo "required path is missing: $path" >&2
     exit 1
@@ -117,38 +149,56 @@ install -d -m 0750 -o root -g "$runtime_group" "$config_dir" "$config_dir/creden
 if [[ ! -e "$telegram_credential_file" ]]; then
   install -m 0400 -o root -g root /dev/null "$telegram_credential_file"
 fi
-install -d -m 0750 -o "$runtime_user" -g "$runtime_group" "$(dirname "$venv")"
+"$retrieval_venv/bin/python" -m pip install \
+  --disable-pip-version-check \
+  --force-reinstall \
+  --no-deps \
+  --no-index \
+  "$intelligence_wheel"
+"$retrieval_venv/bin/python" - <<'PY'
+from importlib import metadata
 
-if [[ ! -x "$venv/bin/python" ]]; then
-  python3 -m venv "$venv"
-fi
-if ! "$venv/bin/python" -m pip --version >/dev/null 2>&1; then
-  python3 -m venv --upgrade "$venv"
-fi
-if [[ -r "$proxy_env" ]]; then
-  set -a
-  . "$proxy_env"
-  set +a
-fi
-pip_args=(install --disable-pip-version-check --force-reinstall)
-if [[ "$install_dependencies" == "false" ]]; then
-  pip_args+=(--no-deps)
-fi
-"$venv/bin/python" -m pip "${pip_args[@]}" "$wheel"
-chown -R "$runtime_user:$runtime_group" "$venv"
+expected = {
+    "fastapi": "0.136.0",
+    "huggingface-hub": "0.36.0",
+    "httpx": "0.28.1",
+    "pydantic": "2.12.5",
+    "prometheus-client": "0.25.0",
+    "PyYAML": "6.0.3",
+    "safetensors": "0.7.0",
+    "torch": "2.11.0+cpu",
+    "transformers": "4.57.1",
+    "uvicorn": "0.44.0",
+}
+for distribution, version in expected.items():
+    actual = metadata.version(distribution)
+    if actual != version:
+        raise SystemExit(
+            f"retrieval dependency mismatch: {distribution}={actual}, expected {version}"
+        )
+PY
 
-cat >"$config_dir/intelligence.env" <<EOF
-INTELLIGENCE_HTTP_HOST=127.0.0.1
-INTELLIGENCE_HTTP_PORT=18082
-INTELLIGENCE_EMBEDDING_BASE_URL=$embedding_base_url
-INTELLIGENCE_EMBEDDING_API_KEY=$embedding_api_key
+cat >"$retrieval_env" <<EOF
+INTELLIGENCE_HTTP_PORT=18083
+INTELLIGENCE_EMBEDDING_BASE_URL=http://127.0.0.1:11434/v1
 INTELLIGENCE_EMBEDDING_MODEL=$embedding_model
 INTELLIGENCE_EMBEDDING_DIMENSION=$embedding_dimension
 INTELLIGENCE_EMBEDDING_TIMEOUT_SECONDS=$embedding_timeout
-INTELLIGENCE_ROUTING_DENSE_MIN_SIMILARITY=$routing_dense_min_similarity
+INTELLIGENCE_RERANKER_MODEL=$reranker_model
+INTELLIGENCE_RERANKER_REVISION=$reranker_revision
+INTELLIGENCE_RERANKER_PATH=$reranker_path
+INTELLIGENCE_RERANKER_DEVICE=cpu
+INTELLIGENCE_RERANKER_MAX_LENGTH=512
+INTELLIGENCE_RERANKER_BATCH_SIZE=16
+TRANSFORMERS_OFFLINE=1
+HF_HUB_OFFLINE=1
+TOKENIZERS_PARALLELISM=false
+OMP_NUM_THREADS=36
+MKL_NUM_THREADS=36
 EOF
-chown root:"$runtime_group" "$config_dir/intelligence.env"
-chmod 0640 "$config_dir/intelligence.env"
+chown root:"$runtime_group" "$retrieval_env"
+chmod 0640 "$retrieval_env"
+rm -f "$config_dir/intelligence.env"
 
 if [[ ! -f "$action_env" ]]; then
   action_password="$(openssl rand -hex 24)"
@@ -192,7 +242,7 @@ chmod 0640 "$action_env"
 
 cat >/etc/systemd/system/openim-intelligence-tunnel.service <<EOF
 [Unit]
-Description=OpenIM loopback-only intelligence tunnel to Windows node1
+Description=OpenIM loopback-only candidate-generation tunnel to Windows node1
 After=network-online.target
 Wants=network-online.target
 
@@ -213,11 +263,44 @@ UMask=0077
 WantedBy=multi-user.target
 EOF
 
+cat >/etc/systemd/system/openim-retrieval-worker.service <<EOF
+[Unit]
+Description=OpenIM loopback-only enterprise retrieval worker
+Requires=ollama.service
+After=network-online.target ollama.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=$runtime_user
+Group=$runtime_group
+EnvironmentFile=$retrieval_env
+Environment=PYTHONUNBUFFERED=1
+Environment=HTTP_PROXY=
+Environment=HTTPS_PROXY=
+Environment=ALL_PROXY=
+Environment=http_proxy=
+Environment=https_proxy=
+Environment=all_proxy=
+Environment=NO_PROXY=127.0.0.1,localhost
+ExecStart=$retrieval_venv/bin/python -m intelligence_worker.retrieval_bootstrap
+Restart=on-failure
+RestartSec=5s
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
 cat >/etc/systemd/system/openim-agent-runtime.service <<EOF
 [Unit]
 Description=OpenIM governed Agent Runtime
-Requires=docker.service openim-intelligence-tunnel.service
-After=docker.service openim-intelligence-tunnel.service
+Requires=docker.service openim-intelligence-tunnel.service openim-retrieval-worker.service
+After=docker.service openim-intelligence-tunnel.service openim-retrieval-worker.service
 
 [Service]
 Type=simple
@@ -366,6 +449,31 @@ write_platform_worker_unit \
   openim-proactive-runtime "OpenIM proactive Agent Runtime" proactive-runtime \
   "docker.service openim-intelligence-tunnel.service" \
   "docker.service openim-intelligence-tunnel.service"
+install -d -m 0750 -o "$runtime_user" -g "$runtime_group" /var/lib/openim-platform/knowledge-ingestion
+cat >/etc/systemd/system/openim-knowledge-ingestion.service <<EOF
+[Unit]
+Description=OpenIM enterprise knowledge ingestion
+Requires=docker.service openim-retrieval-worker.service
+After=docker.service openim-retrieval-worker.service
+
+[Service]
+Type=simple
+User=$runtime_user
+Group=$runtime_group
+EnvironmentFile=$config_dir/platform.env
+ExecStart=$bin_dir/knowledge-ingestion
+Restart=on-failure
+RestartSec=3s
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/var/lib/openim-platform/knowledge-ingestion
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target
+EOF
 write_telegram_worker_unit \
   openim-telegram-ingress "OpenIM Telegram ingress" telegram-ingress
 write_delivery_worker_unit
@@ -399,24 +507,43 @@ assert_running_binary openim-memory-projector.service "$bin_dir/memory-projector
 systemctl disable --now openim-intelligence-worker.service >/dev/null 2>&1 || true
 rm -f /etc/systemd/system/openim-intelligence-worker.service
 systemctl daemon-reload
-systemctl enable openim-intelligence-tunnel.service openim-agent-runtime.service \
-  openim-memory-extractor.service openim-proactive-runtime.service
-systemctl stop openim-agent-runtime.service openim-memory-extractor.service openim-proactive-runtime.service
-systemctl restart openim-intelligence-tunnel.service
+systemctl enable openim-intelligence-tunnel.service openim-retrieval-worker.service \
+  openim-agent-runtime.service \
+  openim-memory-extractor.service openim-proactive-runtime.service \
+  openim-knowledge-ingestion.service
+systemctl stop openim-agent-runtime.service openim-memory-extractor.service \
+  openim-proactive-runtime.service openim-knowledge-ingestion.service
+systemctl restart openim-intelligence-tunnel.service openim-retrieval-worker.service
+systemctl is-active openim-intelligence-tunnel.service openim-retrieval-worker.service
+for endpoint in http://127.0.0.1:18082/healthz http://127.0.0.1:18083/healthz; do
   for _ in $(seq 1 60); do
-    if curl --fail --silent --show-error http://127.0.0.1:18082/healthz >/dev/null; then
+    if curl --fail --silent --show-error "$endpoint" >/dev/null; then
       break
     fi
     sleep 2
   done
-  curl --fail --silent --show-error http://127.0.0.1:18082/healthz >/dev/null
-  embedding_probe="$(mktemp)"
-  trap 'rm -f "$embedding_probe"' EXIT
-  curl --fail --silent --show-error --max-time "$((embedding_timeout + 5))" \
+  curl --fail --silent --show-error "$endpoint" >/dev/null
+done
+assert_running_binary openim-retrieval-worker.service "$retrieval_venv/bin/python"
+
+retrieval_candidate_status="$(
+  curl --silent --output /dev/null --write-out '%{http_code}' \
     -H 'Content-Type: application/json' \
-    --data '{"texts":["node2 deployment readiness"]}' \
-    http://127.0.0.1:18082/v1/embeddings >"$embedding_probe"
-  "$venv/bin/python" - "$embedding_probe" "$embedding_model" "$embedding_dimension" <<'PY'
+    --data '{}' \
+    http://127.0.0.1:18083/v1/candidates
+)"
+[[ "$retrieval_candidate_status" == "404" ]] || {
+  echo "retrieval worker unexpectedly exposes candidate generation" >&2
+  exit 1
+}
+
+embedding_probe="$(mktemp)"
+trap 'rm -f "$embedding_probe"' EXIT
+curl --fail --silent --show-error --max-time "$((embedding_timeout + 5))" \
+  -H 'Content-Type: application/json' \
+  --data '{"texts":["node2 deployment readiness"]}' \
+  http://127.0.0.1:18083/v1/embeddings >"$embedding_probe"
+"$retrieval_venv/bin/python" - "$embedding_probe" "$embedding_model" "$embedding_dimension" <<'PY'
 import json
 import sys
 
@@ -437,26 +564,59 @@ if not isinstance(vectors[0], list) or len(vectors[0]) != expected_dimension:
 if not all(isinstance(value, (int, float)) for value in vectors[0]):
     raise SystemExit("embedding probe returned a non-numeric vector")
 PY
-  rm -f "$embedding_probe"
-  trap - EXIT
-  database_url="$(sed -n 's/^PLATFORM_DATABASE_URL=//p' "$config_dir/platform.env" | tail -1 | tr -d '\r')"
-  [[ "$database_url" =~ ^postgres(ql)?://[^[:space:]]+$ ]] || {
-    unset database_url
-    echo "platform database URL is missing or malformed" >&2
-    exit 1
-  }
-  index_report="$(mktemp)"
-  trap 'rm -f "$index_report"' EXIT
-  runuser -u "$runtime_user" -- env \
-    PLATFORM_DATABASE_URL="$database_url" \
-    PLATFORM_INTELLIGENCE_URL=http://127.0.0.1:18082 \
-    PLATFORM_RETRIEVAL_EMBEDDING_MODEL="$embedding_model" \
-    PLATFORM_RETRIEVAL_EMBEDDING_DIMENSION="$embedding_dimension" \
-    "$bin_dir/knowledge-rag-admin" \
-      -mode index -batch-size "$knowledge_index_batch_size" \
-      -timeout "$((embedding_timeout * 2))s" >"$index_report"
+rm -f "$embedding_probe"
+trap - EXIT
+
+reranker_probe="$(mktemp)"
+trap 'rm -f "$reranker_probe"' EXIT
+curl --fail --silent --show-error --max-time 180 \
+  -H 'Content-Type: application/json' \
+  --data '{"query":"enterprise security policy","candidates":[{"candidate_id":"probe-1","content":"The enterprise security policy requires access review."}]}' \
+  http://127.0.0.1:18083/v1/rerank >"$reranker_probe"
+"$retrieval_venv/bin/python" - "$reranker_probe" "$reranker_model" "$reranker_revision" <<'PY'
+import json
+import math
+import sys
+
+path, expected_model, expected_revision = sys.argv[1:]
+with open(path, encoding="utf-8") as handle:
+    body = json.load(handle)
+scores = body.get("scores")
+if body.get("model") != expected_model or body.get("revision") != expected_revision:
+    raise SystemExit("reranker probe returned an unexpected locked model")
+if (
+    not isinstance(scores, list)
+    or len(scores) != 1
+    or scores[0].get("candidate_id") != "probe-1"
+    or not isinstance(scores[0].get("score"), (int, float))
+    or not math.isfinite(scores[0]["score"])
+):
+    raise SystemExit("reranker probe returned an invalid score")
+PY
+rm -f "$reranker_probe"
+trap - EXIT
+
+database_url="$(sed -n 's/^PLATFORM_DATABASE_URL=//p' "$config_dir/platform.env" | tail -1 | tr -d '\r')"
+[[ "$database_url" =~ ^postgres(ql)?://[^[:space:]]+$ ]] || {
   unset database_url
-  "$venv/bin/python" - "$index_report" <<'PY'
+  echo "platform database URL is missing or malformed" >&2
+  exit 1
+}
+index_report="$(mktemp)"
+trap 'rm -f "$index_report"' EXIT
+runuser -u "$runtime_user" -- env \
+  PLATFORM_DATABASE_URL="$database_url" \
+  PLATFORM_RETRIEVAL_INTELLIGENCE_URL=http://127.0.0.1:18083 \
+  PLATFORM_RETRIEVAL_EMBEDDING_MODEL="$embedding_model" \
+  PLATFORM_RETRIEVAL_EMBEDDING_DIMENSION="$embedding_dimension" \
+  "$bin_dir/knowledge-rag-admin" \
+    -mode index \
+    -intelligence-url http://127.0.0.1:18083 \
+    -batch-size "$knowledge_index_batch_size" \
+    -embedding-workers "$knowledge_index_embedding_workers" \
+    -timeout "$((embedding_timeout * 2))s" >"$index_report"
+unset database_url
+"$retrieval_venv/bin/python" - "$index_report" <<'PY'
 import json
 import sys
 
@@ -467,15 +627,20 @@ if not isinstance(indexed, int) or indexed < 0:
     raise SystemExit("knowledge embedding index report is invalid")
 print(f"knowledge_embeddings_indexed={indexed}")
 PY
-  rm -f "$index_report"
-  trap - EXIT
-  systemctl restart openim-agent-runtime.service openim-memory-extractor.service openim-proactive-runtime.service
-  systemctl is-active openim-intelligence-tunnel.service openim-agent-runtime.service \
-    openim-memory-extractor.service openim-proactive-runtime.service
-  assert_running_binary openim-agent-runtime.service "$bin_dir/agent-runtime"
-  assert_running_binary openim-memory-extractor.service "$bin_dir/memory-extractor"
-  assert_running_binary openim-proactive-runtime.service "$bin_dir/proactive-runtime"
-echo "intelligence_tunnel=active"
+rm -f "$index_report"
+trap - EXIT
+
+systemctl restart openim-agent-runtime.service openim-memory-extractor.service \
+  openim-proactive-runtime.service openim-knowledge-ingestion.service
+systemctl is-active openim-intelligence-tunnel.service openim-retrieval-worker.service \
+  openim-agent-runtime.service openim-memory-extractor.service \
+  openim-proactive-runtime.service openim-knowledge-ingestion.service
+assert_running_binary openim-agent-runtime.service "$bin_dir/agent-runtime"
+assert_running_binary openim-memory-extractor.service "$bin_dir/memory-extractor"
+assert_running_binary openim-proactive-runtime.service "$bin_dir/proactive-runtime"
+assert_running_binary openim-knowledge-ingestion.service "$bin_dir/knowledge-ingestion"
+echo "candidate_generation_tunnel=active"
+echo "retrieval_worker=active"
 systemctl enable openim-agent-delivery.service
 systemctl restart openim-agent-delivery.service
 systemctl is-active openim-agent-delivery.service

@@ -124,9 +124,13 @@ export function AgentWorkspace({ controller, state, controlController, controlSt
                     <section className="citation-section" aria-label="引用来源">
                       <h3><BookOpen size={15} />引用来源</h3>
                       {run.citations.map((citation) => (
-                        <div className="citation-row" key={citation.citation_id}>
-                          <b>[{citation.citation_id}]</b><span>{citation.title}</span><code>{citation.source_uri}</code>
-                        </div>
+                        <details className="citation-detail" key={citation.citation_id}>
+                          <summary className="citation-row">
+                            <b>[{citation.citation_id}]</b><span>{citation.title}</span><code>{citation.source_uri}</code>
+                          </summary>
+                          {citation.authorized_excerpt && <p>{citation.authorized_excerpt}</p>}
+                          <code>{citation.checksum}</code>
+                        </details>
                       ))}
                     </section>
                   )}

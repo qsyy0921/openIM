@@ -18,6 +18,7 @@ import (
 	"github.com/qsyy0921/openim/platform/services/platform-api/internal/delegation"
 	"github.com/qsyy0921/openim/platform/services/platform-api/internal/httpserver"
 	"github.com/qsyy0921/openim/platform/services/platform-api/internal/identity"
+	"github.com/qsyy0921/openim/platform/services/platform-api/internal/knowledge"
 	"github.com/qsyy0921/openim/platform/services/platform-api/internal/memory"
 	"github.com/qsyy0921/openim/platform/services/platform-api/internal/observe"
 	openimclient "github.com/qsyy0921/openim/platform/services/platform-api/internal/openim"
@@ -60,6 +61,29 @@ func main() {
 		Timeout:   cfg.DependencyTimeout,
 	})
 	identityStore := identity.NewPostgresStore(pool)
+	if cfg.KnowledgeParserRevision != knowledge.ParserRevision {
+		slog.Error("knowledge parser revision does not match the compiled contract",
+			"configured", cfg.KnowledgeParserRevision, "compiled", knowledge.ParserRevision)
+		os.Exit(1)
+	}
+	knowledgeObjects, err := knowledge.NewMinIOStore(startupCtx, knowledge.MinIOConfig{
+		Endpoint: cfg.KnowledgeMinIOURL, AccessKey: cfg.KnowledgeMinIOAccessKey,
+		SecretKey: cfg.KnowledgeMinIOSecretKey, Bucket: cfg.KnowledgeMinIOBucket,
+	})
+	if err != nil {
+		slog.Error("configure knowledge object storage failed", "error", err)
+		os.Exit(1)
+	}
+	knowledgeStore, err := knowledge.NewStore(pool, knowledge.StoreConfig{
+		Bucket: cfg.KnowledgeMinIOBucket, ParserRevision: cfg.KnowledgeParserRevision,
+		EmbeddingRevision:  cfg.RetrievalEmbeddingModel,
+		EmbeddingDimension: cfg.RetrievalEmbeddingDimension, MaxAttempts: cfg.KnowledgeMaxAttempts,
+	})
+	if err != nil {
+		slog.Error("configure knowledge repository failed", "error", err)
+		os.Exit(1)
+	}
+	knowledgeService := knowledge.NewService(verifier, identityStore, knowledgeStore, knowledgeObjects)
 	sessions := identity.NewService(
 		verifier,
 		identityStore,
@@ -92,7 +116,9 @@ func main() {
 		}
 		admin.SetRemoteA2AStore(remotea2a.NewStore(pool, a2aClient))
 	}
-	handler := httpserver.NewHandlerWithAgentControlsAndTelegramLinks(cfg.Version, sessions, devices, approvals, workspace, catalog, control, admin, telegramLinks)
+	handler := httpserver.NewHandlerWithAgentControlsTelegramLinksAndKnowledge(
+		cfg.Version, sessions, devices, approvals, workspace, catalog, control, admin, telegramLinks, knowledgeService,
+	)
 
 	listener, err := net.Listen("tcp", cfg.HTTPAddr)
 	if err != nil {

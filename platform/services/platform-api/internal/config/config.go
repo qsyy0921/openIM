@@ -12,34 +12,50 @@ import (
 )
 
 const (
-	httpAddrKey          = "PLATFORM_HTTP_ADDR"
-	versionKey           = "PLATFORM_VERSION"
-	shutdownTimeoutKey   = "PLATFORM_SHUTDOWN_TIMEOUT"
-	databaseURLKey       = "PLATFORM_DATABASE_URL"
-	oidcIssuerKey        = "PLATFORM_OIDC_ISSUER"
-	oidcAudienceKey      = "PLATFORM_OIDC_AUDIENCE"
-	openIMAPIURLKey      = "PLATFORM_OPENIM_API_URL"
-	openIMWSURLKey       = "PLATFORM_OPENIM_WS_URL"
-	openIMSecretKey      = "PLATFORM_OPENIM_SECRET"
-	openIMAdminUserKey   = "PLATFORM_OPENIM_ADMIN_USER_ID"
-	dependencyTimeoutKey = "PLATFORM_DEPENDENCY_TIMEOUT"
+	httpAddrKey                    = "PLATFORM_HTTP_ADDR"
+	versionKey                     = "PLATFORM_VERSION"
+	shutdownTimeoutKey             = "PLATFORM_SHUTDOWN_TIMEOUT"
+	databaseURLKey                 = "PLATFORM_DATABASE_URL"
+	oidcIssuerKey                  = "PLATFORM_OIDC_ISSUER"
+	oidcAudienceKey                = "PLATFORM_OIDC_AUDIENCE"
+	openIMAPIURLKey                = "PLATFORM_OPENIM_API_URL"
+	openIMWSURLKey                 = "PLATFORM_OPENIM_WS_URL"
+	openIMSecretKey                = "PLATFORM_OPENIM_SECRET"
+	openIMAdminUserKey             = "PLATFORM_OPENIM_ADMIN_USER_ID"
+	dependencyTimeoutKey           = "PLATFORM_DEPENDENCY_TIMEOUT"
+	knowledgeMinIOURLKey           = "PLATFORM_KNOWLEDGE_MINIO_URL"
+	knowledgeMinIOAccessKey        = "PLATFORM_KNOWLEDGE_MINIO_ACCESS_KEY"
+	knowledgeMinIOSecretKey        = "PLATFORM_KNOWLEDGE_MINIO_SECRET_KEY"
+	knowledgeMinIOBucketKey        = "PLATFORM_KNOWLEDGE_MINIO_BUCKET"
+	knowledgeParserRevisionKey     = "PLATFORM_KNOWLEDGE_PARSER_REVISION"
+	knowledgeMaxAttemptsKey        = "PLATFORM_KNOWLEDGE_INGESTION_MAX_ATTEMPTS"
+	retrievalEmbeddingModelKey     = "PLATFORM_RETRIEVAL_EMBEDDING_MODEL"
+	retrievalEmbeddingDimensionKey = "PLATFORM_RETRIEVAL_EMBEDDING_DIMENSION"
 )
 
 type Config struct {
-	HTTPAddr               string
-	Version                string
-	ShutdownTimeout        time.Duration
-	DependencyTimeout      time.Duration
-	DatabaseURL            string
-	OIDCIssuer             string
-	OIDCAudience           string
-	OpenIMAPIURL           string
-	OpenIMWSURL            string
-	OpenIMSecret           string
-	OpenIMAdminUserID      string
-	A2AAllowedHosts        []string
-	A2AAllowedPrivateCIDRs []string
-	A2ATimeout             time.Duration
+	HTTPAddr                    string
+	Version                     string
+	ShutdownTimeout             time.Duration
+	DependencyTimeout           time.Duration
+	DatabaseURL                 string
+	OIDCIssuer                  string
+	OIDCAudience                string
+	OpenIMAPIURL                string
+	OpenIMWSURL                 string
+	OpenIMSecret                string
+	OpenIMAdminUserID           string
+	KnowledgeMinIOURL           string
+	KnowledgeMinIOAccessKey     string
+	KnowledgeMinIOSecretKey     string
+	KnowledgeMinIOBucket        string
+	KnowledgeParserRevision     string
+	KnowledgeMaxAttempts        int
+	RetrievalEmbeddingModel     string
+	RetrievalEmbeddingDimension int
+	A2AAllowedHosts             []string
+	A2AAllowedPrivateCIDRs      []string
+	A2ATimeout                  time.Duration
 }
 
 type LookupEnv func(string) (string, bool)
@@ -106,6 +122,41 @@ func Load(lookup LookupEnv) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	knowledgeMinIOURL, err := requiredURL(lookup, knowledgeMinIOURLKey, "http", "https")
+	if err != nil {
+		return Config{}, err
+	}
+	knowledgeMinIOAccess, err := required(lookup, knowledgeMinIOAccessKey)
+	if err != nil {
+		return Config{}, err
+	}
+	knowledgeMinIOSecret, err := required(lookup, knowledgeMinIOSecretKey)
+	if err != nil {
+		return Config{}, err
+	}
+	knowledgeMinIOBucket, err := required(lookup, knowledgeMinIOBucketKey)
+	if err != nil {
+		return Config{}, err
+	}
+	if len(knowledgeMinIOBucket) < 3 || len(knowledgeMinIOBucket) > 63 {
+		return Config{}, fmt.Errorf("%s: bucket length must be between 3 and 63", knowledgeMinIOBucketKey)
+	}
+	knowledgeParserRevision, err := required(lookup, knowledgeParserRevisionKey)
+	if err != nil {
+		return Config{}, err
+	}
+	knowledgeMaxAttempts, err := requiredInt(lookup, knowledgeMaxAttemptsKey, 1, 8)
+	if err != nil {
+		return Config{}, err
+	}
+	retrievalEmbeddingModel, err := required(lookup, retrievalEmbeddingModelKey)
+	if err != nil {
+		return Config{}, err
+	}
+	retrievalEmbeddingDimension, err := requiredInt(lookup, retrievalEmbeddingDimensionKey, 2560, 2560)
+	if err != nil {
+		return Config{}, err
+	}
 	a2aHosts := optionalCSV(lookup, "PLATFORM_A2A_ALLOWED_HOSTS")
 	var a2aTimeout time.Duration
 	if len(a2aHosts) > 0 {
@@ -116,21 +167,41 @@ func Load(lookup LookupEnv) (Config, error) {
 	}
 
 	return Config{
-		HTTPAddr:               httpAddr,
-		Version:                version,
-		ShutdownTimeout:        shutdownTimeout,
-		DependencyTimeout:      dependencyTimeout,
-		DatabaseURL:            databaseURL,
-		OIDCIssuer:             strings.TrimRight(oidcIssuer, "/"),
-		OIDCAudience:           oidcAudience,
-		OpenIMAPIURL:           strings.TrimRight(openIMAPIURL, "/"),
-		OpenIMWSURL:            openIMWSURL,
-		OpenIMSecret:           openIMSecret,
-		OpenIMAdminUserID:      openIMAdminUserID,
-		A2AAllowedHosts:        a2aHosts,
-		A2AAllowedPrivateCIDRs: optionalCSV(lookup, "PLATFORM_A2A_ALLOWED_PRIVATE_CIDRS"),
-		A2ATimeout:             a2aTimeout,
+		HTTPAddr:                    httpAddr,
+		Version:                     version,
+		ShutdownTimeout:             shutdownTimeout,
+		DependencyTimeout:           dependencyTimeout,
+		DatabaseURL:                 databaseURL,
+		OIDCIssuer:                  strings.TrimRight(oidcIssuer, "/"),
+		OIDCAudience:                oidcAudience,
+		OpenIMAPIURL:                strings.TrimRight(openIMAPIURL, "/"),
+		OpenIMWSURL:                 openIMWSURL,
+		OpenIMSecret:                openIMSecret,
+		OpenIMAdminUserID:           openIMAdminUserID,
+		KnowledgeMinIOURL:           strings.TrimRight(knowledgeMinIOURL, "/"),
+		KnowledgeMinIOAccessKey:     knowledgeMinIOAccess,
+		KnowledgeMinIOSecretKey:     knowledgeMinIOSecret,
+		KnowledgeMinIOBucket:        knowledgeMinIOBucket,
+		KnowledgeParserRevision:     knowledgeParserRevision,
+		KnowledgeMaxAttempts:        knowledgeMaxAttempts,
+		RetrievalEmbeddingModel:     retrievalEmbeddingModel,
+		RetrievalEmbeddingDimension: retrievalEmbeddingDimension,
+		A2AAllowedHosts:             a2aHosts,
+		A2AAllowedPrivateCIDRs:      optionalCSV(lookup, "PLATFORM_A2A_ALLOWED_PRIVATE_CIDRS"),
+		A2ATimeout:                  a2aTimeout,
 	}, nil
+}
+
+func requiredInt(lookup LookupEnv, key string, minimum, maximum int) (int, error) {
+	raw, err := required(lookup, key)
+	if err != nil {
+		return 0, err
+	}
+	value, err := strconv.Atoi(raw)
+	if err != nil || value < minimum || value > maximum {
+		return 0, fmt.Errorf("%s: must be between %d and %d", key, minimum, maximum)
+	}
+	return value, nil
 }
 
 func optionalCSV(lookup LookupEnv, key string) []string {

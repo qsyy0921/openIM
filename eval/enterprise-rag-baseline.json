@@ -1,0 +1,39 @@
+{
+  "schema_version": 1,
+  "report_kind": "frozen_historical_baseline",
+  "baseline_commit": "21b06259e4e5d88d40e6ba455ee2fdc0e2ec7e9c",
+  "dataset": {
+    "revision": "enterprise-knowledge/v1",
+    "release_hash": "sha256:35fe1582af8f380cabd5d80f5fd2a19f099055ec2e7056df0a5c521658ffa157",
+    "qa_digest": "sha256:b9f163665f40c3f2e8392d00aa38080520144cf6dcff2e4236563703e0674c61",
+    "cases": 1120
+  },
+  "retrieval": {
+    "source_path": "platform/services/platform-api/eval/enterprise-rag-report.json",
+    "source_digest": "sha256:0f9d5651339e1b42066d8e8bea646feea222257196e8deb3cd82e6bbbc8c0791",
+    "source_schema_version": 3,
+    "answerable_cases": 1040,
+    "unanswerable_cases": 80,
+    "recall_at_8": 0.9288461538461539,
+    "mrr": 0.594902701465202,
+    "precision_at_8": 0.16694711538461537,
+    "unanswerable_retrieval_empty_rate": 0,
+    "provenance_integrity": 1
+  },
+  "generation": {
+    "source_path": "platform/services/platform-api/eval/enterprise-rag-generation-report.json",
+    "source_digest": "sha256:0c0f7ff6ade66f57b154a2c62ac56903af0ccbcafae2ac586c863694d8ad875e",
+    "source_schema_version": 1,
+    "model": "qwen2.5:3b",
+    "cases": 40,
+    "candidate_contract_success_rate": 0,
+    "production_gate_evaluated": false
+  },
+  "comparison_contract": {
+    "recall_at_10_must_not_be_lower_than_baseline_recall_at_8": 0.9288461538461539,
+    "mrr_must_not_be_lower_than_baseline": 0.594902701465202,
+    "provenance_integrity_must_equal": 1,
+    "precision_at_8_is_not_compared_to_precision_at_10": true,
+    "historical_generation_is_negative_evidence_only": true
+  }
+}

@@ -5,6 +5,7 @@ export type AgentCitation = {
   title: string;
   source_uri: string;
   checksum: string;
+  authorized_excerpt?: string;
 };
 
 export type AgentIntent = {

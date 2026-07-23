@@ -22,6 +22,11 @@ EMBEDDING_BATCH = Histogram(
     "Texts per embedding request.",
     buckets=(1, 2, 4, 8, 16, 32, 64, 128),
 )
+RERANKER_BATCH = Histogram(
+    "openim_intelligence_reranker_batch_size",
+    "Authorized candidate pairs per reranker request.",
+    buckets=(1, 2, 4, 8, 16, 32),
+)
 
 
 async def observe_request(request: Request, call_next):

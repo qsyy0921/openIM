@@ -2,7 +2,9 @@ package retrieval
 
 import (
 	"context"
+	"crypto/sha256"
 	"errors"
+	"fmt"
 	"testing"
 )
 
@@ -25,12 +27,14 @@ func (s generationProviderStub) Generate(_ context.Context, request GenerationRe
 }
 
 func TestEvaluateGenerationSeparatesGroundedAnswerAndAbstention(t *testing.T) {
+	content := "审批时限为48小时"
+	checksum := sha256.Sum256([]byte(content))
 	cases := []QACase{
 		{QAID: "answerable", Question: "审批时限？", Answerable: true, RequiredFacts: []string{"48小时"}, Evidence: []QAEvidence{{ChunkID: "chunk-a"}}},
 		{QAID: "unanswerable", Question: "未记录承诺？", Answerable: false},
 	}
 	search := generationSearchStub{byQuestion: map[string][]Evidence{
-		"审批时限？":  {{CitationID: "C1", ChunkID: "chunk-a", Content: "审批时限为48小时"}},
+		"审批时限？":  {{CitationID: "C1", ChunkID: "chunk-a", Content: content, Checksum: fmt.Sprintf("sha256:%x", checksum[:])}},
 		"未记录承诺？": {{CitationID: "C1", ChunkID: "chunk-b", Content: "会议纪要没有相关内容"}},
 	}}
 	provider := generationProviderStub{byCase: map[string]GenerationCandidate{
@@ -44,7 +48,7 @@ func TestEvaluateGenerationSeparatesGroundedAnswerAndAbstention(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if report.Cases != 2 || report.GroundingDecisionAccuracy != 1 || report.AbstentionAccuracy != 1 || report.RequiredFactCoverage != 1 || report.CitationPrecision != 1 || report.CitationRecall != 1 || report.CitationSyntaxIntegrity != 1 || report.EndToEndSuccessRate != 1 {
+	if report.Cases != 2 || report.GroundingDecisionAccuracy != 1 || report.AbstentionAccuracy != 1 || report.RequiredFactCoverage != 1 || report.CitationPrecision != 1 || report.CitationRecall != 1 || report.CitationChecksumIntegrity != 1 || report.Faithfulness != 1 || report.CitationSyntaxIntegrity != 1 || report.EndToEndSuccessRate != 1 {
 		t.Fatalf("unexpected generation report: %#v", report)
 	}
 }
@@ -67,6 +71,31 @@ func TestEvaluateGenerationPreservesProviderFailure(t *testing.T) {
 	}
 	if report.ProviderFailures != 2 || report.EndToEndSuccessRate != 0 || len(report.Failures) != 2 {
 		t.Fatalf("provider failure was hidden: %#v", report)
+	}
+}
+
+func TestEvaluateGenerationRejectsCandidateModelDrift(t *testing.T) {
+	cases := []QACase{
+		{QAID: "a", Question: "a", Answerable: true, Evidence: []QAEvidence{{ChunkID: "chunk-a"}}},
+		{QAID: "u", Question: "u", Answerable: false},
+	}
+	search := generationSearchStub{byQuestion: map[string][]Evidence{
+		"a": {{CitationID: "C1", ChunkID: "chunk-a", Content: "a"}},
+		"u": {{CitationID: "C1", ChunkID: "chunk-u", Content: "u"}},
+	}}
+	provider := generationProviderStub{byCase: map[string]GenerationCandidate{
+		"a": {Text: "a [C1]", Model: "alternate", ProviderResponseID: "a", CitationIDs: []string{"C1"}, GroundingStatus: GenerationGrounded},
+		"u": {Text: "insufficient", Model: "alternate", ProviderResponseID: "u", GroundingStatus: GenerationInsufficientEvidence},
+	}}
+	report, err := EvaluateGeneration(context.Background(), search, provider, cases, GenerationEvaluationConfig{
+		TenantID: "tenant", MemberID: "member", Model: LockedGenerationModel, Seed: "seed",
+		AnswerableCases: 1, UnanswerableCases: 1, RetrievalLimit: 8,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.ProviderFailures != 2 || report.GeneratedCandidates != 0 || report.EndToEndSuccessRate != 0 {
+		t.Fatalf("candidate model drift was accepted: %#v", report)
 	}
 }
 

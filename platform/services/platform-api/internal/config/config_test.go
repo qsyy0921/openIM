@@ -36,7 +36,10 @@ func TestLoadRequiresEveryValue(t *testing.T) {
 	for _, key := range []string{
 		httpAddrKey, versionKey, shutdownTimeoutKey, dependencyTimeoutKey,
 		databaseURLKey, oidcIssuerKey, oidcAudienceKey, openIMAPIURLKey,
-		openIMWSURLKey, openIMSecretKey, openIMAdminUserKey,
+		openIMWSURLKey, openIMSecretKey, openIMAdminUserKey, knowledgeMinIOURLKey,
+		knowledgeMinIOAccessKey, knowledgeMinIOSecretKey, knowledgeMinIOBucketKey,
+		knowledgeParserRevisionKey, knowledgeMaxAttemptsKey, retrievalEmbeddingModelKey,
+		retrievalEmbeddingDimensionKey,
 	} {
 		t.Run(key, func(t *testing.T) {
 			values := make(map[string]string, len(base))
@@ -85,17 +88,25 @@ func TestLoadRejectsInvalidValues(t *testing.T) {
 
 func validValues() map[string]string {
 	return map[string]string{
-		httpAddrKey:          "127.0.0.1:18080",
-		versionKey:           "test-version",
-		shutdownTimeoutKey:   "5s",
-		dependencyTimeoutKey: "3s",
-		databaseURLKey:       "postgres://platform:secret@127.0.0.1/platform",
-		oidcIssuerKey:        "https://identity.example.test/realms/platform/",
-		oidcAudienceKey:      "platform-api",
-		openIMAPIURLKey:      "http://127.0.0.1:10002/",
-		openIMWSURLKey:       "ws://127.0.0.1:10001",
-		openIMSecretKey:      "test-only-secret",
-		openIMAdminUserKey:   "imAdmin",
+		httpAddrKey:                    "127.0.0.1:18080",
+		versionKey:                     "test-version",
+		shutdownTimeoutKey:             "5s",
+		dependencyTimeoutKey:           "3s",
+		databaseURLKey:                 "postgres://platform:secret@127.0.0.1/platform",
+		oidcIssuerKey:                  "https://identity.example.test/realms/platform/",
+		oidcAudienceKey:                "platform-api",
+		openIMAPIURLKey:                "http://127.0.0.1:10002/",
+		openIMWSURLKey:                 "ws://127.0.0.1:10001",
+		openIMSecretKey:                "test-only-secret",
+		openIMAdminUserKey:             "imAdmin",
+		knowledgeMinIOURLKey:           "http://127.0.0.1:12005",
+		knowledgeMinIOAccessKey:        "test-access",
+		knowledgeMinIOSecretKey:        "test-secret",
+		knowledgeMinIOBucketKey:        "enterprise-knowledge",
+		knowledgeParserRevisionKey:     "openim-knowledge-parser-v1",
+		knowledgeMaxAttemptsKey:        "3",
+		retrievalEmbeddingModelKey:     "qwen3-embedding:4b",
+		retrievalEmbeddingDimensionKey: "2560",
 	}
 }
 

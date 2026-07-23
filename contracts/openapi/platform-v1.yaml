@@ -280,6 +280,163 @@ paths:
         "429": { "$ref": "#/components/responses/ErrorResponse" }
         "503": { "$ref": "#/components/responses/ErrorResponse" }
         "500": { "$ref": "#/components/responses/ErrorResponse" }
+  /v1/knowledge/documents:
+    get:
+      operationId: getKnowledgeAdminSnapshot
+      security:
+        - oidcBearer: []
+      parameters:
+        - { in: query, name: platform_id, required: true, schema: { type: integer, const: 5 } }
+        - { in: query, name: device_id, required: true, schema: { type: string, minLength: 1, maxLength: 128 } }
+        - { in: query, name: document_id, required: false, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: Knowledge administration snapshot for an authorized administrator.
+          content:
+            application/json:
+              schema: { "$ref": "#/components/schemas/KnowledgeAdminSnapshot" }
+        "401": { "$ref": "#/components/responses/ErrorResponse" }
+        "403": { "$ref": "#/components/responses/ErrorResponse" }
+        "502": { "$ref": "#/components/responses/ErrorResponse" }
+    post:
+      operationId: uploadKnowledgeDocument
+      security:
+        - oidcBearer: []
+      parameters:
+        - { in: query, name: platform_id, required: true, schema: { type: integer, const: 5 } }
+        - { in: query, name: device_id, required: true, schema: { type: string, minLength: 1, maxLength: 128 } }
+        - { in: header, name: Idempotency-Key, required: true, schema: { type: string, minLength: 16, maxLength: 200 } }
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema: { "$ref": "#/components/schemas/KnowledgeUpload" }
+      responses:
+        "202":
+          description: Immutable source stored and ingestion durably queued.
+          content:
+            application/json:
+              schema: { "$ref": "#/components/schemas/KnowledgeUploadResult" }
+        "200":
+          description: Idempotent replay of an existing immutable version.
+          content:
+            application/json:
+              schema: { "$ref": "#/components/schemas/KnowledgeUploadResult" }
+        "401": { "$ref": "#/components/responses/ErrorResponse" }
+        "403": { "$ref": "#/components/responses/ErrorResponse" }
+        "409": { "$ref": "#/components/responses/ErrorResponse" }
+        "422": { "$ref": "#/components/responses/ErrorResponse" }
+        "502": { "$ref": "#/components/responses/ErrorResponse" }
+  /v1/knowledge/documents/{document_id}/versions:
+    get:
+      operationId: listKnowledgeDocumentVersions
+      security:
+        - oidcBearer: []
+      parameters:
+        - { in: path, name: document_id, required: true, schema: { type: string, format: uuid } }
+        - { in: query, name: platform_id, required: true, schema: { type: integer, const: 5 } }
+        - { in: query, name: device_id, required: true, schema: { type: string, minLength: 1, maxLength: 128 } }
+      responses:
+        "200":
+          description: Immutable versions ordered newest first.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { "$ref": "#/components/schemas/KnowledgeVersion" }
+        "401": { "$ref": "#/components/responses/ErrorResponse" }
+        "403": { "$ref": "#/components/responses/ErrorResponse" }
+        "404": { "$ref": "#/components/responses/ErrorResponse" }
+    post:
+      operationId: uploadKnowledgeDocumentVersion
+      security:
+        - oidcBearer: []
+      parameters:
+        - { in: path, name: document_id, required: true, schema: { type: string, format: uuid } }
+        - { in: query, name: platform_id, required: true, schema: { type: integer, const: 5 } }
+        - { in: query, name: device_id, required: true, schema: { type: string, minLength: 1, maxLength: 128 } }
+        - { in: header, name: Idempotency-Key, required: true, schema: { type: string, minLength: 16, maxLength: 200 } }
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema: { "$ref": "#/components/schemas/KnowledgeUpload" }
+      responses:
+        "202":
+          description: New immutable version stored and durably queued.
+          content:
+            application/json:
+              schema: { "$ref": "#/components/schemas/KnowledgeUploadResult" }
+        "200":
+          description: Idempotent replay.
+          content:
+            application/json:
+              schema: { "$ref": "#/components/schemas/KnowledgeUploadResult" }
+        "401": { "$ref": "#/components/responses/ErrorResponse" }
+        "403": { "$ref": "#/components/responses/ErrorResponse" }
+        "409": { "$ref": "#/components/responses/ErrorResponse" }
+        "422": { "$ref": "#/components/responses/ErrorResponse" }
+        "502": { "$ref": "#/components/responses/ErrorResponse" }
+  /v1/knowledge/documents/{document_id}/versions/{version_id}/publish:
+    post:
+      operationId: publishKnowledgeDocumentVersion
+      security:
+        - oidcBearer: []
+      parameters:
+        - { in: path, name: document_id, required: true, schema: { type: string, format: uuid } }
+        - { in: path, name: version_id, required: true, schema: { type: string, format: uuid } }
+        - { in: query, name: platform_id, required: true, schema: { type: integer, const: 5 } }
+        - { in: query, name: device_id, required: true, schema: { type: string, minLength: 1, maxLength: 128 } }
+      responses:
+        "200": { description: Version became the only current published version. }
+        "401": { "$ref": "#/components/responses/ErrorResponse" }
+        "403": { "$ref": "#/components/responses/ErrorResponse" }
+        "404": { "$ref": "#/components/responses/ErrorResponse" }
+        "409": { "$ref": "#/components/responses/ErrorResponse" }
+  /v1/knowledge/documents/{document_id}/unpublish:
+    post:
+      operationId: unpublishKnowledgeDocument
+      security:
+        - oidcBearer: []
+      parameters:
+        - { in: path, name: document_id, required: true, schema: { type: string, format: uuid } }
+        - { in: query, name: platform_id, required: true, schema: { type: integer, const: 5 } }
+        - { in: query, name: device_id, required: true, schema: { type: string, minLength: 1, maxLength: 128 } }
+      responses:
+        "200": { description: Document was removed from production retrieval. }
+        "401": { "$ref": "#/components/responses/ErrorResponse" }
+        "403": { "$ref": "#/components/responses/ErrorResponse" }
+        "404": { "$ref": "#/components/responses/ErrorResponse" }
+        "409": { "$ref": "#/components/responses/ErrorResponse" }
+  /v1/knowledge/documents/{document_id}/grants/{member_id}:
+    put:
+      operationId: grantKnowledgeDocumentRead
+      security:
+        - oidcBearer: []
+      parameters:
+        - { in: path, name: document_id, required: true, schema: { type: string, format: uuid } }
+        - { in: path, name: member_id, required: true, schema: { type: string, format: uuid } }
+        - { in: query, name: platform_id, required: true, schema: { type: integer, const: 5 } }
+        - { in: query, name: device_id, required: true, schema: { type: string, minLength: 1, maxLength: 128 } }
+      responses:
+        "200": { description: Direct read grant is active. }
+        "401": { "$ref": "#/components/responses/ErrorResponse" }
+        "403": { "$ref": "#/components/responses/ErrorResponse" }
+        "404": { "$ref": "#/components/responses/ErrorResponse" }
+    delete:
+      operationId: revokeKnowledgeDocumentRead
+      security:
+        - oidcBearer: []
+      parameters:
+        - { in: path, name: document_id, required: true, schema: { type: string, format: uuid } }
+        - { in: path, name: member_id, required: true, schema: { type: string, format: uuid } }
+        - { in: query, name: platform_id, required: true, schema: { type: integer, const: 5 } }
+        - { in: query, name: device_id, required: true, schema: { type: string, minLength: 1, maxLength: 128 } }
+      responses:
+        "200": { description: Direct read grant was revoked immediately. }
+        "401": { "$ref": "#/components/responses/ErrorResponse" }
+        "403": { "$ref": "#/components/responses/ErrorResponse" }
+        "404": { "$ref": "#/components/responses/ErrorResponse" }
 components:
   securitySchemes:
     oidcBearer:
@@ -477,6 +634,89 @@ components:
         title: { type: string, minLength: 1 }
         source_uri: { type: string, minLength: 1 }
         checksum: { type: string, minLength: 1 }
+        authorized_excerpt: { type: string, minLength: 1, maxLength: 1200 }
+    KnowledgeUpload:
+      type: object
+      additionalProperties: false
+      required: [title, classification, file]
+      properties:
+        title: { type: string, minLength: 1, maxLength: 300 }
+        classification: { type: string, enum: [public, internal, confidential, restricted] }
+        file:
+          type: string
+          format: binary
+    KnowledgeUploadResult:
+      type: object
+      additionalProperties: false
+      required: [document_id, version_id, version_number, ingestion_state, idempotent]
+      properties:
+        document_id: { type: string, format: uuid }
+        version_id: { type: string, format: uuid }
+        version_number: { type: integer, minimum: 1 }
+        ingestion_state: { type: string, enum: [uploading, queued, processing, indexed, failed] }
+        idempotent: { type: boolean }
+    KnowledgeAdminSnapshot:
+      type: object
+      additionalProperties: false
+      required: [roles, documents, members]
+      properties:
+        roles:
+          type: array
+          uniqueItems: true
+          items: { type: string, enum: [knowledge_admin, platform_admin] }
+        documents:
+          type: array
+          items: { "$ref": "#/components/schemas/KnowledgeDocument" }
+        members:
+          type: array
+          items: { "$ref": "#/components/schemas/KnowledgeMember" }
+    KnowledgeDocument:
+      type: object
+      additionalProperties: false
+      required: [id, title, classification, status, grant_count, created_at]
+      properties:
+        id: { type: string, format: uuid }
+        title: { type: string, minLength: 1, maxLength: 300 }
+        classification: { type: string, enum: [public, internal, confidential, restricted] }
+        status: { type: string, enum: [active, deleted] }
+        current_version_id: { type: string, format: uuid }
+        current_version: { type: integer, minimum: 1 }
+        current_ingestion_state: { type: string }
+        latest_version_id: { type: string, format: uuid }
+        latest_version: { type: integer, minimum: 1 }
+        latest_ingestion_state: { type: string }
+        latest_failure_code: { type: string }
+        latest_failure_detail: { type: string }
+        grant_count: { type: integer, minimum: 0 }
+        created_at: { type: string, format: date-time }
+    KnowledgeVersion:
+      type: object
+      additionalProperties: false
+      required: [id, version_number, checksum, status, ingestion_state, created_at]
+      properties:
+        id: { type: string, format: uuid }
+        version_number: { type: integer, minimum: 1 }
+        checksum: { type: string, pattern: "^sha256:[0-9a-f]{64}$" }
+        status: { type: string, enum: [draft, published, superseded] }
+        ingestion_state: { type: string, enum: [legacy_indexed, uploading, queued, processing, indexed, failed] }
+        failure_code: { type: string }
+        failure_detail: { type: string }
+        source_format: { type: string, enum: [markdown, text, pdf, docx] }
+        original_filename: { type: string }
+        size_bytes: { type: integer, minimum: 1, maximum: 33554432 }
+        job_state: { type: string, enum: [queued, leased, retryable, succeeded, failed] }
+        attempts: { type: integer, minimum: 0, maximum: 8 }
+        created_at: { type: string, format: date-time }
+        published_at: { type: string, format: date-time }
+    KnowledgeMember:
+      type: object
+      additionalProperties: false
+      required: [id, display_name, status, granted]
+      properties:
+        id: { type: string, format: uuid }
+        display_name: { type: string, minLength: 1 }
+        status: { type: string, enum: [active, disabled] }
+        granted: { type: boolean }
     AgentIntent:
       type: object
       additionalProperties: false

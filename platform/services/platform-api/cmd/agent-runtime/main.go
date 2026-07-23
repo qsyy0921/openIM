@@ -59,14 +59,26 @@ func run() error {
 	consumer := agent.NewConsumer(group, cfg.EventTopic, store)
 	candidates := agent.NewCandidateClient(cfg.IntelligenceURL, cfg.DependencyTimeout)
 	embeddingClient, err := retrieval.NewHTTPEmbeddingClient(
-		cfg.IntelligenceURL, cfg.DependencyTimeout, cfg.RetrievalModelRevision, cfg.RetrievalDimension,
+		cfg.RetrievalIntelligenceURL,
+		cfg.DependencyTimeout,
+		cfg.RetrievalModelRevision,
+		cfg.RetrievalDimension,
 	)
 	if err != nil {
 		return err
 	}
-	retriever, err := retrieval.NewStore(pool, embeddingClient, retrieval.Config{
+	reranker, err := retrieval.NewHTTPReranker(
+		cfg.RetrievalIntelligenceURL, cfg.DependencyTimeout,
+		cfg.RetrievalRerankerModel, cfg.RetrievalRerankerRevision,
+	)
+	if err != nil {
+		return err
+	}
+	retriever, err := retrieval.NewStore(pool, embeddingClient, reranker, retrieval.Config{
 		ModelRevision: cfg.RetrievalModelRevision, Dimension: cfg.RetrievalDimension,
 		DenseMinSimilarity: cfg.RetrievalDenseMinSimilarity, MaxCandidates: cfg.RetrievalMaxCandidates,
+		RerankerModel: cfg.RetrievalRerankerModel, RerankerRevision: cfg.RetrievalRerankerRevision,
+		HNSWEFSearch: cfg.RetrievalHNSWEFSearch,
 	})
 	if err != nil {
 		return err
@@ -97,7 +109,7 @@ func run() error {
 		BaseURL: cfg.OpenIMAPIURL, Secret: cfg.OpenIMSecret,
 		AdminUser: cfg.OpenIMAdminUserID, Timeout: cfg.DependencyTimeout,
 	})
-	worker := agent.NewWorker(store, candidates, agent.NewToolPlannerClient(cfg.IntelligenceURL, cfg.DependencyTimeout), operationBridge{service: toolService}, memoryBridge{
+	worker := agent.NewWorker(store, candidates, agent.NewToolPlannerClient(cfg.IntelligenceURL, cfg.DependencyTimeout), operationBridge{service: toolService, retrieval: retriever}, memoryBridge{
 		store: memory.NewStore(pool), openIM: openIMClient, telegram: telegram.NewStore(pool),
 	}, actionBridge{store: actions}, router, deliveryBridge{store: delivery.NewStore(pool)}, cfg.Poll, cfg.Lease, cfg.MaxAttempts)
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -126,7 +138,10 @@ func (b actionBridge) EnsureIntent(ctx context.Context, request agent.IntentRequ
 	return agent.Intent{ID: result.ID, Digest: result.Digest}, err
 }
 
-type operationBridge struct{ service *toolruntime.Service }
+type operationBridge struct {
+	service   *toolruntime.Service
+	retrieval *retrieval.Store
+}
 
 type memoryBridge struct {
 	store    *memory.Store
@@ -153,6 +168,36 @@ func (b operationBridge) SearchKnowledge(ctx context.Context, _ agent.Run, snaps
 		return nil, err
 	}
 	return decodeKnowledgeResult(prepared, raw)
+}
+
+func (b operationBridge) ValidateKnowledgeCitations(ctx context.Context, run agent.Run, answer string, evidence []agent.Evidence) ([]agent.Evidence, error) {
+	if b.retrieval == nil {
+		return nil, errors.New("enterprise knowledge citation validator is not configured")
+	}
+	items := make([]retrieval.Evidence, len(evidence))
+	for index, item := range evidence {
+		items[index] = retrieval.Evidence{
+			CitationID: item.CitationID, DocumentID: item.DocumentID,
+			VersionID: item.VersionID, ChunkID: item.ChunkID, Title: item.Title,
+			SourceURI: item.SourceURI, Checksum: item.Checksum, Content: item.Content,
+		}
+	}
+	validated, err := b.retrieval.ValidateCitations(ctx, retrieval.Query{
+		TenantID: run.TenantID, MemberID: run.MemberID,
+		Purpose: "agent_answer", Text: run.Prompt, Limit: len(evidence),
+	}, answer, items)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]agent.Evidence, len(validated))
+	for index, item := range validated {
+		result[index] = agent.Evidence{
+			CitationID: item.CitationID, DocumentID: item.DocumentID,
+			VersionID: item.VersionID, ChunkID: item.ChunkID, Title: item.Title,
+			SourceURI: item.SourceURI, Checksum: item.Checksum, Content: item.Content,
+		}
+	}
+	return result, nil
 }
 
 func decodeKnowledgeResult(prepared toolruntime.PreparedCall, raw any) ([]agent.Evidence, error) {

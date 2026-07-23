@@ -55,14 +55,20 @@ func (s *runtimeStoreStub) Fail(_ context.Context, _ Run, failure string) error 
 }
 
 type retrieverStub struct {
-	query  RetrievalQuery
-	items  []Evidence
-	called bool
+	query            RetrievalQuery
+	items            []Evidence
+	called           bool
+	validationCalled bool
+	validationErr    error
 }
 
 func (s *retrieverStub) SearchKnowledge(_ context.Context, _ Run, _ capability.Snapshot, query RetrievalQuery) ([]Evidence, error) {
 	s.called, s.query = true, query
 	return s.items, nil
+}
+func (s *retrieverStub) ValidateKnowledgeCitations(_ context.Context, _ Run, _ string, evidence []Evidence) ([]Evidence, error) {
+	s.validationCalled = true
+	return evidence, s.validationErr
 }
 func (*retrieverStub) ExecuteTool(context.Context, Run, capability.Snapshot, ToolCallRequest) (ToolExecution, error) {
 	return ToolExecution{}, errors.New("unexpected tool execution")
@@ -72,10 +78,11 @@ type candidateGeneratorStub struct {
 	version CatalogVersion
 	result  Candidate
 	called  bool
+	memory  []MemoryFact
 }
 
-func (s *candidateGeneratorStub) Generate(_ context.Context, _ Run, version CatalogVersion, _ []Evidence, _ []MemoryFact, _ []ToolResultContext) (Candidate, error) {
-	s.called, s.version = true, version
+func (s *candidateGeneratorStub) Generate(_ context.Context, _ Run, version CatalogVersion, _ []Evidence, memory []MemoryFact, _ []ToolResultContext) (Candidate, error) {
+	s.called, s.version, s.memory = true, version, memory
 	return s.result, nil
 }
 
@@ -185,11 +192,12 @@ func TestWorkerUsesPinnedCatalogPolicyForCandidatePhase(t *testing.T) {
 	if !candidates.called || candidates.version.VersionID != "version-2" {
 		t.Fatalf("candidate version = %#v", candidates.version)
 	}
-	if store.savedCandidate == nil || len(store.savedEvidence) != 1 || store.savedEvidence[0].CitationID != "C1" {
+	if !retriever.validationCalled || store.savedCandidate == nil || len(store.savedEvidence) != 1 || store.savedEvidence[0].CitationID != "C1" {
 		t.Fatalf("saved candidate=%#v evidence=%#v", store.savedCandidate, store.savedEvidence)
 	}
-	if !memoryContext.searched || len(memoryContext.exposures) != 1 || memoryContext.reason != "knowledge_response" {
-		t.Fatalf("memory context=%#v", memoryContext)
+	if memoryContext.searched || memoryContext.groupSearched || len(memoryContext.exposures) != 0 ||
+		len(candidates.memory) != 0 {
+		t.Fatalf("enterprise RAG mixed memory into its evidence path: memory=%#v candidate=%#v", memoryContext, candidates)
 	}
 }
 

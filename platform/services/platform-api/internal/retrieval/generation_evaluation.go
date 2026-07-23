@@ -73,9 +73,13 @@ type GenerationEvaluationReport struct {
 	RequiredFactCoverage      float64                       `json:"required_fact_coverage"`
 	CitationPrecision         float64                       `json:"generated_citation_precision"`
 	CitationRecall            float64                       `json:"generated_citation_recall"`
+	CitationChecksumIntegrity float64                       `json:"citation_checksum_integrity"`
+	AnswerCorrectness         float64                       `json:"answer_correctness"`
+	Faithfulness              float64                       `json:"faithfulness"`
 	CitationSyntaxIntegrity   float64                       `json:"citation_syntax_integrity"`
 	EndToEndSuccessRate       float64                       `json:"end_to_end_success_rate"`
 	ProductionGateEvaluated   bool                          `json:"production_gate_evaluated"`
+	ProductionGatePassed      bool                          `json:"production_gate_passed"`
 	Failures                  []GenerationEvaluationFailure `json:"failures"`
 }
 
@@ -99,7 +103,9 @@ func EvaluateGeneration(ctx context.Context, searcher GenerationSearcher, provid
 		SchemaVersion: 1, EvaluatorVersion: "grounded-generation-v1", Model: config.Model,
 		SampleDigest: digest, Cases: len(selected), Failures: make([]GenerationEvaluationFailure, 0),
 	}
-	var decisions, abstentions, matchedFacts, totalFacts, correctCitations, totalCitations, citedExpected, totalExpected, syntaxValid, generated, successes float64
+	var decisions, abstentions, matchedFacts, totalFacts, correctCitations, totalCitations float64
+	var citedExpected, totalExpected, syntaxValid, checksumValid, checksumTotal float64
+	var faithful, generated, successes float64
 	for _, item := range selected {
 		if item.Answerable {
 			report.AnswerableCases++
@@ -138,7 +144,7 @@ func EvaluateGeneration(ctx context.Context, searcher GenerationSearcher, provid
 			report.Failures = append(report.Failures, GenerationEvaluationFailure{QAID: item.QAID, Reason: "provider_or_schema_failure"})
 			continue
 		}
-		if candidate.Model == "" || candidate.ProviderResponseID == "" || candidate.Text == "" {
+		if candidate.Model != config.Model || candidate.ProviderResponseID == "" || candidate.Text == "" {
 			report.ProviderFailures++
 			report.Failures = append(report.Failures, GenerationEvaluationFailure{QAID: item.QAID, Reason: "incomplete_candidate"})
 			continue
@@ -167,15 +173,22 @@ func EvaluateGeneration(ctx context.Context, searcher GenerationSearcher, provid
 			}
 		}
 		citationOK, correct, cited, expectedCited, _ := evaluateGeneratedCitations(candidate, evidence, item.Evidence)
+		validChecksums, checkedChecksums := evaluateGeneratedCitationChecksums(candidate, evidence)
+		checksumValid += float64(validChecksums)
+		checksumTotal += float64(checkedChecksums)
 		if citationOK {
 			syntaxValid++
+		}
+		faithfulCase := generationCaseFaithful(candidate, evidence, item)
+		if faithfulCase {
+			faithful++
 		}
 		if item.Answerable {
 			correctCitations += float64(correct)
 			totalCitations += float64(cited)
 			citedExpected += float64(expectedCited)
 		}
-		caseSuccess := decisionOK && citationOK
+		caseSuccess := decisionOK && citationOK && faithfulCase && validChecksums == checkedChecksums
 		if item.Answerable {
 			caseSuccess = caseSuccess && factsOK && correct > 0
 		}
@@ -205,6 +218,7 @@ func EvaluateGeneration(ctx context.Context, searcher GenerationSearcher, provid
 	}
 	if totalFacts > 0 {
 		report.RequiredFactCoverage = matchedFacts / totalFacts
+		report.AnswerCorrectness = report.RequiredFactCoverage
 	}
 	if totalCitations > 0 {
 		report.CitationPrecision = correctCitations / totalCitations
@@ -214,7 +228,20 @@ func EvaluateGeneration(ctx context.Context, searcher GenerationSearcher, provid
 	}
 	if generated > 0 {
 		report.CitationSyntaxIntegrity = syntaxValid / generated
+		report.Faithfulness = faithful / generated
 	}
+	if checksumTotal > 0 {
+		report.CitationChecksumIntegrity = checksumValid / checksumTotal
+	} else if generated > 0 && report.GeneratedCitations == 0 {
+		report.CitationChecksumIntegrity = 1
+	}
+	report.ProductionGateEvaluated = report.Cases >= 120 && config.Model == LockedGenerationModel
+	report.ProductionGatePassed = report.ProductionGateEvaluated &&
+		report.CandidateContractSuccess == 1 &&
+		report.AbstentionAccuracy >= 0.95 &&
+		report.CitationPrecision >= 0.95 &&
+		report.CitationChecksumIntegrity == 1 &&
+		report.Faithfulness >= 0.95
 	return report, nil
 }
 
@@ -224,27 +251,16 @@ type rankedGenerationCase struct {
 }
 
 func selectGenerationCases(cases []QACase, answerableCount, unanswerableCount int, seed string) ([]QACase, string, error) {
-	answerable := make([]rankedGenerationCase, 0)
-	unanswerable := make([]rankedGenerationCase, 0)
-	for _, item := range cases {
-		digest := sha256.Sum256([]byte(seed + "\x00" + item.QAID))
-		ranked := rankedGenerationCase{item: item, key: hex.EncodeToString(digest[:])}
-		if item.Answerable {
-			answerable = append(answerable, ranked)
-		} else {
-			unanswerable = append(unanswerable, ranked)
-		}
-	}
-	if len(answerable) < answerableCount || len(unanswerable) < unanswerableCount {
+	answerable := stratifiedGenerationCases(cases, true, answerableCount, seed)
+	unanswerable := stratifiedGenerationCases(cases, false, unanswerableCount, seed)
+	if len(answerable) != answerableCount || len(unanswerable) != unanswerableCount {
 		return nil, "", errors.New("generation evaluation dataset cannot satisfy the requested balance")
 	}
-	sort.Slice(answerable, func(i, j int) bool { return answerable[i].key < answerable[j].key })
-	sort.Slice(unanswerable, func(i, j int) bool { return unanswerable[i].key < unanswerable[j].key })
 	selected := make([]QACase, 0, answerableCount+unanswerableCount)
-	for _, item := range answerable[:answerableCount] {
+	for _, item := range answerable {
 		selected = append(selected, item.item)
 	}
-	for _, item := range unanswerable[:unanswerableCount] {
+	for _, item := range unanswerable {
 		selected = append(selected, item.item)
 	}
 	sort.Slice(selected, func(i, j int) bool { return selected[i].QAID < selected[j].QAID })
@@ -253,6 +269,43 @@ func selectGenerationCases(cases []QACase, answerableCount, unanswerableCount in
 		_, _ = hash.Write([]byte(item.QAID + "\n"))
 	}
 	return selected, "sha256:" + hex.EncodeToString(hash.Sum(nil)), nil
+}
+
+func stratifiedGenerationCases(cases []QACase, answerable bool, count int, seed string) []rankedGenerationCase {
+	groups := make(map[string][]rankedGenerationCase)
+	for _, item := range cases {
+		if item.Answerable != answerable {
+			continue
+		}
+		digest := sha256.Sum256([]byte(seed + "\x00" + item.QAID))
+		stratum := item.DomainCode + "\x00" + item.Type
+		groups[stratum] = append(groups[stratum], rankedGenerationCase{
+			item: item, key: hex.EncodeToString(digest[:]),
+		})
+	}
+	keys := make([]string, 0, len(groups))
+	for key := range groups {
+		keys = append(keys, key)
+		sort.Slice(groups[key], func(i, j int) bool { return groups[key][i].key < groups[key][j].key })
+	}
+	sort.Strings(keys)
+	selected := make([]rankedGenerationCase, 0, count)
+	for round := 0; len(selected) < count; round++ {
+		added := false
+		for _, key := range keys {
+			if round < len(groups[key]) {
+				selected = append(selected, groups[key][round])
+				added = true
+				if len(selected) == count {
+					break
+				}
+			}
+		}
+		if !added {
+			break
+		}
+	}
+	return selected
 }
 
 var generatedCitationPattern = regexp.MustCompile(`\[(C[0-9]+)\]`)
@@ -294,6 +347,59 @@ func evaluateGeneratedCitations(candidate GenerationCandidate, evidence []Eviden
 		valid = false
 	}
 	return valid, correct, len(declared), len(correctChunks), len(expectedChunks)
+}
+
+func evaluateGeneratedCitationChecksums(candidate GenerationCandidate, evidence []Evidence) (valid, total int) {
+	available := make(map[string]Evidence, len(evidence))
+	for _, item := range evidence {
+		available[item.CitationID] = item
+	}
+	seen := make(map[string]struct{}, len(candidate.CitationIDs))
+	for _, citationID := range candidate.CitationIDs {
+		if _, duplicate := seen[citationID]; duplicate {
+			continue
+		}
+		seen[citationID] = struct{}{}
+		item, exists := available[citationID]
+		if !exists {
+			continue
+		}
+		total++
+		checksum := sha256.Sum256([]byte(item.Content))
+		if item.Checksum == fmt.Sprintf("sha256:%x", checksum[:]) {
+			valid++
+		}
+	}
+	return valid, total
+}
+
+func generationCaseFaithful(candidate GenerationCandidate, evidence []Evidence, item QACase) bool {
+	if !item.Answerable {
+		return candidate.GroundingStatus == GenerationInsufficientEvidence &&
+			len(candidate.CitationIDs) == 0
+	}
+	available := make(map[string]string, len(evidence))
+	for _, item := range evidence {
+		available[item.CitationID] = item.Content
+	}
+	var cited strings.Builder
+	for _, citationID := range candidate.CitationIDs {
+		content, exists := available[citationID]
+		if !exists {
+			return false
+		}
+		cited.WriteString(content)
+		cited.WriteByte('\n')
+	}
+	if cited.Len() == 0 {
+		return false
+	}
+	for _, fact := range item.RequiredFacts {
+		if !containsNormalized(candidate.Text, fact) || !containsNormalized(cited.String(), fact) {
+			return false
+		}
+	}
+	return true
 }
 
 func containsNormalized(text, fact string) bool {

@@ -1,4 +1,4 @@
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 from typing import Literal
 
 
@@ -215,3 +215,39 @@ class EmbeddingResponse(BaseModel):
     model: str = Field(min_length=1, max_length=256)
     dimension: int = Field(ge=8, le=8192)
     vectors: list[list[float]] = Field(min_length=1, max_length=128)
+
+
+class RerankCandidate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    candidate_id: str = Field(min_length=1, max_length=128)
+    content: str = Field(min_length=1, max_length=8000)
+
+
+class RerankRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    query: str = Field(min_length=1, max_length=2000)
+    candidates: list[RerankCandidate] = Field(min_length=1, max_length=32)
+
+    @model_validator(mode="after")
+    def unique_candidate_ids(self) -> "RerankRequest":
+        ids = [candidate.candidate_id for candidate in self.candidates]
+        if len(ids) != len(set(ids)):
+            raise ValueError("candidate_id values must be unique")
+        return self
+
+
+class RerankScore(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    candidate_id: str = Field(min_length=1, max_length=128)
+    score: float
+
+
+class RerankResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    model: str
+    revision: str
+    scores: list[RerankScore] = Field(min_length=1, max_length=32)
