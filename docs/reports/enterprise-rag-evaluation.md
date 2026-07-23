@@ -101,13 +101,15 @@ Node2 长任务由 `ops/run-node2-enterprise-rag-evaluation.sh` 串联后两段�
 
 ## 6. 当前证据
 
-- 新 pgvector 索引在隔离数据库完成 `2704/2704` 当前发布 Chunk 投影；
+- 新 pgvector 索引在隔离数据库完成 `2704/2704` 当前发布 Chunk 投影，
+  激活 generation `dc117419-fb2c-43db-b069-6c0c9f303ac6`；
 - 迁移 0001-0032 首次和重复执行通过，数据集导入为
   `520 documents / 624 versions / 3224 chunks / 520 grants / 2 members`；
 - ACL、撤权、旧版本、checksum、伪引用、固定 reranker/no-fallback 和
   EvaluationRun 幂等集成测试通过；
-- 全量检索评测已于 2026-07-23 22:10 +08:00 启动，尚未把运行中状态
-  记为通过；
+- 全量检索评测已于 2026-07-24 01:35 +08:00 使用与发布包一致的
+  `knowledge-rag-admin` SHA-256 `430a3082...8818` 启动；门槛检查后的
+  Terra 生成评测已排队，尚未把运行中状态记为通过；
 - Terra 120 条生成评测、Node2 导入和 Web/OpenIM/Telegram E2E 尚未
   完成。
 

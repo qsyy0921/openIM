@@ -39,22 +39,22 @@ This unit records slice state, durable evidence, and the next idempotent action.
 | DDD and SDD boundary | verified | `akashic-openim-integration.md` | preserve bounded-context ownership |
 | Enterprise RAG research gate | verified | `docs/research/enterprise-rag-research.md`, adoption matrix, ADR-0010 | preserve pinned sources, licenses, and adopted/rejected decisions |
 | Enterprise RAG SDD and API contract | local_verified | SDD, ADR-0010, OpenAPI, research record and adoption matrix are synchronized to the implemented boundary | preserve until final evidence pass |
-| Source upload and ingestion | local_verified_node2_cleanup | strict four-format parser tests and immutable leased job pass locally; exact-object cleanup lease/three-attempt terminal integration passes on Node2 | repeat four real uploads in the production release |
-| pgvector hybrid index | node2_eval_running | Node2 isolated PostgreSQL 17/pgvector 0.8.5 reached migration 0032 twice; dataset counts are `520/624/3224/520/2`; resumable index service is building the locked generation | inspect `openim-rag-index-eval.service` and `index-report.json`, then run full metrics |
+| Source upload and ingestion | local_verified_node2_isolated | strict four-format parser tests and immutable leased job pass locally; exact-object cleanup lease/three-attempt terminal integration and isolated pinned-MinIO put/download/delete pass on Node2 | repeat four real uploads in the production release |
+| pgvector hybrid index | node2_eval_verified | Node2 isolated PostgreSQL 17/pgvector 0.8.5 reached migration 0032 twice; dataset counts are `520/624/3224/520/2`; locked generation `dc117419-fb2c-43db-b069-6c0c9f303ac6` activated with `2704/2704` current Chunk projections | preserve the index and consume it only through the active generation |
 | Fixed multilingual reranker | node2_eval_verified | retrieval-only service exposes no generation routes; real 32-passage locked rerank is `3.378s` warm and 8-way embedding benchmark is `6.034s/32` | preserve exact model/revision and complete full evaluation |
 | Trusted citations and Knowledge Web | local_verified | post-generation checksum/support reauthorization, atomic save-time grant lock, durable authorized excerpts, role-gated Web module and 128 Web tests pass | complete visual and real channel acceptance |
-| Enterprise RAG evaluation | in_progress | deterministic finalizer passes focused tests; the superseded Windows process was stopped without a report, and Node2 is building the fresh locked index before 1,120-case evaluation | wait for the resumable Node2 index, then run retrieval, 120-case Terra generation, and finalize |
+| Enterprise RAG evaluation | node2_retrieval_running | full 1,120-case retrieval uses the exact release binary SHA-256 `430a3082...8818`; gated 120-case Terra generation is queued behind the retrieval service and cannot start unless every retrieval threshold passes | inspect the two user services and reports; never restart an active stage |
 | Node2 enterprise RAG E2E | pending | no upload/version/failure-injection E2E exists | deploy immutable release and execute Web/OpenIM/Telegram matrix |
-| Enterprise RAG GitHub delivery | pending | branch equals main baseline and has no commit for this Goal | final review, scoped commits, push, Draft PR |
+| Enterprise RAG GitHub delivery | local_committed | implementation, offline Node2 deployment guard, and gated evaluation orchestration are committed on the feature branch; push and Draft PR remain gated on remote acceptance | preserve commits, then add measured evidence before push and Draft PR |
 | Migrations 0009-0031 | node2_verified | the Terra transition preserves canonical Luna history, and Node2 reports `31|sql/0031_telegram_identity_linking.sql` on release `akashic-node2-20260723-oidc-renew1` | preserve immutable-version and deployment guards |
 | Fixed Responses generation | node2_verified | source and deployed catalog require `gpt-5.6-terra`, `reasoning.effort=high`, `POST /v1/responses`, `stream=false`, and no fallback; real Responses, OpenIM ACL-RAG, and cited Telegram delivery pass | preserve candidate-only, ACL, citation, and no-fallback boundaries |
-| Routing 36/190 | local_verified | `platform/services/intelligence-worker/eval/routing-gate-report.json` | rerun deterministic evaluator in final gate |
+| Routing 36/190 | local_verified | fresh deterministic report is `190/190`, status accuracy `1.0`, Recall@1 `1.0` | preserve the regenerated report and rerun only if routing code changes |
 | Legacy enterprise RAG baseline | node2_verified | schema-v3 local report plus Node2 `2704/2704` historical `real[]` projections and real authorized/revoked/no-match OpenIM Runs | use only as frozen comparison; it does not satisfy the active Goal |
 | Group Memory review | local_verified | migration 0026, API, Web panel, tests | include in full Go/Web gates |
 | Catalog Web administration | local_verified | migration 0027, admin API/UI/tests | include in full Go/Web gates |
 | Remote A2A | local_verified | migration 0028, bounded client/store/API/UI/tests | include in full Go/Web gates; no broad federation claim |
 | Prometheus/Grafana | node2_verified | Node2 reported three healthy targets, six loaded rules, the `Prometheus` datasource, and the `openim-agent-platform` dashboard | preserve the Node2 host-network override and repeat after monitoring changes |
-| Full repository gates | pending_revalidation | previous Go/Python/Web gates passed, but retrieval topology, cleanup state, and bounded index concurrency changed afterward | rerun every required gate after evaluation code freezes |
+| Full repository gates | local_verified_pending_remote | Go all-package tests and vet, Python `43/43`, Web typecheck/`128/128`/production build, dataset and repository validators, shell syntax, secret scan, `git diff --check`, and routing `190/190` pass after code freeze | repeat only if implementation changes; remote channel and visual gates remain |
 | Node2 runtime and OpenIM ingress | node2_verified | `oidc-renew1` runtime, schema/index counts, loopback topology, observability, real Terra ACL-RAG authorization/revocation/no-match E2E, and OIDC/OpenIM continuity passed | preserve release and re-run only after relevant runtime changes |
 | Telegram channel E2E | node2_verified | self-service Web challenge, private-chat consumption, Web `connected` convergence, four-citation Terra answer, sent delivery, `1|1|1` idempotency, and exact fixture cleanup passed | preserve private-chat binding, digest-only challenges, and channel idempotency |
 | OIDC browser session continuity | node2_verified | 119 Web tests, typecheck/build, repository/security gates, 696-file release verification, active `oidc-renew1`, 314-second PKCE session, one refresh, access/ID expiry `+240s`, Platform API 200, and real outbound/inbound OpenIM messages | preserve fail-closed renewal, identity pinning, and no-reconnect boundaries |
@@ -114,6 +114,17 @@ The Codex task may use the 15-minute `OpenIM Akashic Goal 心跳` to re-enter th
 
 ## Latest local evidence
 
+- On 2026-07-24, commit `bcedbe7959c391d5e46df2599df8e2d077697c43`
+  produced clean immutable release `akashic-node2-20260724-enterprise-rag2`
+  with 697 verified manifest entries and archive SHA-256
+  `20ce932c9b46a28d025b5dd4dba9f1476d1a62058728a990ab3b9dd81e2d32a2`.
+  The release and commit-matched evaluation binary have identical SHA-256
+  `430a308216d28ed608c8b7a5f4e3e7a468c851b8c241fed282d73dd264348818`.
+  Node2 has both digest-pinned PostgreSQL/pgvector and MinIO images locally;
+  production deployment is configured with `--pull never`. An isolated MinIO
+  container passed real put/download/delete and was removed. Full retrieval is
+  active and gated generation is waiting in systemd; neither result is yet
+  claimed as passed.
 - On 2026-07-24, all external downloads were moved behind the Windows Clash
   proxy and hash-verified before LAN transfer. Node2 reused the 914 MB Python
   dependency archive and 2.14 GiB manifest-verified reranker on the M2 volume;
@@ -122,8 +133,8 @@ The Codex task may use the 15-minute `OpenIM Akashic Goal 心跳` to re-enter th
   `127.0.0.1:55433`, migrations 0001-0032 pass twice, and dataset import reports
   `520 documents / 624 versions / 3224 chunks / 520 grants / 2 members`.
   `TestStoreObjectCleanupLeaseRetryAndTerminalState` passed against that real
-  database. The bounded eight-request index build is resumable and still
-  running; no retrieval metric or channel E2E is claimed yet.
+  database. The bounded index completed and activated exactly `2704/2704`
+  current projections; no final retrieval metric or channel E2E is claimed yet.
 - On 2026-07-23, the enterprise RAG implementation added immutable
   MinIO-backed ingestion for Markdown/TXT/text-layer PDF/DOCX, migration 0032
   with pgvector 0.8.5 `halfvec(2560)` HNSW/FTS generations, ACL-first hybrid
