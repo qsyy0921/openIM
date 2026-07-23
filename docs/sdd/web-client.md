@@ -10,7 +10,7 @@ depends_on:
 
 ## Scope
 
-Provide an extensible browser collaboration shell with verified OpenIM single/group text conversation foundations and an independently owned Agent workspace module. The group foundation is specified in `im-client-foundation.md`, contacts/member-picker in `im-client-contacts.md`, image/file in `im-client-media.md`, search/pin/mute in `im-client-conversations.md`, group lifecycle in `im-client-group-lifecycle.md`, message actions in `im-client-message-actions.md`, local message search in `im-client-message-search.md`, the admitted device slice in `im-client-device-management.md`, and the Agent module in `agent-workspace.md`. This unit continues to own shell, identity/session bootstrap, and IM presentation rather than Agent business state. It does not yet implement audio, video, enterprise-directory search, documents, or administration.
+Provide an extensible browser collaboration shell with verified OpenIM single/group text conversation foundations and independently owned Agent and channel-connection modules. The group foundation is specified in `im-client-foundation.md`, contacts/member-picker in `im-client-contacts.md`, image/file in `im-client-media.md`, search/pin/mute in `im-client-conversations.md`, group lifecycle in `im-client-group-lifecycle.md`, message actions in `im-client-message-actions.md`, local message search in `im-client-message-search.md`, device management in `im-client-device-management.md`, Telegram linking in `telegram-identity-linking.md`, and the Agent module in `agent-workspace.md`. This unit continues to own shell, identity/session bootstrap, and presentation rather than Agent or channel business state. It does not yet implement audio, video, enterprise-directory search, documents, or administration.
 
 ## Responsibilities and non-goals
 
@@ -23,6 +23,7 @@ The unit owns interactive sign-in/out, the extensible workspace shell, use of an
 - Official `@openim/wasm-client-sdk@3.8.3-patch.13` and its pinned WASM assets.
 - A fail-closed install-time compatibility patch normalizes the pinned official SDK Worker's nullable batch payloads, dynamic history-table initialization, and the keyword-search ABI mismatch between the 8-argument WASM caller and 9-argument Worker implementation; it refuses unknown upstream signatures.
 - Same-origin `/platform-api` and `/openim-api` routes; Vite proxies them to node2 only in local development.
+- The Telegram channel module uses only the member-scoped Platform API status/challenge contracts; challenge plaintext stays in React controller memory and is never persisted.
 
 ## Invariants
 
@@ -36,6 +37,9 @@ The unit owns interactive sign-in/out, the extensible workspace shell, use of an
 - A send is shown as `sending` before the SDK call, `succeeded` only from the returned authoritative message, and `failed` on an explicit SDK error.
 - Global modules are registered through `WorkspaceModule` descriptors and rendered by `WorkspaceShell`; feature modules own their inner list/detail workflow and do not duplicate global navigation or account controls.
 - Desktop uses global-module, conversation-list, and work-panel columns. At mobile width, the current module keeps one work panel visible and provides an explicit list/detail transition.
+- Telegram challenge issuance is single-flight, stale status responses cannot overwrite newer state, and polling timers are removed on logout, reconnect replacement, or component teardown.
+- The active M2 delta in `oidc-session-continuity.md` requires every Platform API adapter to resolve the current validated ID Token at invocation time; no controller may capture the initial Token.
+- A normal OIDC Token rotation updates browser identity state without reconnecting a healthy OpenIM session. Renewal terminal events close the workspace exactly once and require interactive login.
 
 ## Runtime flow
 
@@ -51,6 +55,8 @@ The unit owns interactive sign-in/out, the extensible workspace shell, use of an
 10. Resolve the active Agent and trigger from the authenticated Catalog, require Bot identity agreement, and display exact Run version provenance in the Agent workspace.
 11. Merge real-time message, conversation, friend, and application events by stable IDs and mark the visible conversation read.
 12. On successful reconnection, reload conversations, contacts, unread state, and active history before declaring the client state restored.
+13. On demand, load Telegram member binding status, show a newly issued command once, and poll until the server reports `bound` or an explicit failure occurs.
+14. Before Token expiry, renew through the same OIDC refresh-token grant, pin subject and tenant, and rotate the in-memory Platform API credential without disturbing OpenIM.
 
 ## Data ownership and state
 
@@ -58,7 +64,7 @@ Keycloak owns the enterprise session, Platform API owns identity exchange policy
 
 ## Failure handling
 
-OIDC callback failure, expired identity, typed Platform API failure, malformed success response, unexpected endpoint, OpenIM SDK failure, history failure, send failure, and read-state failure are explicit. Retry repeats the authoritative operation; it does not generate a local success, switch transports, or silently discard failed sends.
+OIDC callback failure, missing renewal material, failed renewal, identity mismatch, expired identity, typed Platform API failure, malformed success response, unexpected endpoint, OpenIM SDK failure, history failure, send failure, and read-state failure are explicit. Retry repeats the authoritative operation with the current validated identity; it does not generate a local success, reuse an expired Token, switch transports, or silently discard failed sends.
 
 ## Security
 
@@ -80,6 +86,7 @@ The UI exposes coarse connection phase and endpoint readiness. Platform and Open
 - Real node2 conversation search filters only the synchronized projection; pin and per-conversation `NotNotify` persist across reload while muted messages continue to synchronize.
 - Real node2 message search uses the official synchronized local index, bounded pages, official bidirectional history context, and exact `clientMsgID` highlighting after reload.
 - A member can inspect the safe device-enrollment/platform-online projection, distinguish the current device, and log out another enrolled OpenIM platform without receiving an Admin Token; kicked and expired SDK states leave the active workspace.
+- A member can issue a Telegram challenge without supplying identity fields; the UI prevents duplicate issuance, does not persist the command, and converges to server-reported binding state.
 - Browser inspection confirms no token in visible UI, URL, localStorage, or console output.
 
 ## Source evidence
@@ -99,6 +106,9 @@ The UI exposes coarse connection phase and endpoint readiness. Platform and Open
 - `platform/apps/web/src/device.ts`
 - `platform/apps/web/src/device-api.ts`
 - `platform/apps/web/src/DeviceWorkspace.tsx`
+- `platform/apps/web/src/telegram-link-api.ts`
+- `platform/apps/web/src/telegram-link.ts`
+- `platform/apps/web/src/ChannelWorkspace.tsx`
 - `platform/apps/web/vite.config.ts`
 - `platform/apps/web/scripts/patch-openim-worker.mjs`
 - `platform/apps/web/src/config.test.ts`
@@ -122,10 +132,13 @@ The UI exposes coarse connection phase and endpoint readiness. Platform and Open
 - The verified message-search extension repairs the pinned SDK Worker/WASM keyword-search ABI at install time, queries only the official synchronized local database, and navigates through official forward/reverse history APIs because the locked runtime does not register its declared `fetchSurroundingMessages` global. The complete six-scenario Node2 suite passed serially in 91.7 seconds.
 - The verified device extension adds a member-scoped Platform API projection, exact current-device authorization, server-side OpenIM Admin calls, other-platform confirmation, request-order and duplicate-action protection, and distinct kicked/expired terminal states. A real Web plus Windows-platform run observed `OnKickedOffline`, then the full seven-scenario Node2 suite passed serially in 107.3 seconds.
 - The verified Agent Catalog extension removes the hard-coded trigger, requires one authenticated active Agent with matching Bot identity, and displays immutable Run version provenance. Web tests passed 75 cases, and the full seven-scenario Node2 suite passed serially in 106.5 seconds with desktop/mobile Agent screenshot inspection.
+- The verified Telegram-link extension adds a fifth shell module, strict response validation, stale-request protection, duplicate issuance prevention, memory-only challenge display, pending-status polling, and teardown cleanup. Web typecheck, all 105 tests, and the explicit Node2-topology production build pass. A real Node2 member issued and consumed the private-chat challenge, and a fast follow-up run observed the UI converge to `connected` before deterministic fixture cleanup.
+- The verified OIDC-continuity extension adds lifecycle-controlled refresh renewal, immutable enterprise identity pinning, request-time ID Token resolution, idempotent terminal teardown, and current-identity OpenIM retry without reconnecting a healthy WebSocket. The complete Web suite passes 119 tests. On Node2 release `akashic-node2-20260723-oidc-renew1`, one browser remained online for 314 seconds, observed one refresh with access/ID expiry advancing 240 seconds, then completed an authenticated channel read and real outbound/inbound OpenIM messages with no failed HTTP response, console error, Token-shaped visible text, URL residue, or localStorage entry.
 
 ## Open questions
 
 - Production reverse-proxy and CSP headers enter the deployment slice before public exposure.
 - Organization/department authorization and vector retrieval remain independent backend slices; OpenIM currently owns IM group authorization.
 - Secure browser device enrollment remains a separate identity slice; device management reads existing enrollment and never self-enrolls a browser.
+- Cross-tab OIDC synchronization and background authentication remain separate slices; M2 intentionally preserves per-tab `sessionStorage`.
 - Remove the Worker compatibility patch when an accepted upstream SDK release handles nullable batch payloads and dynamic history-table initialization itself; the patch refuses unknown upstream signatures.

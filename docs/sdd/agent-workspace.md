@@ -26,7 +26,7 @@ The backend projection owns member/device-scoped reads of up to 30 recent Runs, 
 - Authenticated `GET /v1/agent/workspace?platform_id=5&device_id=...`.
 - Existing authenticated `POST /v1/agent/intents/{intent_id}/approve` with the exact `payload_digest`.
 - PostgreSQL `agent.runs`, `agent.run_citations`, `action.intents`, `action.executions`, and `collaboration.tickets` as authoritative state.
-- Existing Kafka ingress, Agent Runtime, ACL retrieval, DeepSeek worker, OpenIM reply, and restricted Action Executor processes.
+- Existing Kafka ingress, Agent Runtime, ACL retrieval, fixed Responses Worker, OpenIM reply, and restricted Action Executor processes.
 
 ## Invariants
 
@@ -70,7 +70,7 @@ The projection exposes durable Run, Intent, Execution, and ticket identifiers fo
 ## Acceptance criteria
 
 - Selecting the Agent module restores the authenticated member's recent Runs and deterministic Bot.
-- A real `.1` browser prompt traverses `.2` OpenIM, ingress, ACL retrieval, DeepSeek, Agent Runtime, and returns an answer with persisted citation provenance.
+- A real `.1` browser prompt traverses `.2` OpenIM, ingress, ACL retrieval, the fixed generation Worker, Agent Runtime, and returns an answer with persisted citation provenance.
 - A real explicit ticket prompt remains at zero business effects before approval.
 - Browser approval uses the exact server digest; duplicate approval converges on one Execution and one ticket.
 - Terminal ticket ID and state survive browser reload.

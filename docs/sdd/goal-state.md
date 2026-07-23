@@ -1,9 +1,9 @@
 ---
 unit: akashic-openim-goal-state
-status: draft
-branch: codex/akashic-openim-integration
+status: verified
+branch: codex/local-responses-model-current
 worktree: E:\development\OPENIM-akashic
-updated: 2026-07-20
+updated: 2026-07-23
 ---
 
 # Akashic integration Goal state
@@ -12,7 +12,7 @@ This file is the authoritative restart checkpoint for the active Codex Goal. It 
 
 ## Scope
 
-Track restart-safe implementation and acceptance evidence for the bounded Akashic integration Goal on `codex/akashic-openim-integration`. It does not define a second runtime or replace the owning unit SDD.
+Track restart-safe implementation and acceptance evidence for the bounded Akashic integration Goal on `codex/local-responses-model-current`. It does not define a second runtime or replace the owning unit SDD.
 
 ## Responsibilities and non-goals
 
@@ -37,16 +37,18 @@ This unit records slice state, durable evidence, and the next idempotent action.
 | Slice | State | Durable evidence | Resume action |
 | --- | --- | --- | --- |
 | DDD and SDD boundary | verified | `akashic-openim-integration.md` | preserve bounded-context ownership |
-| Migrations 0009-0028 | node2_verified | Node2 reached `28|sql/0028_remote_a2a.sql`; fresh and restored-0021 upgrade chains also reached 0028 idempotently | preserve the 0022 compatibility fix and rerun the fresh-chain gate after migration edits |
+| Migrations 0009-0031 | node2_verified | the Terra transition preserves canonical Luna history, and Node2 reports `31|sql/0031_telegram_identity_linking.sql` on release `akashic-node2-20260723-oidc-renew1` | preserve immutable-version and deployment guards |
+| Fixed Responses generation | node2_verified | source and deployed catalog require `gpt-5.6-terra`, `reasoning.effort=high`, `POST /v1/responses`, `stream=false`, and no fallback; real Responses, OpenIM ACL-RAG, and cited Telegram delivery pass | preserve candidate-only, ACL, citation, and no-fallback boundaries |
 | Routing 36/190 | local_verified | `platform/services/intelligence-worker/eval/routing-gate-report.json` | rerun deterministic evaluator in final gate |
 | Enterprise RAG | node2_verified | schema-v3 local report plus Node2 `2704/2704` current-chunk index and real authorized/revoked/no-match OpenIM Runs | preserve pinned embedding revision, strict Candidate schema, ACL-first retrieval, and no-fallback routing |
 | Group Memory review | local_verified | migration 0026, API, Web panel, tests | include in full Go/Web gates |
 | Catalog Web administration | local_verified | migration 0027, admin API/UI/tests | include in full Go/Web gates |
 | Remote A2A | local_verified | migration 0028, bounded client/store/API/UI/tests | include in full Go/Web gates; no broad federation claim |
 | Prometheus/Grafana | node2_verified | Node2 reported three healthy targets, six loaded rules, the `Prometheus` datasource, and the `openim-agent-platform` dashboard | preserve the Node2 host-network override and repeat after monitoring changes |
-| Full repository gates | local_verified | Go `./...`, Python 26, Web typecheck/94 tests/build, dataset and repository validators, formatting, diff, and credential-shape checks passed | preserve on subsequent changes |
-| Node2 runtime and OpenIM ingress | node2_verified | `akashic-node2-20260720-candidatefix1`; migration 0028, immutable binaries, OpenIM delivery, `2704/2704` embeddings, real DeepSeek/citations, ACL revocation, abstention, and observability accepted | preserve release hashes and repeat after runtime, retrieval, Candidate, or delivery changes |
-| Telegram channel E2E | node2_verified | A real bound Telegram update at source offset `96338388` produced one published Outbox event, one successful `deepseek-v4-pro` Run with five citations, and one sent Telegram delivery with a non-empty external message ID; idempotency was `1|1|1` and the temporary binding was cleaned to `0|0` | preserve explicit enterprise binding, fail-closed unknown identities, durable delivery, and the fixed text event-ID cardinality check |
+| Full repository gates | local_verified | Go vet/all-package tests, Python 37 tests, Web typecheck/119 tests/build, repository validation, shell syntax, compileall, diff, and credential-shape scan pass | repeat after any further source change |
+| Node2 runtime and OpenIM ingress | node2_verified | `oidc-renew1` runtime, schema/index counts, loopback topology, observability, real Terra ACL-RAG authorization/revocation/no-match E2E, and OIDC/OpenIM continuity passed | preserve release and re-run only after relevant runtime changes |
+| Telegram channel E2E | node2_verified | self-service Web challenge, private-chat consumption, Web `connected` convergence, four-citation Terra answer, sent delivery, `1|1|1` idempotency, and exact fixture cleanup passed | preserve private-chat binding, digest-only challenges, and channel idempotency |
+| OIDC browser session continuity | node2_verified | 119 Web tests, typecheck/build, repository/security gates, 696-file release verification, active `oidc-renew1`, 314-second PKCE session, one refresh, access/ID expiry `+240s`, Platform API 200, and real outbound/inbound OpenIM messages | preserve fail-closed renewal, identity pinning, and no-reconnect boundaries |
 
 ## Resume protocol
 
@@ -76,7 +78,7 @@ Progress is observable through this table, generated evaluation reports, test ou
 ## Acceptance criteria
 
 - Every local slice has current full-gate evidence.
-- A fresh database reaches migration `0028` exactly once.
+- A fresh database reaches migration `0031` exactly once, and an upgrade preserves the immutable Luna version while activating one canonical Terra version with audit evidence.
 - Routing and RAG reports are regenerated with declared metric semantics.
 - Prometheus rules and Grafana provisioning are loaded and healthy.
 - Node2 migrations and OpenIM plus Telegram E2E are accepted only after real remote round trips.
@@ -99,6 +101,15 @@ The Codex task may use the 15-minute `OpenIM Akashic Goal 心跳` to re-enter th
 
 ## Latest local evidence
 
+- On 2026-07-23, M2 OIDC continuity implemented lifecycle-controlled `oidc-client-ts` refresh renewal, immutable `(sub, tenant_id)` pinning, mandatory advancing ID Token rotation, request-time Platform API Token resolution, idempotent teardown, and current-identity OpenIM session retry without a healthy-connection reconnect. Vitest passed 119 cases, typecheck and the exact Node2 production build passed, and release `akashic-node2-20260723-oidc-renew1` activated with 696 verified manifest entries and preserved host-local environment. A real PKCE browser stayed online for 314 seconds, observed one successful refresh with access/ID expiry advancing 240 seconds, then passed Platform API 200 and real outbound/inbound OpenIM messaging. The initial acceptance attempt exposed the old Windows/WSL E2E helper path after renewal; the helper was corrected to native Ubuntu and the full 5.3-minute scenario passed without fallback.
+- On 2026-07-23, Node2 release `akashic-node2-20260723-telegram-link1` applied migration `0031` and passed runtime/data acceptance. A real OIDC member issued a one-time Web challenge, the private Telegram Bot chat consumed it without host-admin binding, and a fast follow-up run showed `connected` in the Web module. Telegram update `96338395` produced one accepted ingress, one published Outbox event, one successful Terra Run with four authorized citations, one sent delivery with a non-empty external message ID, visible client receipt, and `1|1|1` cardinality. The isolated principal, chat, challenge, and link-audit fixture was removed and verified as zero.
+- On 2026-07-23, the correct Telegram Bot produced exactly one unbound bootstrap update after baseline `96338392`. The acceptance flow created an isolated enterprise member/chat binding and advanced its verification baseline to `96338393`, but three consecutive resumed audits found zero bound query messages. Telegram ingress was paused for race-free cleanup, the exact fixture binding and root-only runtime state were removed, systemd was reloaded, and ingress, Agent Runtime, and Delivery all returned active. No model Run or outbound Telegram delivery is claimed for this attempt.
+- The third consecutive Goal recovery audit after the fresh Telegram bootstrap baseline again found zero unbound updates; runtime, delivery, and Telegram ingress services were all active. No binding, transfer, migration, or channel send was attempted. This satisfies the external-blocker threshold for the active Goal; resume only after a real Telegram client message is present.
+- `akashic-node2-20260722-terra2` was built from the current dirty worktree as an explicit immutable artifact with 695 manifest entries. Node2 accepted archive hashes, preserved the host-local platform environment, took a new PostgreSQL backup, applied idempotent migration state `0030`, and passed runtime (`520|624|3224|520|2704|2704`), bidirectional Worker/Ollama topology, and Prometheus/Grafana acceptance. The release itself does not prove an upstream generation success.
+- Terra source validation passed: Python `37` tests, Go package tests and vet, Web typecheck/`94` tests/production build, repository validation, shell syntax, Python compilation, and `git diff --check`. A disposable PostgreSQL 18.4 upgrade test preserved one canonical Luna version, created one Terra version, activated Terra, and wrote one deployment audit record.
+- On 2026-07-22, the local loopback gateway listed `gpt-5.6-terra`, but an initial high-reasoning Responses request returned gateway `502` with upstream `server_is_overloaded`; the Worker correctly exposed it as retryable `503`. After the bounded delay, a real candidate and direct intent route succeeded, then Node2 OpenIM acceptance succeeded on the fixed model: authorized ACL-RAG returned four citations; revoked target evidence produced zero target Tool results and citations; no-match returned explicit insufficient evidence with zero citations. No model, endpoint, provider, or semantic fallback was used. The remaining current-model channel evidence is Telegram only.
+- Release `akashic-node2-20260721-responses3` was built from clean commit `003dee6`, contains 695 verified manifest entries, and has archive SHA-256 `2518a1a1054e3c07c39e1f8a3dd2a61f91be172795a5b49f08341f06d006a5b3`. Node2 applied migration `0029`, retained `2704/2704` valid current embeddings, and passed runtime, permanent bidirectional topology, real fixed-model Candidate, OpenIM ingress/Outbox, authorized ACL-RAG (five citations), revoked target isolation (zero target Tool results and citations), explicit no-match abstention, and observability acceptance. Telegram update `96338391` produced published event `f21b1dbe-d367-48cd-9b34-ab070fef1dc0`, successful Run `57db8842-e70e-4bd9-a122-0ec947d29d5c` with four citations, sent delivery `f1d0fcac-1018-4a78-9155-9b108c0ee9a1`, a non-empty external message ID, and `1|1|1` cardinality. The isolated principal/chat binding was removed and verified as `0|0`.
+- Historical Luna migration evidence: local model discovery and Responses calls, a cited Worker candidate, a temporary Node2 candidate forward, and a bidirectional tunnel check returned a 2560-dimensional Node2 Ollama embedding. Empty-database migration reached `0029`; a simulated upgrade preserved one DeepSeek version, activated one Luna version, and wrote one deployment audit event. This does not verify the Terra/high transition.
 - Fresh empty PostgreSQL migration and self-contained dataset-import audit: `28|sql/0028_remote_a2a.sql|520 documents|3224 chunks|520 ACL grants`; the one-time container was removed after the check.
 - Routing regression: 36 operations, 190 cases, 190 passed, Recall@1 1.0.
 - Enterprise retrieval schema v3: 1120 cases, Recall@8 `0.928846`, MRR `0.594903`, retrieval Precision@8 `0.166947`, and provenance integrity `1.0`. Retrieval returned evidence for all 80 unanswerable questions; that zero-result metric is not generation abstention.

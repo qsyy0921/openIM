@@ -2,9 +2,9 @@ from fastapi.testclient import TestClient
 import httpx
 
 from intelligence_worker.app import create_app
-from intelligence_worker.config import Settings
+from intelligence_worker.config import GENERATION_MODEL, LOCAL_RESPONSES_BASE_URL, Settings
 from intelligence_worker.models import CandidateRequest
-from intelligence_worker.deepseek_client import DeepSeekClient
+from intelligence_worker.responses_client import ResponsesClient
 
 
 CATALOG_FIELDS = {
@@ -12,32 +12,41 @@ CATALOG_FIELDS = {
     "agent_version_id": "version-1",
     "agent_spec_checksum": "sha256:" + "a" * 64,
     "instructions": "Answer only from authorized evidence.",
-    "model_route": "test-model",
+    "model_route": GENERATION_MODEL,
     "allowed_action_types": ["create_ticket"],
 }
 
 
-def test_candidate_calls_deepseek_and_extracts_json() -> None:
+def _settings(max_retries: int = 0) -> Settings:
+    return Settings(
+        LOCAL_RESPONSES_BASE_URL, "unit-test-secret", GENERATION_MODEL, 1, 512,
+        model_max_retries=max_retries, model_retry_base_seconds=0.001,
+    )
+
+
+def _response(content: str, response_id: str, model: str = GENERATION_MODEL) -> httpx.Response:
+    return httpx.Response(200, json={
+        "id": response_id,
+        "model": model,
+        "status": "completed",
+        "output": [{"type": "message", "content": [{"type": "output_text", "text": content}]}],
+    })
+
+
+def test_candidate_calls_responses_api_and_extracts_json() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
-        assert request.url.path == "/chat/completions"
+        assert request.url.path == "/v1/responses"
         body = __import__("json").loads(request.content)
-        assert body["model"] == "test-model"
-        assert body["response_format"] == {"type": "json_object"}
-        assert body["thinking"] == {"type": "disabled"}
-        assert body["temperature"] == 0
-        return httpx.Response(
-            200,
-            json={
-                "id": "resp_1",
-                "model": "test-model-2026",
-                "choices": [{"finish_reason": "stop", "message": {"role": "assistant", "content": '{"text":"候选回答 [C1]","citation_ids":["C1"],"grounding_status":"grounded","action_intent":null}'}}],
-            },
+        assert body["model"] == GENERATION_MODEL
+        assert body["stream"] is False
+        assert body["store"] is False
+        assert body["text"]["format"]["type"] == "json_schema"
+        return _response(
+            '{"text":"候选回答 [C1]","citation_ids":["C1"],"grounding_status":"grounded","action_intent":null}',
+            "resp_1",
         )
 
-    client = DeepSeekClient(
-        Settings("https://api.deepseek.test", "secret", "test-model", 1, 512),
-        httpx.MockTransport(handler),
-    )
+    client = ResponsesClient(_settings(), httpx.MockTransport(handler))
     with TestClient(create_app(client)) as http:
         response = http.post(
             "/v1/candidates",
@@ -54,7 +63,7 @@ def test_candidate_calls_deepseek_and_extracts_json() -> None:
     assert response.status_code == 200
     assert response.json() == {
         "text": "候选回答 [C1]",
-        "model": "test-model-2026",
+        "model": GENERATION_MODEL,
         "provider_response_id": "resp_1",
         "citation_ids": ["C1"],
         "grounding_status": "grounded",
@@ -66,10 +75,7 @@ def test_model_failure_is_explicit_not_fallback() -> None:
     def handler(_: httpx.Request) -> httpx.Response:
         return httpx.Response(503, json={"error": "unavailable"})
 
-    client = DeepSeekClient(
-        Settings("https://api.deepseek.test", "secret", "test-model", 1, 512),
-        httpx.MockTransport(handler),
-    )
+    client = ResponsesClient(_settings(), httpx.MockTransport(handler))
     with TestClient(create_app(client)) as http:
         response = http.post(
             "/v1/candidates",
@@ -83,22 +89,15 @@ def test_model_failure_is_explicit_not_fallback() -> None:
                 "evidence": [{"citation_id":"C1","document_id":"d","version_id":"v","chunk_id":"c","title":"t","source_uri":"doc://d","checksum":"sum","content":"evidence"}],
             },
         )
-    assert response.status_code == 502
-    assert response.json()["detail"] == "required model provider failed"
+    assert response.status_code == 503
+    assert response.json()["detail"] == {"code": "model_unavailable", "retryable": True}
 
 
 def test_explicit_ticket_command_creates_bounded_candidate() -> None:
     def handler(_: httpx.Request) -> httpx.Response:
-        return httpx.Response(
-            200,
-            json={
-                "id": "resp_action",
-                "model": "test-model",
-                "choices": [{"finish_reason": "stop", "message": {"content": '{"text":"建议已生成 [C1]","citation_ids":["C1"],"grounding_status":"grounded","action_intent":null}'}}],
-            },
-        )
+        return _response('{"text":"建议已生成 [C1]","citation_ids":["C1"],"grounding_status":"grounded","action_intent":null}', "resp_action")
 
-    client = DeepSeekClient(Settings("https://api.deepseek.test", "secret", "test-model", 1, 512), httpx.MockTransport(handler))
+    client = ResponsesClient(_settings(), httpx.MockTransport(handler))
     with TestClient(create_app(client)) as http:
         response = http.post(
             "/v1/candidates",
@@ -118,16 +117,9 @@ def test_explicit_ticket_command_creates_bounded_candidate() -> None:
 
 def test_unsolicited_model_action_is_rejected() -> None:
     def handler(_: httpx.Request) -> httpx.Response:
-        return httpx.Response(
-            200,
-            json={
-                "id": "resp_unsolicited",
-                "model": "test-model",
-                "choices": [{"finish_reason": "stop", "message": {"content": '{"text":"answer [C1]","citation_ids":["C1"],"grounding_status":"grounded","action_intent":{"type":"create_ticket","title":"unauthorized"}}'}}],
-            },
-        )
+        return _response('{"text":"answer [C1]","citation_ids":["C1"],"grounding_status":"grounded","action_intent":{"type":"create_ticket","title":"unauthorized"}}', "resp_unsolicited")
 
-    client = DeepSeekClient(Settings("https://api.deepseek.test", "secret", "test-model", 1, 512), httpx.MockTransport(handler))
+    client = ResponsesClient(_settings(), httpx.MockTransport(handler))
     with TestClient(create_app(client)) as http:
         response = http.post(
             "/v1/candidates",
@@ -146,16 +138,9 @@ def test_unsolicited_model_action_is_rejected() -> None:
 
 def test_negated_ticket_phrase_does_not_enter_action_protocol() -> None:
     def handler(_: httpx.Request) -> httpx.Response:
-        return httpx.Response(
-            200,
-            json={
-                "id": "resp_negated",
-                "model": "test-model",
-                "choices": [{"finish_reason": "stop", "message": {"content": '{"text":"不会创建 [C1]","citation_ids":["C1"],"grounding_status":"grounded","action_intent":null}'}}],
-            },
-        )
+        return _response('{"text":"不会创建 [C1]","citation_ids":["C1"],"grounding_status":"grounded","action_intent":null}', "resp_negated")
 
-    client = DeepSeekClient(Settings("https://api.deepseek.test", "secret", "test-model", 1, 512), httpx.MockTransport(handler))
+    client = ResponsesClient(_settings(), httpx.MockTransport(handler))
     with TestClient(create_app(client)) as http:
         response = http.post(
             "/v1/candidates",
@@ -175,16 +160,9 @@ def test_negated_ticket_phrase_does_not_enter_action_protocol() -> None:
 
 def test_insufficient_enterprise_evidence_can_abstain_without_fake_citation() -> None:
     def handler(_: httpx.Request) -> httpx.Response:
-        return httpx.Response(
-            200,
-            json={
-                "id": "resp_abstain",
-                "model": "test-model",
-                "choices": [{"finish_reason": "stop", "message": {"content": '{"text":"现有证据不足以回答该问题。","citation_ids":[],"grounding_status":"insufficient_evidence","action_intent":null}'}}],
-            },
-        )
+        return _response('{"text":"现有证据不足以回答该问题。","citation_ids":[],"grounding_status":"insufficient_evidence","action_intent":null}', "resp_abstain")
 
-    client = DeepSeekClient(Settings("https://api.deepseek.test", "secret", "test-model", 1, 512), httpx.MockTransport(handler))
+    client = ResponsesClient(_settings(), httpx.MockTransport(handler))
     with TestClient(create_app(client)) as http:
         response = http.post(
             "/v1/candidates",
@@ -199,18 +177,29 @@ def test_insufficient_enterprise_evidence_can_abstain_without_fake_citation() ->
     assert response.json()["citation_ids"] == []
 
 
-def test_grounded_enterprise_answer_without_citation_fails_closed() -> None:
+def test_empty_authorized_corpus_can_abstain_without_fake_citation() -> None:
     def handler(_: httpx.Request) -> httpx.Response:
-        return httpx.Response(
-            200,
+        return _response('{"text":"当前没有可访问的企业证据。","citation_ids":[],"grounding_status":"insufficient_evidence","action_intent":null}', "resp_empty")
+
+    client = ResponsesClient(_settings(), httpx.MockTransport(handler))
+    with TestClient(create_app(client)) as http:
+        response = http.post(
+            "/v1/candidates",
             json={
-                "id": "resp_invalid_grounding",
-                "model": "test-model",
-                "choices": [{"finish_reason": "stop", "message": {"content": '{"text":"没有引用的断言","citation_ids":[],"grounding_status":"grounded","action_intent":null}'}}],
+                "run_id": "run-empty", "tenant_id": "tenant-1", "conversation_id": "si_a_b", "sender_id": "user-1",
+                **CATALOG_FIELDS, "content": "查询企业制度", "evidence": [],
             },
         )
+    assert response.status_code == 200
+    assert response.json()["grounding_status"] == "insufficient_evidence"
+    assert response.json()["citation_ids"] == []
 
-    client = DeepSeekClient(Settings("https://api.deepseek.test", "secret", "test-model", 1, 512), httpx.MockTransport(handler))
+
+def test_grounded_enterprise_answer_without_citation_fails_closed() -> None:
+    def handler(_: httpx.Request) -> httpx.Response:
+        return _response('{"text":"没有引用的断言","citation_ids":[],"grounding_status":"grounded","action_intent":null}', "resp_invalid_grounding")
+
+    client = ResponsesClient(_settings(), httpx.MockTransport(handler))
     with TestClient(create_app(client)) as http:
         response = http.post(
             "/v1/candidates",
@@ -225,16 +214,9 @@ def test_grounded_enterprise_answer_without_citation_fails_closed() -> None:
 
 def test_candidate_with_undeclared_text_citation_fails_closed() -> None:
     def handler(_: httpx.Request) -> httpx.Response:
-        return httpx.Response(
-            200,
-            json={
-                "id": "resp_undeclared_citation",
-                "model": "test-model",
-                "choices": [{"finish_reason": "stop", "message": {"content": '{"text":"回答 [C1] 和 [C2]","citation_ids":["C1"],"grounding_status":"grounded","action_intent":null}'}}],
-            },
-        )
+        return _response('{"text":"回答 [C1] 和 [C2]","citation_ids":["C1"],"grounding_status":"grounded","action_intent":null}', "resp_undeclared_citation")
 
-    client = DeepSeekClient(Settings("https://api.deepseek.test", "secret", "test-model", 1, 512), httpx.MockTransport(handler))
+    client = ResponsesClient(_settings(), httpx.MockTransport(handler))
     with TestClient(create_app(client)) as http:
         response = http.post(
             "/v1/candidates",
@@ -249,16 +231,9 @@ def test_candidate_with_undeclared_text_citation_fails_closed() -> None:
 
 def test_candidate_with_unauthorized_citation_id_fails_closed() -> None:
     def handler(_: httpx.Request) -> httpx.Response:
-        return httpx.Response(
-            200,
-            json={
-                "id": "resp_unauthorized_citation",
-                "model": "test-model",
-                "choices": [{"finish_reason": "stop", "message": {"content": '{"text":"回答 [C2]","citation_ids":["C2"],"grounding_status":"grounded","action_intent":null}'}}],
-            },
-        )
+        return _response('{"text":"回答 [C2]","citation_ids":["C2"],"grounding_status":"grounded","action_intent":null}', "resp_unauthorized_citation")
 
-    client = DeepSeekClient(Settings("https://api.deepseek.test", "secret", "test-model", 1, 512), httpx.MockTransport(handler))
+    client = ResponsesClient(_settings(), httpx.MockTransport(handler))
     with TestClient(create_app(client)) as http:
         response = http.post(
             "/v1/candidates",
@@ -330,7 +305,7 @@ def test_metrics_endpoint_exposes_bounded_service_metrics() -> None:
 
 
 def test_unconfigured_model_route_and_disallowed_action_fail_closed() -> None:
-    client = DeepSeekClient(Settings("https://api.deepseek.test", "secret", "test-model", 1, 512), httpx.MockTransport(lambda _: httpx.Response(500)))
+    client = ResponsesClient(_settings(), httpx.MockTransport(lambda _: httpx.Response(500)))
     with TestClient(create_app(client)) as http:
         wrong_route = http.post(
             "/v1/candidates",

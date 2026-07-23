@@ -1,14 +1,23 @@
-# Intelligence worker
+# Intelligence Worker
 
-This Python service is the untrusted intelligence plane. It calls one configured DeepSeek Chat Completions model and returns a validated answer/action candidate; it has no OpenIM, PostgreSQL, Kafka, tool, approval, or business credentials.
+This Python service is the untrusted intelligence plane. All generative operations use the single fixed `gpt-5.6-terra` route through `POST /v1/responses` with `reasoning.effort=high`; there is no Chat Completions, alternate model, alternate provider, or success-shaped fallback. The Worker has no OpenIM, PostgreSQL, Kafka, approval, or business-write credential.
+
+On Windows, start it with:
 
 ```powershell
-$env:INTELLIGENCE_DEEPSEEK_BASE_URL = 'https://api.deepseek.com'
-$env:INTELLIGENCE_DEEPSEEK_API_KEY = '<scoped-secret>'
-$env:INTELLIGENCE_DEEPSEEK_MODEL = 'deepseek-v4-pro'
-$env:INTELLIGENCE_DEEPSEEK_TIMEOUT_SECONDS = '90'
-$env:INTELLIGENCE_DEEPSEEK_MAX_TOKENS = '1024'
-python -m uvicorn intelligence_worker.app:app --app-dir src --host 127.0.0.1 --port 18082
+uv sync --extra test
+uv run openim-intelligence-local
 ```
 
-Run checks with `python -m pytest -q`. `tests/contract_stub.py` is only an explicit local end-to-end test double; production code has no fallback route to it.
+`openim-intelligence-local` loads the one usable API key directly from `%USERPROFILE%\.cli-proxy-api\config.yaml` into the child process environment, verifies that `GET /v1/models` contains `gpt-5.6-terra`, and binds the Worker only to `127.0.0.1:18082`. The key is absent from source, sample configuration, command arguments, logs, and databases.
+
+The generation contract is fixed:
+
+- gateway: `http://127.0.0.1:8317/v1`, Windows loopback only;
+- endpoint: `POST /v1/responses`;
+- model: `gpt-5.6-terra` with `reasoning.effort=high`;
+- `stream=false`, `store=false`, strict JSON schema;
+- retry only bounded transient transport, timeout, `429`, and selected `5xx` failures;
+- typed failure after the retry budget, with no route change.
+
+Run checks with `uv run pytest -q`. `tests/contract_stub.py` remains an explicit test double only and is not reachable from production configuration.

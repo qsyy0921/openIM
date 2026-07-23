@@ -21,7 +21,7 @@ services=(
   ollama.service
   openim-platform-api.service
   openim-platform-ingress.service
-  openim-intelligence-worker.service
+  openim-intelligence-tunnel.service
   openim-agent-runtime.service
   openim-agent-delivery.service
   openim-action-executor.service
@@ -85,7 +85,7 @@ database_state="$(docker exec "$postgres_container" psql -At -F '|' -U platform 
               AND e.model_revision = 'qwen3-embedding:4b'
               AND e.dimension = 2560 AND e.normalized
               AND e.content_checksum = c.checksum);")"
-[[ "$database_state" == "28|sql/0028_remote_a2a.sql|520|624|3224|520|2704|2704" ]] || {
+[[ "$database_state" == "31|sql/0031_telegram_identity_linking.sql|520|624|3224|520|2704|2704" ]] || {
   echo "unexpected Node2 database state: $database_state" >&2
   exit 1
 }
@@ -127,7 +127,7 @@ if not all(isinstance(value, (int, float)) for value in vectors[0]):
     raise SystemExit("embedding vector contains non-numeric values")
 PY
 
-echo "node2_database=28|sql/0028_remote_a2a.sql|520|624|3224|520|2704|2704"
+echo "node2_database=31|sql/0031_telegram_identity_linking.sql|520|624|3224|520|2704|2704"
 [[ "$release_version" =~ ^[A-Za-z0-9._-]+$ ]] || {
   echo "release version is malformed" >&2
   exit 1

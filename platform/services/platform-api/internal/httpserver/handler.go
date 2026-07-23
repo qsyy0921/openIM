@@ -19,6 +19,7 @@ import (
 	"github.com/qsyy0921/openim/platform/services/platform-api/internal/agentcontrol"
 	"github.com/qsyy0921/openim/platform/services/platform-api/internal/identity"
 	"github.com/qsyy0921/openim/platform/services/platform-api/internal/observe"
+	"github.com/qsyy0921/openim/platform/services/platform-api/internal/telegram"
 )
 
 type healthResponse struct {
@@ -43,26 +44,44 @@ type AgentWorkspaceService interface {
 type AgentCatalogService interface {
 	List(context.Context, string, string, int32) ([]agent.AgentSummary, error)
 }
+type TelegramLinkService interface {
+	Status(context.Context, string, string, int32) (telegram.LinkStatus, error)
+	Issue(context.Context, string, string, int32) (telegram.LinkChallenge, error)
+}
 
 func NewHandler(version string, sessions SessionService, devices DeviceService, approvals ApprovalService, workspace AgentWorkspaceService, catalog AgentCatalogService) http.Handler {
-	return newHandler(version, sessions, devices, approvals, workspace, catalog, nil, nil)
+	return newHandler(version, sessions, devices, approvals, workspace, catalog, nil, nil, nil)
+}
+
+func NewHandlerWithTelegramLinks(version string, sessions SessionService, devices DeviceService, approvals ApprovalService, workspace AgentWorkspaceService, catalog AgentCatalogService, links TelegramLinkService) http.Handler {
+	if links == nil {
+		panic("Telegram link service is required")
+	}
+	return newHandler(version, sessions, devices, approvals, workspace, catalog, nil, links, nil)
 }
 
 func NewHandlerWithAgentControl(version string, sessions SessionService, devices DeviceService, approvals ApprovalService, workspace AgentWorkspaceService, catalog AgentCatalogService, control *agentcontrol.Service) http.Handler {
 	if control == nil {
 		panic("Agent control service is required")
 	}
-	return newHandler(version, sessions, devices, approvals, workspace, catalog, control, nil)
+	return newHandler(version, sessions, devices, approvals, workspace, catalog, control, nil, nil)
 }
 
 func NewHandlerWithAgentControls(version string, sessions SessionService, devices DeviceService, approvals ApprovalService, workspace AgentWorkspaceService, catalog AgentCatalogService, control *agentcontrol.Service, admin *admincontrol.Service) http.Handler {
 	if control == nil || admin == nil {
 		panic("member and administrator Agent control services are required")
 	}
-	return newHandler(version, sessions, devices, approvals, workspace, catalog, control, admin)
+	return newHandler(version, sessions, devices, approvals, workspace, catalog, control, nil, admin)
 }
 
-func newHandler(version string, sessions SessionService, devices DeviceService, approvals ApprovalService, workspace AgentWorkspaceService, catalog AgentCatalogService, control AgentControlService, admins ...AdminControlService) http.Handler {
+func NewHandlerWithAgentControlsAndTelegramLinks(version string, sessions SessionService, devices DeviceService, approvals ApprovalService, workspace AgentWorkspaceService, catalog AgentCatalogService, control *agentcontrol.Service, admin *admincontrol.Service, links TelegramLinkService) http.Handler {
+	if control == nil || admin == nil || links == nil {
+		panic("member, administrator, and Telegram link services are required")
+	}
+	return newHandler(version, sessions, devices, approvals, workspace, catalog, control, links, admin)
+}
+
+func newHandler(version string, sessions SessionService, devices DeviceService, approvals ApprovalService, workspace AgentWorkspaceService, catalog AgentCatalogService, control AgentControlService, links TelegramLinkService, admins ...AdminControlService) http.Handler {
 	if sessions == nil || devices == nil || approvals == nil || workspace == nil || catalog == nil {
 		panic("session, device, approval, Agent workspace, and Agent catalog services are required")
 	}
@@ -95,6 +114,10 @@ func newHandler(version string, sessions SessionService, devices DeviceService, 
 	}
 	if admin != nil {
 		registerAdminControlRoutes(mux, admin)
+	}
+	if links != nil {
+		mux.Handle("GET /v1/agent/channels/telegram/link", &telegramLinkStatusHandler{service: links})
+		mux.Handle("POST /v1/agent/channels/telegram/link-challenges", &telegramLinkChallengeHandler{service: links})
 	}
 	return requestLogger(observe.HTTPMetrics(mux))
 }

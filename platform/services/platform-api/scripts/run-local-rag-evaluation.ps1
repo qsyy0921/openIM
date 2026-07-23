@@ -12,8 +12,6 @@ param(
     [string]$EmbeddingBaseURL = "http://127.0.0.1:11434/v1",
     [string]$EmbeddingModel = "qwen3-embedding:4b",
     [int]$EmbeddingDimension = 2560,
-    [string]$GenerationBaseURL = "http://127.0.0.1:11434/v1",
-    [string]$GenerationModel = "qwen2.5:3b",
     [int]$GenerationAnswerableCases = 20,
     [int]$GenerationUnanswerableCases = 20,
     [switch]$IndexMissing
@@ -41,13 +39,9 @@ if (Get-NetTCPConnection -LocalPort $WorkerPort -State Listen -ErrorAction Silen
     throw "Port $WorkerPort is already in use."
 }
 
-# Retrieval mode never invokes generation. Generation mode uses the explicitly
-# declared evaluation model; neither mode changes production provider routing.
-$env:INTELLIGENCE_DEEPSEEK_BASE_URL = if ($Mode -eq "generation") { $GenerationBaseURL } else { "https://invalid.local" }
-$env:INTELLIGENCE_DEEPSEEK_API_KEY = "rag-evaluation-not-a-credential"
-$env:INTELLIGENCE_DEEPSEEK_MODEL = if ($Mode -eq "generation") { $GenerationModel } else { "generation-not-evaluated" }
-$env:INTELLIGENCE_DEEPSEEK_TIMEOUT_SECONDS = "120"
-$env:INTELLIGENCE_DEEPSEEK_MAX_TOKENS = "512"
+# The bootstrap loads the local CLIProxyAPI key directly into the child process.
+# Both evaluation modes preserve the single production generation route.
+$env:INTELLIGENCE_HTTP_PORT = [string]$WorkerPort
 $env:INTELLIGENCE_EMBEDDING_BASE_URL = $EmbeddingBaseURL
 $env:INTELLIGENCE_EMBEDDING_API_KEY = "local-embedding"
 $env:INTELLIGENCE_EMBEDDING_MODEL = $EmbeddingModel
@@ -60,7 +54,7 @@ $stderr = Join-Path $env:TEMP "openim-rag-evaluation-worker.err.log"
 $worker = $null
 try {
     $worker = Start-Process -FilePath $python `
-        -ArgumentList @("-m", "uvicorn", "intelligence_worker.app:app", "--host", "127.0.0.1", "--port", $WorkerPort) `
+        -ArgumentList @("-m", "intelligence_worker.local_bootstrap") `
         -WorkingDirectory $workerRoot `
         -RedirectStandardOutput $stdout `
         -RedirectStandardError $stderr `
@@ -120,7 +114,7 @@ try {
         )
         if ($Mode -eq "generation") {
             $arguments += @(
-                "-generation-model", $GenerationModel,
+                "-generation-model", "gpt-5.6-terra",
                 "-generation-seed", "enterprise-rag-generation-v1",
                 "-generation-answerable", $GenerationAnswerableCases,
                 "-generation-unanswerable", $GenerationUnanswerableCases

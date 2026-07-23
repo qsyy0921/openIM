@@ -82,7 +82,7 @@ The first supported specification is deliberately closed:
 {
   "runtime_kind": "knowledge_ticket_v1",
   "instructions": "Answer only from authorized evidence and abstain when evidence is absent.",
-  "model_route": "deepseek-v4-pro",
+  "model_route": "gpt-5.6-terra",
   "retrieval": {
     "purpose": "agent_answer",
     "limit": 5

@@ -208,7 +208,7 @@ LIMIT 1")"
   IFS='|' read -r update_id event_id outbox_state run_id run_state model provider_id \
     delivery_id delivery_state external_message_id citation_count <<<"$row"
   [[ "$outbox_state" == published && "$run_state" == succeeded && \
-     "$model" == deepseek-v4-pro && -n "$provider_id" && \
+     "$model" == gpt-5.6-terra && -n "$provider_id" && \
      "$delivery_state" == sent && -n "$external_message_id" && \
      "$citation_count" -ge "$minimum_citations" ]] || {
     echo "Telegram round trip did not meet the acceptance contract: $row" >&2
@@ -240,27 +240,96 @@ cleanup_binding() {
   valid_uuid "$tenant_id" || usage
   valid_uuid "$member_id" || usage
 
-  local fixture
-  fixture="$(psql_value "
+  psql_value "
+DO \$\$
+DECLARE
+  principal_count integer;
+  chat_count integer;
+  challenge_count integer;
+  matching_consumed_count integer;
+  mismatched_consumed_count integer;
+  foreign_event_count integer;
+BEGIN
+  SELECT count(*) INTO principal_count
+    FROM channel.telegram_principals
+   WHERE telegram_user_id=$user_id
+     AND tenant_id='$tenant_id'::uuid
+     AND member_id='$member_id'::uuid;
+  SELECT count(*) INTO chat_count
+    FROM channel.telegram_chats
+   WHERE telegram_chat_id=$chat_id
+     AND tenant_id='$tenant_id'::uuid
+     AND session_type=1;
+  IF principal_count <> 1 OR chat_count <> 1 THEN
+    RAISE EXCEPTION 'Telegram binding does not match the isolated fixture';
+  END IF;
+
+  SELECT count(*),
+         count(*) FILTER (
+           WHERE consumed_at IS NOT NULL
+             AND telegram_user_id=$user_id
+             AND telegram_chat_id=$chat_id),
+         count(*) FILTER (
+           WHERE consumed_at IS NOT NULL
+             AND (telegram_user_id<>$user_id OR telegram_chat_id<>$chat_id))
+    INTO challenge_count, matching_consumed_count, mismatched_consumed_count
+    FROM channel.telegram_link_challenges
+   WHERE tenant_id='$tenant_id'::uuid
+     AND member_id='$member_id'::uuid;
+  IF challenge_count > 0
+     AND (matching_consumed_count <> 1 OR mismatched_consumed_count <> 0) THEN
+    RAISE EXCEPTION 'Telegram challenge history does not match the isolated fixture';
+  END IF;
+
+  SELECT count(*) INTO foreign_event_count
+    FROM audit.telegram_link_events event
+   WHERE event.tenant_id='$tenant_id'::uuid
+     AND event.member_id='$member_id'::uuid
+     AND NOT EXISTS (
+       SELECT 1
+         FROM channel.telegram_link_challenges challenge
+        WHERE challenge.id=event.challenge_id
+          AND challenge.tenant_id='$tenant_id'::uuid
+          AND challenge.member_id='$member_id'::uuid);
+  IF foreign_event_count <> 0 THEN
+    RAISE EXCEPTION 'Telegram link audit history is outside the isolated fixture';
+  END IF;
+
+  DELETE FROM audit.telegram_link_events event
+   USING channel.telegram_link_challenges challenge
+   WHERE event.challenge_id=challenge.id
+     AND challenge.tenant_id='$tenant_id'::uuid
+     AND challenge.member_id='$member_id'::uuid;
+  DELETE FROM channel.telegram_link_challenges
+   WHERE tenant_id='$tenant_id'::uuid
+     AND member_id='$member_id'::uuid;
+  DELETE FROM channel.telegram_principals
+   WHERE telegram_user_id=$user_id
+     AND tenant_id='$tenant_id'::uuid
+     AND member_id='$member_id'::uuid;
+  DELETE FROM channel.telegram_chats
+   WHERE telegram_chat_id=$chat_id
+     AND tenant_id='$tenant_id'::uuid
+     AND session_type=1;
+END
+\$\$;" >/dev/null
+
+  local residual
+  residual="$(psql_value "
 SELECT (SELECT count(*) FROM channel.telegram_principals
          WHERE telegram_user_id=$user_id AND tenant_id='$tenant_id'::uuid
            AND member_id='$member_id'::uuid),
        (SELECT count(*) FROM channel.telegram_chats
          WHERE telegram_chat_id=$chat_id AND tenant_id='$tenant_id'::uuid
-           AND session_type=1)")"
-  [[ "$fixture" == "1|1" ]] || {
-    echo "Telegram binding does not match the isolated fixture: $fixture" >&2
+           AND session_type=1),
+       (SELECT count(*) FROM channel.telegram_link_challenges
+         WHERE tenant_id='$tenant_id'::uuid AND member_id='$member_id'::uuid),
+       (SELECT count(*) FROM audit.telegram_link_events
+         WHERE tenant_id='$tenant_id'::uuid AND member_id='$member_id'::uuid)")"
+  [[ "$residual" == "0|0|0|0" ]] || {
+    echo "Telegram fixture cleanup left residual state: $residual" >&2
     exit 1
   }
-  psql_value "
-BEGIN;
-DELETE FROM channel.telegram_principals
- WHERE telegram_user_id=$user_id AND tenant_id='$tenant_id'::uuid
-   AND member_id='$member_id'::uuid;
-DELETE FROM channel.telegram_chats
- WHERE telegram_chat_id=$chat_id AND tenant_id='$tenant_id'::uuid
-   AND session_type=1;
-COMMIT;" >/dev/null
   echo "telegram_binding=cleaned"
 }
 

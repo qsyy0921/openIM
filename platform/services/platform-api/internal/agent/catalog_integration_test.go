@@ -56,7 +56,7 @@ WHERE d.tenant_id = $1::uuid AND d.slug = 'knowledge-agent'`, catalogTestTenant,
 	versionTwoSpec := AgentSpec{
 		RuntimeKind:        KnowledgeTicketRuntime,
 		Instructions:       "Answer only from authorized evidence and identify this as catalog version two.",
-		ModelRoute:         DeepSeekV4ProRoute,
+		ModelRoute:         GenerationModelRoute,
 		Retrieval:          RetrievalSpec{Purpose: "agent_answer", Limit: 5},
 		AllowedActionTypes: []string{"create_ticket"},
 		MaxModelAttempts:   3,

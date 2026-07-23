@@ -38,7 +38,8 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	poller, err := telegram.NewPoller(client, telegram.NewStore(pool), ingress.NewStore(pool), cfg.PollTimeout, cfg.RetryDelay, cfg.CatalogAlias)
+	store := telegram.NewStore(pool)
+	poller, err := telegram.NewPoller(client, store, store, ingress.NewStore(pool), cfg.PollTimeout, cfg.RetryDelay, cfg.CatalogAlias)
 	if err != nil {
 		return err
 	}

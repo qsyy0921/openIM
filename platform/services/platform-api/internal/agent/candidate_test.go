@@ -29,7 +29,7 @@ func TestCandidateClientUsesStructuredContract(t *testing.T) {
 			t.Fatal(err)
 		}
 		if body.RunID != "run-1" || body.AgentVersionID != "version-1" || body.AgentSpecChecksum != seedAgentSpecChecksum ||
-			body.ModelRoute != DeepSeekV4ProRoute || body.Content != "question" || len(body.Evidence) != 1 || len(body.Memory) != 1 {
+			body.ModelRoute != GenerationModelRoute || body.Content != "question" || len(body.Evidence) != 1 || len(body.Memory) != 1 {
 			t.Fatalf("body = %#v", body)
 		}
 		if string(body.ToolResults) != "[]" || string(body.Skills) != "[]" {

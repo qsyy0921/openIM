@@ -10,14 +10,13 @@ runtime_group="${OPENIM_PLATFORM_RUNTIME_GROUP:-$runtime_user}"
 mfl_root="${OPENIM_PLATFORM_MFL_ROOT:-$(dirname "$(dirname "$release_root")")}"
 venv="${OPENIM_INTELLIGENCE_VENV:-$mfl_root/venvs/intelligence-worker}"
 config_dir=/etc/openim-platform
-credential_file="$config_dir/credentials/deepseek-api-key"
 telegram_credential_file="$config_dir/credentials/telegram-bot-token"
 action_env="$config_dir/action-executor.env"
 postgres_container="${OPENIM_PLATFORM_POSTGRES_CONTAINER:-openim-platform-local-postgres-1}"
 install_dependencies="${OPENIM_INTELLIGENCE_INSTALL_DEPENDENCIES:-false}"
 proxy_env="${OPENIM_PLATFORM_PROXY_ENV:-/etc/openim/proxy.env}"
-deepseek_base_url="${OPENIM_INTELLIGENCE_DEEPSEEK_BASE_URL:-https://api.deepseek.com}"
-deepseek_model="${OPENIM_INTELLIGENCE_DEEPSEEK_MODEL:-deepseek-v4-pro}"
+intelligence_ssh_target="${OPENIM_INTELLIGENCE_SSH_TARGET:-10495@172.31.50.1}"
+windows_embedding_forward_port="${OPENIM_INTELLIGENCE_WINDOWS_EMBEDDING_FORWARD_PORT:-11435}"
 embedding_base_url="${OPENIM_INTELLIGENCE_EMBEDDING_BASE_URL:-http://127.0.0.1:11434/v1}"
 embedding_api_key="${OPENIM_INTELLIGENCE_EMBEDDING_API_KEY:-local-only}"
 embedding_model="${OPENIM_INTELLIGENCE_EMBEDDING_MODEL:-qwen3-embedding:4b}"
@@ -63,6 +62,19 @@ command -v runuser >/dev/null 2>&1 || {
 }
 [[ "$telegram_no_proxy" =~ ^[A-Za-z0-9.,:/-]+$ ]] || {
   echo "Telegram NO_PROXY value is malformed" >&2
+  exit 1
+}
+[[ "$intelligence_ssh_target" =~ ^[A-Za-z0-9._-]+@[A-Za-z0-9.:-]+$ ]] || {
+  echo "intelligence SSH target is malformed" >&2
+  exit 1
+}
+[[ "$windows_embedding_forward_port" =~ ^[0-9]+$ ]] && \
+  ((windows_embedding_forward_port >= 1024 && windows_embedding_forward_port <= 65535)) || {
+  echo "Windows embedding forward port must be between 1024 and 65535" >&2
+  exit 1
+}
+command -v ssh >/dev/null 2>&1 || {
+  echo "OpenSSH client is required for the intelligence tunnel" >&2
   exit 1
 }
 runtime_binaries=(
@@ -128,10 +140,6 @@ chown -R "$runtime_user:$runtime_group" "$venv"
 cat >"$config_dir/intelligence.env" <<EOF
 INTELLIGENCE_HTTP_HOST=127.0.0.1
 INTELLIGENCE_HTTP_PORT=18082
-INTELLIGENCE_DEEPSEEK_BASE_URL=$deepseek_base_url
-INTELLIGENCE_DEEPSEEK_MODEL=$deepseek_model
-INTELLIGENCE_DEEPSEEK_TIMEOUT_SECONDS=90
-INTELLIGENCE_DEEPSEEK_MAX_TOKENS=1024
 INTELLIGENCE_EMBEDDING_BASE_URL=$embedding_base_url
 INTELLIGENCE_EMBEDDING_API_KEY=$embedding_api_key
 INTELLIGENCE_EMBEDDING_MODEL=$embedding_model
@@ -182,18 +190,17 @@ unset action_password escaped_action_password action_url
 chown root:"$runtime_group" "$action_env"
 chmod 0640 "$action_env"
 
-cat >/etc/systemd/system/openim-intelligence-worker.service <<EOF
+cat >/etc/systemd/system/openim-intelligence-tunnel.service <<EOF
 [Unit]
-Description=OpenIM Intelligence Worker
+Description=OpenIM loopback-only intelligence tunnel to Windows node1
 After=network-online.target
+Wants=network-online.target
 
 [Service]
 Type=simple
 User=$runtime_user
 Group=$runtime_group
-EnvironmentFile=$config_dir/intelligence.env
-LoadCredential=deepseek_api_key:$credential_file
-ExecStart=/bin/sh -ec 'export INTELLIGENCE_DEEPSEEK_API_KEY="\$(cat "\$CREDENTIALS_DIRECTORY/deepseek_api_key")"; exec $venv/bin/python -m uvicorn intelligence_worker.app:app --host "\$INTELLIGENCE_HTTP_HOST" --port "\$INTELLIGENCE_HTTP_PORT"'
+ExecStart=/usr/bin/ssh -NT -o BatchMode=yes -o ExitOnForwardFailure=yes -o StrictHostKeyChecking=yes -o ServerAliveInterval=30 -o ServerAliveCountMax=3 -L 127.0.0.1:18082:127.0.0.1:18082 -R 127.0.0.1:$windows_embedding_forward_port:127.0.0.1:11434 $intelligence_ssh_target
 Restart=on-failure
 RestartSec=3s
 NoNewPrivileges=true
@@ -209,8 +216,8 @@ EOF
 cat >/etc/systemd/system/openim-agent-runtime.service <<EOF
 [Unit]
 Description=OpenIM governed Agent Runtime
-Requires=docker.service openim-intelligence-worker.service
-After=docker.service openim-intelligence-worker.service
+Requires=docker.service openim-intelligence-tunnel.service
+After=docker.service openim-intelligence-tunnel.service
 
 [Service]
 Type=simple
@@ -353,12 +360,12 @@ write_platform_worker_unit \
   docker.service docker.service
 write_platform_worker_unit \
   openim-memory-extractor "OpenIM Agent Memory extractor" memory-extractor \
-  "docker.service openim-intelligence-worker.service" \
-  "docker.service openim-intelligence-worker.service"
+  "docker.service openim-intelligence-tunnel.service" \
+  "docker.service openim-intelligence-tunnel.service"
 write_platform_worker_unit \
   openim-proactive-runtime "OpenIM proactive Agent Runtime" proactive-runtime \
-  "docker.service openim-intelligence-worker.service" \
-  "docker.service openim-intelligence-worker.service"
+  "docker.service openim-intelligence-tunnel.service" \
+  "docker.service openim-intelligence-tunnel.service"
 write_telegram_worker_unit \
   openim-telegram-ingress "OpenIM Telegram ingress" telegram-ingress
 write_delivery_worker_unit
@@ -389,11 +396,13 @@ assert_running_binary() {
 assert_running_binary openim-action-executor.service "$bin_dir/action-executor"
 assert_running_binary openim-memory-projector.service "$bin_dir/memory-projector"
 
-if [[ -s "$credential_file" ]]; then
-  systemctl enable openim-intelligence-worker.service openim-agent-runtime.service \
-    openim-memory-extractor.service openim-proactive-runtime.service
-  systemctl stop openim-agent-runtime.service openim-memory-extractor.service openim-proactive-runtime.service
-  systemctl restart openim-intelligence-worker.service
+systemctl disable --now openim-intelligence-worker.service >/dev/null 2>&1 || true
+rm -f /etc/systemd/system/openim-intelligence-worker.service
+systemctl daemon-reload
+systemctl enable openim-intelligence-tunnel.service openim-agent-runtime.service \
+  openim-memory-extractor.service openim-proactive-runtime.service
+systemctl stop openim-agent-runtime.service openim-memory-extractor.service openim-proactive-runtime.service
+systemctl restart openim-intelligence-tunnel.service
   for _ in $(seq 1 60); do
     if curl --fail --silent --show-error http://127.0.0.1:18082/healthz >/dev/null; then
       break
@@ -461,17 +470,12 @@ PY
   rm -f "$index_report"
   trap - EXIT
   systemctl restart openim-agent-runtime.service openim-memory-extractor.service openim-proactive-runtime.service
-  systemctl is-active openim-intelligence-worker.service openim-agent-runtime.service \
+  systemctl is-active openim-intelligence-tunnel.service openim-agent-runtime.service \
     openim-memory-extractor.service openim-proactive-runtime.service
   assert_running_binary openim-agent-runtime.service "$bin_dir/agent-runtime"
   assert_running_binary openim-memory-extractor.service "$bin_dir/memory-extractor"
   assert_running_binary openim-proactive-runtime.service "$bin_dir/proactive-runtime"
-  echo "deepseek_credential=present"
-else
-  systemctl disable --now openim-intelligence-worker.service openim-agent-runtime.service \
-    openim-memory-extractor.service openim-proactive-runtime.service
-  echo "deepseek_credential=required"
-fi
+echo "intelligence_tunnel=active"
 systemctl enable openim-agent-delivery.service
 systemctl restart openim-agent-delivery.service
 systemctl is-active openim-agent-delivery.service

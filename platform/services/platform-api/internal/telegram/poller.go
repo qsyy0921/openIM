@@ -20,6 +20,10 @@ type BindingRepository interface {
 	SaveOffset(context.Context, int64, int64) error
 }
 
+type ChallengeConsumer interface {
+	ConsumeLinkChallenge(context.Context, string, int64, int64) (Binding, error)
+}
+
 type Ingress interface {
 	IngestBound(context.Context, ingress.Message, string, string) (ingress.Outcome, error)
 	Reject(context.Context, ingress.Source, string, string, string) error
@@ -28,21 +32,22 @@ type Ingress interface {
 type Poller struct {
 	api          API
 	bindings     BindingRepository
+	challenges   ChallengeConsumer
 	ingress      Ingress
 	pollTimeout  int
 	retryDelay   time.Duration
 	catalogAlias string
 }
 
-func NewPoller(api API, bindings BindingRepository, accepted Ingress, pollTimeout int, retryDelay time.Duration, catalogAlias string) (*Poller, error) {
+func NewPoller(api API, bindings BindingRepository, challenges ChallengeConsumer, accepted Ingress, pollTimeout int, retryDelay time.Duration, catalogAlias string) (*Poller, error) {
 	catalogAlias = strings.ToLower(strings.TrimSpace(catalogAlias))
-	if api == nil || bindings == nil || accepted == nil || pollTimeout < 1 || pollTimeout > 50 || retryDelay <= 0 {
+	if api == nil || bindings == nil || challenges == nil || accepted == nil || pollTimeout < 1 || pollTimeout > 50 || retryDelay <= 0 {
 		return nil, errors.New("Telegram poller dependencies or timing are invalid")
 	}
 	if !validAlias(catalogAlias) {
 		return nil, errors.New("Telegram catalog alias is invalid")
 	}
-	return &Poller{api: api, bindings: bindings, ingress: accepted, pollTimeout: pollTimeout, retryDelay: retryDelay, catalogAlias: catalogAlias}, nil
+	return &Poller{api: api, bindings: bindings, challenges: challenges, ingress: accepted, pollTimeout: pollTimeout, retryDelay: retryDelay, catalogAlias: catalogAlias}, nil
 }
 
 func (p *Poller) Run(ctx context.Context) error {
@@ -91,6 +96,27 @@ func (p *Poller) process(ctx context.Context, bot Bot, update Update) error {
 	if update.Message == nil || update.Message.From == nil || update.Message.ID <= 0 || update.Message.Chat.ID == 0 || strings.TrimSpace(update.Message.Text) == "" {
 		return p.ingress.Reject(ctx, source, "", "", "telegram_unsupported_update")
 	}
+	if code, recognized := parseLinkCommand(update.Message.Text, bot.Username); recognized {
+		messageID := telegramMessageID(update.Message.Chat.ID, update.Message.ID)
+		senderID := telegramSenderID(update.Message.From.ID)
+		if update.Message.Chat.Type != "private" {
+			return p.ingress.Reject(ctx, source, messageID, senderID, "telegram_link_private_chat_required")
+		}
+		if code == "" {
+			return p.ingress.Reject(ctx, source, messageID, senderID, "telegram_link_challenge_invalid")
+		}
+		if _, err := p.challenges.ConsumeLinkChallenge(ctx, code, update.Message.From.ID, update.Message.Chat.ID); err != nil {
+			switch {
+			case errors.Is(err, ErrInvalidChallenge):
+				return p.ingress.Reject(ctx, source, messageID, senderID, "telegram_link_challenge_invalid")
+			case errors.Is(err, ErrBindingConflict), errors.Is(err, ErrAlreadyBound):
+				return p.ingress.Reject(ctx, source, messageID, senderID, "telegram_link_binding_conflict")
+			default:
+				return err
+			}
+		}
+		return nil
+	}
 	binding, err := p.bindings.ResolveBinding(ctx, update.Message.From.ID, update.Message.Chat.ID)
 	if errors.Is(err, ErrUnbound) {
 		return p.ingress.Reject(ctx, source, telegramMessageID(update.Message.Chat.ID, update.Message.ID), telegramSenderID(update.Message.From.ID), "telegram_unbound_identity")
@@ -118,6 +144,27 @@ func (p *Poller) process(ctx context.Context, bot Bot, update Update) error {
 	}
 	_, err = p.ingress.IngestBound(ctx, message, binding.TenantID, binding.MemberID)
 	return err
+}
+
+func parseLinkCommand(text, botUsername string) (string, bool) {
+	fields := strings.Fields(strings.TrimSpace(text))
+	if len(fields) == 0 {
+		return "", false
+	}
+	command := strings.ToLower(fields[0])
+	plain := command == "/link"
+	qualified := strings.EqualFold(command, "/link@"+strings.TrimPrefix(strings.TrimSpace(botUsername), "@"))
+	if !plain && !qualified {
+		return "", false
+	}
+	if len(fields) != 2 {
+		return "", true
+	}
+	code, valid := normalizeChallengeCode(fields[1])
+	if !valid {
+		return "", true
+	}
+	return code, true
 }
 
 func normalizeTrigger(text, chatType, botUsername, alias string) string {

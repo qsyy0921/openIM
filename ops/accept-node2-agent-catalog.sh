@@ -11,7 +11,7 @@ actor_member_id=bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb
 spec_file="$(mktemp)"
 rollback_needed=false
 agent_id=""
-version_one_id=""
+baseline_version_id=""
 
 psql_value() {
   docker exec "$postgres_container" psql -At -F '|' -v ON_ERROR_STOP=1 -U platform -d platform -c "$1"
@@ -32,12 +32,12 @@ activate() {
 cleanup() {
   local exit_code=$?
   rm -f "$spec_file"
-  if [[ "$rollback_needed" == true && -n "$agent_id" && -n "$version_one_id" ]]; then
+  if [[ "$rollback_needed" == true && -n "$agent_id" && -n "$baseline_version_id" ]]; then
     local current current_version revision
     current="$(psql_value "select active_version_id::text,revision from agent.deployments where tenant_id='$tenant_id' and agent_id='$agent_id' and slot='production'" || true)"
     IFS='|' read -r current_version revision <<<"$current"
-    if [[ -n "$current_version" && "$current_version" != "$version_one_id" && -n "$revision" ]]; then
-      activate "$version_one_id" "$revision" || echo "automatic rollback failed" >&2
+    if [[ -n "$current_version" && "$current_version" != "$baseline_version_id" && -n "$revision" ]]; then
+      activate "$baseline_version_id" "$revision" || echo "automatic rollback failed" >&2
     fi
   fi
   exit "$exit_code"
@@ -53,20 +53,21 @@ set -a
 set +a
 
 catalog_row="$(psql_value "
-select d.id::text,v.id::text,dep.revision,l.openim_user_id
+select d.id::text,v.id::text,v.version_number,dep.revision,l.openim_user_id,v.spec->>'model_route'
 from agent.definitions d
 join agent.deployments dep on dep.tenant_id=d.tenant_id and dep.agent_id=d.id and dep.slot='production'
-join agent.versions v on v.tenant_id=d.tenant_id and v.agent_id=d.id and v.version_number=1
+join agent.versions v on v.tenant_id=d.tenant_id and v.agent_id=d.id and v.id=dep.active_version_id
 join identity.identity_links l on l.tenant_id=d.tenant_id and l.member_id='$actor_member_id' and l.provisioning_state='ready'
 where d.tenant_id='$tenant_id' and d.slug='knowledge-agent'")"
-IFS='|' read -r agent_id version_one_id revision sender <<<"$catalog_row"
-[[ -n "$agent_id" && -n "$version_one_id" && -n "$revision" && -n "$sender" ]] || {
+IFS='|' read -r agent_id baseline_version_id baseline_version_number revision sender baseline_model <<<"$catalog_row"
+[[ -n "$agent_id" && -n "$baseline_version_id" && "$baseline_version_number" =~ ^[1-9][0-9]*$ && \
+   -n "$revision" && -n "$sender" && "$baseline_model" == gpt-5.6-terra ]] || {
   echo "seed Agent Catalog or sender identity is missing" >&2
   exit 1
 }
 
 cat >"$spec_file" <<'JSON'
-{"runtime_kind":"knowledge_ticket_v1","instructions":"Answer only from authorized evidence and identify this execution as catalog validation version two.","model_route":"deepseek-v4-pro","retrieval":{"purpose":"agent_answer","limit":5},"allowed_action_types":["create_ticket"],"max_model_attempts":3}
+{"runtime_kind":"knowledge_ticket_v1","instructions":"Answer only from authorized evidence and identify this execution as catalog validation version two.","model_route":"gpt-5.6-terra","retrieval":{"purpose":"agent_answer","limit":5},"allowed_action_types":["create_ticket"],"max_model_attempts":3}
 JSON
 expected_checksum="$(SPEC_FILE="$spec_file" python3 - <<'PY'
 import hashlib
@@ -77,32 +78,33 @@ print("sha256:" + hashlib.sha256(raw).hexdigest())
 PY
 )"
 
-version_two_row="$(psql_value "select id::text,spec_checksum from agent.versions where tenant_id='$tenant_id' and agent_id='$agent_id' and version_number=2")"
-if [[ -z "$version_two_row" ]]; then
+acceptance_row="$(psql_value "select id::text,spec_checksum,version_number from agent.versions where tenant_id='$tenant_id' and agent_id='$agent_id' and spec_checksum='$expected_checksum'")"
+if [[ -z "$acceptance_row" ]]; then
+  expected_version="$(psql_value "select max(version_number)+1 from agent.versions where tenant_id='$tenant_id' and agent_id='$agent_id'")"
   publish_result="$("$admin" \
     -operation publish \
     -tenant-id "$tenant_id" \
     -agent-id "$agent_id" \
     -actor-member-id "$actor_member_id" \
-    -expected-version 2 \
+    -expected-version "$expected_version" \
     -spec-file "$spec_file")"
-  version_two_id="$(RESULT="$publish_result" python3 -c 'import json,os; print(json.loads(os.environ["RESULT"])["version_id"])')"
-  version_two_checksum="$(RESULT="$publish_result" python3 -c 'import json,os; print(json.loads(os.environ["RESULT"])["spec_checksum"])')"
+  acceptance_version_id="$(RESULT="$publish_result" python3 -c 'import json,os; print(json.loads(os.environ["RESULT"])["version_id"])')"
+  acceptance_checksum="$(RESULT="$publish_result" python3 -c 'import json,os; print(json.loads(os.environ["RESULT"])["spec_checksum"])')"
 else
-  IFS='|' read -r version_two_id version_two_checksum <<<"$version_two_row"
+  IFS='|' read -r acceptance_version_id acceptance_checksum expected_version <<<"$acceptance_row"
 fi
-[[ "$version_two_checksum" == "$expected_checksum" ]] || {
-  echo "existing version 2 does not match the acceptance specification" >&2
+[[ "$acceptance_checksum" == "$expected_checksum" && "$expected_version" =~ ^[1-9][0-9]*$ ]] || {
+  echo "existing acceptance version does not match the specification" >&2
   exit 1
 }
 
 current_row="$(psql_value "select active_version_id::text,revision from agent.deployments where tenant_id='$tenant_id' and agent_id='$agent_id' and slot='production'")"
 IFS='|' read -r current_version revision <<<"$current_row"
-if [[ "$current_version" != "$version_one_id" ]]; then
-  echo "acceptance requires production to start on version 1" >&2
+if [[ "$current_version" != "$baseline_version_id" ]]; then
+  echo "acceptance requires production to remain on the captured baseline" >&2
   exit 1
 fi
-activate "$version_two_id" "$revision"
+activate "$acceptance_version_id" "$revision"
 rollback_needed=true
 
 secret="$(sed -n 's/^OPENIM_SECRET=//p' "$openim_env" | tail -1 | tr -d '\r' | sed -E 's/[[:space:]]+#.*$//')"
@@ -167,22 +169,22 @@ where i.server_msg_id='$server_msg_id'")"
 }
 
 nonce="$(date +%s%N)"
-version_two_run="$(send_and_wait "v2-$nonce" 2 "$version_two_id")"
+acceptance_run="$(send_and_wait "candidate-$nonce" "$expected_version" "$acceptance_version_id")"
 
 current_revision="$(psql_value "select revision from agent.deployments where tenant_id='$tenant_id' and agent_id='$agent_id' and slot='production'")"
-activate "$version_one_id" "$current_revision"
+activate "$baseline_version_id" "$current_revision"
 rollback_needed=false
-version_one_run="$(send_and_wait "rollback-v1-$nonce" 1 "$version_one_id")"
+baseline_run="$(send_and_wait "rollback-baseline-$nonce" "$baseline_version_number" "$baseline_version_id")"
 
-IFS='|' read -r old_run_id old_run_version _ _ <<<"$version_two_run"
-old_run_still_v2="$(psql_value "select v.version_number from agent.runs r join agent.versions v on v.id=r.agent_version_id and v.agent_id=r.agent_id and v.tenant_id=r.tenant_id where r.id='$old_run_id'")"
-[[ "$old_run_version" -eq 2 && "$old_run_still_v2" -eq 2 ]] || {
-  echo "rollback mutated the historical version 2 Run" >&2
+IFS='|' read -r old_run_id old_run_version _ _ <<<"$acceptance_run"
+old_run_still_pinned="$(psql_value "select v.version_number from agent.runs r join agent.versions v on v.id=r.agent_version_id and v.agent_id=r.agent_id and v.tenant_id=r.tenant_id where r.id='$old_run_id'")"
+[[ "$old_run_version" -eq "$expected_version" && "$old_run_still_pinned" -eq "$expected_version" ]] || {
+  echo "rollback mutated the historical acceptance Run" >&2
   exit 1
 }
 
-printf 'version_two_run=%s\n' "$version_two_run"
-printf 'rollback_version_one_run=%s\n' "$version_one_run"
-printf 'historical_run_version=2\n'
-printf 'production_version=1\n'
+printf 'acceptance_version_run=%s\n' "$acceptance_run"
+printf 'rollback_baseline_run=%s\n' "$baseline_run"
+printf 'historical_run_version=%s\n' "$expected_version"
+printf 'production_version=%s\n' "$baseline_version_number"
 unset admin_token
