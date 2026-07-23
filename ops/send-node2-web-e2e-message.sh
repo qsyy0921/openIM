@@ -15,7 +15,7 @@ openim_env="$deploy_root/openim/.env"
   exit 1
 }
 
-secret="$(sed -n 's/^OPENIM_SECRET=//p' "$openim_env" | tail -1 | tr -d '\r')"
+secret="$(sed -n 's/^OPENIM_SECRET=//p' "$openim_env" | tail -1 | tr -d '\r' | sed -E 's/[[:space:]]+#.*$//')"
 content="$(CONTENT_BASE64="$content_base64" python3 - <<'PY'
 import base64
 import os

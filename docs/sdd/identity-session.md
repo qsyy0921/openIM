@@ -17,6 +17,8 @@ Map a verified enterprise member identity to one OpenIM user and issue the OpenI
 
 The unit owns OIDC claim validation, tenant/member status checks, `IdentityLink`, device/platform validation, and `/v1/im/session`. It does not store user passwords, issue OpenIM Admin Tokens to clients, or implement a development authentication bypass.
 
+The active browser-continuity delta is specified by `oidc-session-continuity.md`: a refreshed ID Token must still pass this unit's full server-side verification and current membership/device checks. Browser renewal does not weaken or cache these decisions.
+
 ## Contracts and dependencies
 
 - `POST /v1/im/session` in `contracts/openapi/platform-v1.yaml`
@@ -84,6 +86,7 @@ Record session issue latency and outcomes by error class without token values. C
 - Local Keycloak 26.7.0 issued a token whose `iss`, `aud`, `sub`, and `tenant_id` matched the authoritative seed.
 - A live request traversed Keycloak, PostgreSQL, OpenIM user provisioning and User Token issuance, then completed an OpenIM WebSocket handshake with state `Open`.
 - A disabled member returned HTTP 403 before OpenIM was called.
+- Node2 release `akashic-node2-20260723-oidc-renew1` completed a real 314-second browser run in which the refreshed ID Token advanced by 240 seconds, the same subject and tenant remained pinned, and a post-renewal member-scoped Platform API request returned HTTP 200 before the OpenIM round trip completed.
 
 ## Open questions
 

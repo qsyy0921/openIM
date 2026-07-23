@@ -19,6 +19,12 @@ payload = {
     "tenant_id": "node2-acceptance-tenant",
     "conversation_id": "node2-intelligence-acceptance",
     "sender_id": "node2-acceptance-user",
+    "agent_id": "node2-acceptance-agent",
+    "agent_version_id": "node2-acceptance-version-1",
+    "agent_spec_checksum": "sha256:" + "a" * 64,
+    "instructions": "Answer only from the supplied authorized evidence and cite it.",
+    "model_route": "gpt-5.6-terra",
+    "allowed_action_types": ["create_ticket"],
     "content": "根据证据说明本次迁移的验收范围。",
     "evidence": [
         {
@@ -29,7 +35,7 @@ payload = {
             "title": "Node2 migration acceptance",
             "source_uri": "openim://acceptance/node2",
             "checksum": "node2-acceptance-checksum",
-            "content": "本次验收仅覆盖 Windows node1 与 Windows/WSL2 node2，不包含其他主机。",
+            "content": "本次验收仅覆盖 Windows node1 与原生 Ubuntu node2，不包含其他主机。",
         }
     ],
 }
@@ -55,10 +61,10 @@ with open(sys.argv[2], encoding="utf-8") as stream:
 assert status == "200", {"status": status, "response": payload}
 assert payload.get("citation_ids") == ["C1"], payload
 assert "[C1]" in payload.get("text", ""), payload
-assert isinstance(payload.get("model"), str) and payload["model"], payload
+assert payload.get("model") == "gpt-5.6-terra", payload
 assert isinstance(payload.get("provider_response_id"), str) and payload["provider_response_id"], payload
 assert payload.get("action_intent") is None, payload
-print(f"deepseek_model={payload['model']}")
-print("deepseek_real_call=accepted")
+print(f"generation_model={payload['model']}")
+print("responses_real_call=accepted")
 print("citation_validation=accepted")
 PY

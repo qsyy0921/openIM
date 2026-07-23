@@ -26,11 +26,11 @@ func TestNormalizeSingleChat(t *testing.T) {
 	if message.ConversationID != "si_user-a_user-b" || message.Content != `{"content":"hello"}` {
 		t.Fatalf("message = %#v", message)
 	}
-	event, err := message.ToEvent("tenant-1")
+	event, err := message.ToEvent("tenant-1", "member-1")
 	if err != nil {
 		t.Fatalf("ToEvent() error = %v", err)
 	}
-	if event.EventType != EventType || event.SourceKey != "openim:server-1" || event.DataClassification != "internal" {
+	if event.EventType != EventType || event.SourceChannel != ChannelOpenIM || event.PrincipalMemberID != "member-1" || event.SourceKey != "openim:server-1" || event.DataClassification != "internal" {
 		t.Fatalf("event = %#v", event)
 	}
 	if len(event.EventID) != 36 || event.OccurredAt != time.UnixMilli(1_700_000_000_000).UTC().Format(time.RFC3339Nano) {

@@ -63,11 +63,15 @@ func (h *agentConsumerHandler) ConsumeClaim(session sarama.ConsumerGroupSession,
 			continue
 		}
 		if matched {
-			runID, err := h.store.Enqueue(session.Context(), trigger)
+			result, err := h.store.Enqueue(session.Context(), source, trigger)
 			if err != nil {
 				return err
 			}
-			slog.Info("Agent Run enqueued", "run_id", runID, "event_id", event.EventID)
+			if result.RunID != "" {
+				slog.Info("Agent Run enqueued", "run_id", result.RunID, "event_id", event.EventID)
+			} else if result.RejectionReason != "" {
+				slog.Info("Agent trigger rejected", "event_id", event.EventID, "reason", result.RejectionReason)
+			}
 		}
 		markAndCommit(session, record)
 	}

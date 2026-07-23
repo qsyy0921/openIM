@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/qsyy0921/openim/platform/services/platform-api/internal/delivery"
 )
 
 func TestStoreDeduplicatesAndFencesRun(t *testing.T) {
@@ -21,43 +22,63 @@ func TestStoreDeduplicatesAndFencesRun(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer pool.Close()
-	var senderID string
-	if err := pool.QueryRow(ctx, `SELECT openim_user_id FROM identity.identity_links WHERE member_id = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb' AND provisioning_state = 'ready'`).Scan(&senderID); err != nil {
-		t.Fatal(err)
-	}
 	trigger := Trigger{
 		EventID:  "agent-integration-" + time.Now().Format("20060102150405.000000000"),
-		TenantID: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", ConversationID: "si_a_b",
-		SenderID: senderID, SessionType: 1, Prompt: "question",
+		TenantID: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", MemberID: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+		SourceChannel: "openim", ConversationID: "si_a_b",
+		SenderID: "integration-openim-user", SessionType: 1, Mentions: []Mention{{Alias: "@agent", Prompt: "question"}},
 	}
 	store := NewStore(pool)
-	runID, err := store.Enqueue(ctx, trigger)
+	source := Source{Topic: "integration", Partition: 0, Offset: time.Now().UnixNano()}
+	result, err := store.Enqueue(ctx, source, trigger)
 	if err != nil {
 		t.Fatal(err)
 	}
-	duplicateID, err := store.Enqueue(ctx, trigger)
-	if err != nil || duplicateID != runID {
-		t.Fatalf("duplicate Enqueue() = %q, %v", duplicateID, err)
+	runID := result.RunID
+	duplicate, err := store.Enqueue(ctx, source, trigger)
+	if err != nil || duplicate.RunID != runID {
+		t.Fatalf("duplicate Enqueue() = %#v, %v", duplicate, err)
 	}
-	t.Cleanup(func() { _, _ = pool.Exec(context.Background(), "DELETE FROM agent.runs WHERE id = $1::uuid", runID) })
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), "DELETE FROM audit.delivery_events WHERE run_id = $1::uuid", runID)
+		_, _ = pool.Exec(context.Background(), "DELETE FROM agent.runs WHERE id = $1::uuid", runID)
+	})
 
 	run, err := store.Claim(ctx, 15*time.Second, 3)
 	if err != nil || run == nil || run.ID != runID {
 		t.Fatalf("Claim() = %#v, %v", run, err)
 	}
+	if err := store.FailOrRetry(ctx, *run, "transient integration failure", 3, 0); err != nil {
+		t.Fatalf("FailOrRetry() = %v", err)
+	}
+	run, err = store.Claim(ctx, 15*time.Second, 3)
+	if err != nil || run == nil || run.ID != runID {
+		t.Fatalf("Claim() after retry = %#v, %v", run, err)
+	}
 	stale := *run
 	stale.LeaseToken = "stale"
-	if err := store.SaveCandidate(ctx, stale, Candidate{Text: "answer", Model: "model", ProviderResponseID: "resp"}, nil); err == nil {
+	if err := store.SaveCandidate(ctx, stale, Candidate{Text: "answer", Model: "model", ProviderResponseID: "resp", GroundingStatus: GroundingNotApplicable}, nil); err == nil {
 		t.Fatal("stale lease saved candidate")
 	}
-	if err := store.SaveCandidate(ctx, *run, Candidate{Text: "answer", Model: "model", ProviderResponseID: "resp"}, nil); err != nil {
+	if err := store.SaveCandidate(ctx, *run, Candidate{Text: "answer", Model: "model", ProviderResponseID: "resp", GroundingStatus: GroundingNotApplicable}, nil); err != nil {
 		t.Fatal(err)
 	}
 	run, err = store.Claim(ctx, 15*time.Second, 3)
 	if err != nil || run == nil || run.CandidateText != "answer" {
 		t.Fatalf("reply claim = %#v, %v", run, err)
 	}
-	if err := store.CompleteReply(ctx, *run, "server-msg-1", false); err != nil {
+	deliveries := delivery.NewStore(pool)
+	if err := deliveries.Prepare(ctx, delivery.PrepareRequest{
+		RunID: run.ID, LeaseToken: run.LeaseToken, TenantID: run.TenantID,
+		Channel: "openim", TargetID: run.SenderID, SessionType: 1, Content: run.CandidateText,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	deliveryRecord, err := deliveries.Claim(ctx, 15*time.Second, 3)
+	if err != nil || deliveryRecord == nil || deliveryRecord.RunID != runID {
+		t.Fatalf("delivery Claim() = %#v, %v", deliveryRecord, err)
+	}
+	if err := deliveries.MarkSent(ctx, *deliveryRecord, "server-msg-1"); err != nil {
 		t.Fatal(err)
 	}
 	var state, serverMsgID string

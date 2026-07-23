@@ -35,18 +35,19 @@ func (s *Store) Ingest(ctx context.Context, message Message) (Outcome, error) {
 	defer func() { _ = tx.Rollback(ctx) }()
 
 	var tenantID string
+	var memberID *string
 	err = tx.QueryRow(ctx, `
-SELECT tenant_id::text
+SELECT tenant_id::text, member_id::text
 FROM (
-    SELECT tenant_id, openim_user_id
+    SELECT tenant_id, member_id, openim_user_id
     FROM identity.identity_links
     WHERE provisioning_state = 'ready'
     UNION ALL
-    SELECT tenant_id, openim_user_id
+    SELECT tenant_id, NULL::uuid AS member_id, openim_user_id
     FROM agent.bot_identities
 ) AS senders
 WHERE openim_user_id = $1
-LIMIT 1`, message.SenderID).Scan(&tenantID)
+LIMIT 1`, message.SenderID).Scan(&tenantID, &memberID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		if err := insertRejection(ctx, tx, message.Source, message.ServerMsgID, message.SenderID, string(OutcomeUnmapped)); err != nil {
 			return "", err
@@ -60,7 +61,38 @@ LIMIT 1`, message.SenderID).Scan(&tenantID)
 		return "", fmt.Errorf("resolve ingress tenant: %w", err)
 	}
 
-	event, err := message.ToEvent(tenantID)
+	resolvedMemberID := ""
+	if memberID != nil {
+		resolvedMemberID = *memberID
+	}
+	return ingestMessage(ctx, tx, message, tenantID, resolvedMemberID)
+}
+
+func (s *Store) IngestBound(ctx context.Context, message Message, tenantID, memberID string) (Outcome, error) {
+	if message.SourceChannel != ChannelTelegram {
+		return "", errors.New("bound ingress is only supported for Telegram")
+	}
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return "", fmt.Errorf("begin bound ingress transaction: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	var active bool
+	if err := tx.QueryRow(ctx, `
+SELECT EXISTS (
+    SELECT 1 FROM identity.members
+    WHERE id = $1::uuid AND tenant_id = $2::uuid AND status = 'active'
+)`, memberID, tenantID).Scan(&active); err != nil {
+		return "", fmt.Errorf("validate bound ingress member: %w", err)
+	}
+	if !active {
+		return "", errors.New("bound ingress member is not active")
+	}
+	return ingestMessage(ctx, tx, message, tenantID, memberID)
+}
+
+func ingestMessage(ctx context.Context, tx pgx.Tx, message Message, tenantID, memberID string) (Outcome, error) {
+	event, err := message.ToEvent(tenantID, memberID)
 	if err != nil {
 		return "", err
 	}
@@ -71,17 +103,19 @@ LIMIT 1`, message.SenderID).Scan(&tenantID)
 	const insertIngress = `
 INSERT INTO integration.ingress_messages (
   source_key, event_id, source_topic, source_partition, source_offset,
-  tenant_id, conversation_id, server_msg_id, client_msg_id, sender_id,
+  tenant_id, source_channel, principal_member_id,
+  conversation_id, server_msg_id, client_msg_id, sender_id,
   session_type, content_type, content, event_payload
-) VALUES ($1, $2, $3, $4, $5, $6::uuid, $7, $8, $9, $10, $11, $12, $13, $14::jsonb)
+) VALUES ($1, $2, $3, $4, $5, $6::uuid, $7, NULLIF($8, '')::uuid,
+          $9, $10, $11, $12, $13, $14, $15, $16::jsonb)
 ON CONFLICT DO NOTHING
 RETURNING event_id`
 	var insertedEventID string
 	err = tx.QueryRow(ctx, insertIngress,
 		event.SourceKey, event.EventID, message.Source.Topic, message.Source.Partition,
-		message.Source.Offset, tenantID, event.ConversationID, event.ServerMsgID,
-		event.ClientMsgID, event.SenderID, event.SessionType, event.ContentType,
-		event.Content, payload,
+		message.Source.Offset, tenantID, event.SourceChannel, event.PrincipalMemberID,
+		event.ConversationID, event.ServerMsgID, event.ClientMsgID, event.SenderID,
+		event.SessionType, event.ContentType, event.Content, payload,
 	).Scan(&insertedEventID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		if err := tx.Commit(ctx); err != nil {

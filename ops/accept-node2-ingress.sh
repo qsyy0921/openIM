@@ -10,7 +10,7 @@ postgres_container=openim-platform-local-postgres-1
   exit 1
 }
 
-secret="$(sed -n 's/^OPENIM_SECRET=//p' "$openim_env" | tail -1 | tr -d '\r')"
+secret="$(sed -n 's/^OPENIM_SECRET=//p' "$openim_env" | tail -1 | tr -d '\r' | sed -E 's/[[:space:]]+#.*$//')"
 sender="$(docker exec "$postgres_container" psql -At -U platform -d platform -c \
   "select openim_user_id from identity.identity_links where member_id='bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb' and provisioning_state='ready'")"
 [[ -n "$secret" && -n "$sender" ]] || {

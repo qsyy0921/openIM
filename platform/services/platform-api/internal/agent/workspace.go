@@ -29,17 +29,21 @@ type WorkspaceIntent struct {
 }
 
 type WorkspaceRun struct {
-	ID             string              `json:"run_id"`
-	ConversationID string              `json:"conversation_id"`
-	Prompt         string              `json:"prompt"`
-	State          string              `json:"state"`
-	Answer         string              `json:"answer,omitempty"`
-	Model          string              `json:"model,omitempty"`
-	LastError      string              `json:"last_error,omitempty"`
-	CreatedAt      time.Time           `json:"created_at"`
-	UpdatedAt      time.Time           `json:"updated_at"`
-	Citations      []WorkspaceCitation `json:"citations"`
-	Intent         *WorkspaceIntent    `json:"intent,omitempty"`
+	ID                 string              `json:"run_id"`
+	AgentID            string              `json:"agent_id"`
+	AgentDisplayName   string              `json:"agent_display_name"`
+	AgentVersionNumber int                 `json:"agent_version_number"`
+	AgentSpecChecksum  string              `json:"agent_spec_checksum"`
+	ConversationID     string              `json:"conversation_id"`
+	Prompt             string              `json:"prompt"`
+	State              string              `json:"state"`
+	Answer             string              `json:"answer,omitempty"`
+	Model              string              `json:"model,omitempty"`
+	LastError          string              `json:"last_error,omitempty"`
+	CreatedAt          time.Time           `json:"created_at"`
+	UpdatedAt          time.Time           `json:"updated_at"`
+	Citations          []WorkspaceCitation `json:"citations"`
+	Intent             *WorkspaceIntent    `json:"intent,omitempty"`
 }
 
 type Workspace struct {
@@ -52,13 +56,16 @@ func (s *Store) ReadWorkspace(ctx context.Context, tenantID, memberID string, li
 		return nil, errors.New("workspace query is invalid")
 	}
 	const runsQuery = `
-SELECT r.id::text, r.conversation_id, r.prompt, r.state,
+SELECT r.id::text, r.agent_id::text, d.display_name, v.version_number, r.agent_spec_checksum,
+       r.conversation_id, r.prompt, r.state,
        COALESCE(r.candidate_text, ''), COALESCE(r.model, ''), COALESCE(r.last_error, ''),
        r.created_at, r.updated_at,
        COALESCE(i.id::text, ''), COALESCE(i.action_type, ''), COALESCE(i.payload->>'title', ''),
        COALESCE(i.payload_digest, ''), COALESCE(i.state, ''), i.expires_at,
        COALESCE(e.id::text, ''), COALESCE(e.state, ''), COALESCE(e.ticket_id::text, '')
 FROM agent.runs r
+JOIN agent.definitions d ON d.tenant_id = r.tenant_id AND d.id = r.agent_id
+JOIN agent.versions v ON v.tenant_id = r.tenant_id AND v.agent_id = r.agent_id AND v.id = r.agent_version_id
 LEFT JOIN action.intents i ON i.run_id = r.id
 LEFT JOIN action.executions e ON e.intent_id = i.id
 WHERE r.tenant_id = $1::uuid AND r.principal_member_id = $2::uuid
@@ -76,7 +83,8 @@ LIMIT $3`
 		var intentID, actionType, title, digest, intentState, executionID, executionState, ticketID string
 		var expiresAt *time.Time
 		if err := rows.Scan(
-			&run.ID, &run.ConversationID, &run.Prompt, &run.State, &run.Answer, &run.Model, &run.LastError,
+			&run.ID, &run.AgentID, &run.AgentDisplayName, &run.AgentVersionNumber, &run.AgentSpecChecksum,
+			&run.ConversationID, &run.Prompt, &run.State, &run.Answer, &run.Model, &run.LastError,
 			&run.CreatedAt, &run.UpdatedAt, &intentID, &actionType, &title, &digest, &intentState, &expiresAt,
 			&executionID, &executionState, &ticketID,
 		); err != nil {

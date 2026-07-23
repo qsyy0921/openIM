@@ -24,9 +24,14 @@ func TestSearchEnforcesTenantGrantClassificationAndRevocation(t *testing.T) {
 	}
 	defer pool.Close()
 
-	const tenantID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
-	const memberID = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+	tenantID, memberID := testUUID(t), testUUID(t)
 	otherTenant, otherMember := testUUID(t), testUUID(t)
+	if _, err := pool.Exec(ctx, `INSERT INTO identity.tenants (id, external_id, display_name, status) VALUES ($1::uuid, $2, 'Retrieval test', 'active')`, tenantID, "retrieval-"+tenantID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO identity.members (id, tenant_id, issuer, subject, display_name, status) VALUES ($1::uuid, $2::uuid, 'test', $3, 'Retrieval member', 'active')`, memberID, tenantID, "subject-"+memberID); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := pool.Exec(ctx, `INSERT INTO identity.tenants (id, external_id, display_name, status) VALUES ($1::uuid, $2, 'Other', 'active')`, otherTenant, "other-"+otherTenant); err != nil {
 		t.Fatal(err)
 	}
@@ -43,6 +48,7 @@ func TestSearchEnforcesTenantGrantClassificationAndRevocation(t *testing.T) {
 			_, _ = pool.Exec(context.Background(), "UPDATE knowledge.documents SET current_version_id = NULL WHERE id = $1::uuid", doc.documentID)
 			_, _ = pool.Exec(context.Background(), "DELETE FROM knowledge.documents WHERE id = $1::uuid", doc.documentID)
 		}
+		_, _ = pool.Exec(context.Background(), "DELETE FROM identity.tenants WHERE id = $1::uuid", tenantID)
 		_, _ = pool.Exec(context.Background(), "DELETE FROM identity.tenants WHERE id = $1::uuid", otherTenant)
 	})
 	for _, doc := range []testDocument{authorized, restricted} {
@@ -57,7 +63,13 @@ func TestSearchEnforcesTenantGrantClassificationAndRevocation(t *testing.T) {
 		t.Fatal("cross-tenant member grant was accepted")
 	}
 
-	store := NewStore(pool)
+	store, err := NewStore(pool, fixtureEmbedder{}, Config{ModelRevision: "test-embedding-v1", Dimension: 8, DenseMinSimilarity: 0.9, MaxCandidates: 32})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO knowledge.chunk_embeddings (chunk_id, model_revision, dimension, content_checksum, embedding, normalized) SELECT id, 'test-embedding-v1', 8, checksum, ARRAY[1,0,0,0,0,0,0,0]::real[], true FROM knowledge.chunks WHERE document_id IN ($1::uuid, $2::uuid, $3::uuid, $4::uuid)`, authorized.documentID, unauthorized.documentID, restricted.documentID, crossTenant.documentID); err != nil {
+		t.Fatal(err)
+	}
 	items, err := store.Search(ctx, Query{TenantID: tenantID, MemberID: memberID, Purpose: "agent_answer", Text: "retention policy", Limit: 8})
 	if err != nil {
 		t.Fatal(err)
@@ -75,6 +87,16 @@ func TestSearchEnforcesTenantGrantClassificationAndRevocation(t *testing.T) {
 	if len(items) != 0 {
 		t.Fatalf("revoked document remained visible: %#v", items)
 	}
+}
+
+type fixtureEmbedder struct{}
+
+func (fixtureEmbedder) Embed(_ context.Context, texts []string) (EmbeddingBatch, error) {
+	vectors := make([][]float32, len(texts))
+	for index := range texts {
+		vectors[index] = []float32{1, 0, 0, 0, 0, 0, 0, 0}
+	}
+	return EmbeddingBatch{Model: "test-embedding-v1", Dimension: 8, Vectors: vectors}, nil
 }
 
 type testDocument struct{ documentID string }

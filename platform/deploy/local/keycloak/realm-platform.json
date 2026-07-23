@@ -12,8 +12,22 @@
       "publicClient": true,
       "standardFlowEnabled": true,
       "directAccessGrantsEnabled": true,
-      "redirectUris": ["http://127.0.0.1:3000/*"],
-      "webOrigins": ["http://127.0.0.1:3000"],
+      "redirectUris": [
+        "http://127.0.0.1:3000/*",
+        "http://172.31.50.2:3000/*",
+        "http://192.168.0.38:3000/*",
+        "https://127.0.0.1:3443/*",
+        "https://172.31.50.2:3443/*",
+        "https://192.168.0.38:3443/*"
+      ],
+      "webOrigins": [
+        "http://127.0.0.1:3000",
+        "http://172.31.50.2:3000",
+        "http://192.168.0.38:3000",
+        "https://127.0.0.1:3443",
+        "https://172.31.50.2:3443",
+        "https://192.168.0.38:3443"
+      ],
       "protocol": "openid-connect",
       "protocolMappers": [
         {

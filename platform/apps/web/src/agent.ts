@@ -1,9 +1,10 @@
 import { getSDK, SessionType, type MessageItem } from "@openim/wasm-client-sdk";
 
-import type { AgentRun, AgentWorkspaceSnapshot, ApprovalResult } from "./agent-api";
+import type { AgentRun, AgentSummary, AgentWorkspaceSnapshot, ApprovalResult } from "./agent-api";
 
 export type AgentState = {
   agentUserID: string;
+  agent: AgentSummary | null;
   runs: AgentRun[];
   loading: boolean;
   sending: boolean;
@@ -14,6 +15,7 @@ export type AgentState = {
 
 export const initialAgentState: AgentState = {
   agentUserID: "",
+  agent: null,
   runs: [],
   loading: false,
   sending: false,
@@ -23,6 +25,7 @@ export const initialAgentState: AgentState = {
 };
 
 export type AgentDataPort = {
+  catalog: () => Promise<AgentSummary[]>;
   workspace: () => Promise<AgentWorkspaceSnapshot>;
   approve: (intentID: string, digest: string) => Promise<ApprovalResult>;
 };
@@ -86,10 +89,10 @@ export class AgentController {
     const content = prompt.trim();
     if (!content) throw new Error("Agent question is required");
     if (content.length > 4000) throw new Error("Agent question exceeds 4000 characters");
-    if (!this.state.agentUserID) throw new Error("Agent workspace is not ready");
+    if (!this.state.agentUserID || !this.state.agent) throw new Error("Agent workspace is not ready");
     this.update({ sending: true, pendingPrompt: content, error: null });
     try {
-      const message = await this.transport.createText(`${content} @Agent`);
+      const message = await this.transport.createText(`${content} ${this.state.agent.trigger_alias}`);
       await this.transport.send(this.state.agentUserID, message);
       await this.refresh();
       this.update({ sending: false });
@@ -119,7 +122,10 @@ export class AgentController {
   clearError(): void { this.update({ error: null }); }
 
   private async refresh(): Promise<void> {
-    const snapshot = await this.data.workspace();
+    const [catalog, snapshot] = await Promise.all([this.data.catalog(), this.data.workspace()]);
+    if (catalog.length !== 1) throw new Error("Agent Catalog v1 requires exactly one active Agent");
+    const agent = catalog[0];
+    if (agent.bot_user_id !== snapshot.agent_user_id) throw new Error("Agent catalog and workspace bot identities do not match");
     if (this.state.agentUserID && snapshot.agent_user_id !== this.state.agentUserID) {
       throw new Error("Agent workspace identity changed unexpectedly");
     }
@@ -127,6 +133,7 @@ export class AgentController {
     const pending = this.state.pendingPrompt;
     this.update({
       agentUserID: snapshot.agent_user_id,
+      agent,
       runs: snapshot.runs,
       pendingPrompt: pending && snapshot.runs.some((run) => run.prompt === pending) ? null : pending
     });

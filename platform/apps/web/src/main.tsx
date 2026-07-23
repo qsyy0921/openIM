@@ -1,16 +1,19 @@
 import { createRoot } from "react-dom/client";
 
-import { App } from "./App";
 import { createUserManager } from "./auth";
 import { loadConfig } from "./config";
 import "./styles.css";
 
 const root = createRoot(document.getElementById("root")!);
 
-try {
+async function start() {
   const config = loadConfig(import.meta.env);
-  root.render(<App config={config} userManager={createUserManager(config)} />);
-} catch (error) {
+  const userManager = createUserManager(config);
+  const { App } = await import("./App");
+  root.render(<App config={config} userManager={userManager} />);
+}
+
+void start().catch((error: unknown) => {
   const message = error instanceof Error ? error.message : "invalid web configuration";
   root.render(
     <main className="fatal-shell">
@@ -18,4 +21,4 @@ try {
       <pre>{message}</pre>
     </main>
   );
-}
+});

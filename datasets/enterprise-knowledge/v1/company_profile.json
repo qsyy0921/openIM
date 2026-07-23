@@ -1,0 +1,20 @@
+{
+  "dataset_notice": "全部企业、产品、事件和组织信息均为合成数据，不对应任何真实公司。",
+  "legal_name": "星澜智协科技有限公司",
+  "company_code": "XLZX",
+  "timezone": "Asia/Shanghai",
+  "currency": "CNY",
+  "sites": [
+    "北京总部",
+    "上海研发中心",
+    "深圳客户中心"
+  ],
+  "products": [
+    "云枢协作平台",
+    "星河知识助手",
+    "企业集成网关"
+  ],
+  "release_date": "2026-07-14",
+  "tenant_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+  "local_member_id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+}

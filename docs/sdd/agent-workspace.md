@@ -21,18 +21,20 @@ The backend projection owns member/device-scoped reads of up to 30 recent Runs, 
 
 ## Contracts and dependencies
 
-- Official `@openim/wasm-client-sdk` text send to the deterministic tenant Bot using `<prompt> @Agent`.
+- Authenticated `GET /v1/agents` for the single active v1 Agent, trigger alias, production version, checksum, and deterministic tenant Bot.
+- Official `@openim/wasm-client-sdk` text send to the Catalog Bot using `<prompt> <trigger_alias>`.
 - Authenticated `GET /v1/agent/workspace?platform_id=5&device_id=...`.
 - Existing authenticated `POST /v1/agent/intents/{intent_id}/approve` with the exact `payload_digest`.
 - PostgreSQL `agent.runs`, `agent.run_citations`, `action.intents`, `action.executions`, and `collaboration.tickets` as authoritative state.
-- Existing Kafka ingress, Agent Runtime, ACL retrieval, DeepSeek worker, OpenIM reply, and restricted Action Executor processes.
+- Existing Kafka ingress, Agent Runtime, ACL retrieval, fixed Responses Worker, OpenIM reply, and restricted Action Executor processes.
 
 ## Invariants
 
 - The browser cannot provide tenant/member identity; OIDC subject, tenant claim, and active device resolve the authoritative member.
 - Workspace reads include only Runs where both `tenant_id` and `principal_member_id` match that member.
 - The workspace returns citation provenance but never chunk content, model credentials, OpenIM Admin Token, or another member's Runs.
-- Prompt submission uses the official OpenIM SDK and the existing `@Agent` event contract; there is no direct model or alternate Run-creation endpoint.
+- Prompt submission uses the official OpenIM SDK and Catalog trigger; there is no direct model or alternate Run-creation endpoint.
+- Catalog v1 requires exactly one active Agent and exact Catalog/workspace Bot identity agreement; zero, multiple, or mismatched results fail closed.
 - The explicit `创建工单：<title>` prefix remains before the appended trigger so the Intelligence Worker action protocol is unchanged.
 - Approval sends the exact server-returned Intent ID and digest. The client does not calculate, edit, or infer either value from Bot text.
 - Polling is bounded to two minutes and fails visibly; it does not synthesize completion or switch providers.
@@ -41,8 +43,8 @@ The backend projection owns member/device-scoped reads of up to 30 recent Runs, 
 ## Runtime flow
 
 1. The signed-in browser selects the registered `agent` workspace module.
-2. Platform API verifies the ID Token, resolves the active member/device, derives the tenant Bot ID, ensures its mapping and OpenIM account, and returns the member-scoped projection.
-3. The Web controller creates a text message and sends `<prompt> @Agent` to that Bot through the official SDK.
+2. Platform API verifies the ID Token and active member/device, returns the tenant Agent Catalog, ensures the tenant Bot mapping/account, and returns the member-scoped workspace projection.
+3. The Web controller requires one active Agent with the same Bot identity, then sends `<prompt> <trigger_alias>` through the official SDK.
 4. Existing OpenIM ingress, Kafka, Agent Runtime, ACL retrieval, and Intelligence Worker create and process the durable Run.
 5. The Web controller polls the projection while a prompt or Run is active and renders answer state and citation provenance.
 6. For `waiting_approval`, the UI displays the immutable ticket title and submits the returned ID/digest only after the member clicks approve.
@@ -68,7 +70,7 @@ The projection exposes durable Run, Intent, Execution, and ticket identifiers fo
 ## Acceptance criteria
 
 - Selecting the Agent module restores the authenticated member's recent Runs and deterministic Bot.
-- A real `.1` browser prompt traverses `.2` OpenIM, ingress, ACL retrieval, DeepSeek, Agent Runtime, and returns an answer with persisted citation provenance.
+- A real `.1` browser prompt traverses `.2` OpenIM, ingress, ACL retrieval, the fixed generation Worker, Agent Runtime, and returns an answer with persisted citation provenance.
 - A real explicit ticket prompt remains at zero business effects before approval.
 - Browser approval uses the exact server digest; duplicate approval converges on one Execution and one ticket.
 - Terminal ticket ID and state survive browser reload.
@@ -94,6 +96,7 @@ The projection exposes durable Run, Intent, Execution, and ticket identifiers fo
 - Real node2 action Run `1940b88c-2d75-42ee-9acc-0d67dd7a03cd`, Intent `c0dcba7c-5720-4779-89db-e31a0c87fdfd`, and Execution `bac0faa0-014b-4ce0-a0a6-8dc5d75ad789` converged to succeeded with exactly one ticket `dccc657d-62db-479e-bafc-4600abf26e74`.
 - The serial real Playwright suite passed both Agent and single-chat scenarios in 23.3 seconds. It verified cited answer, pre-approval UI, browser approval, ticket receipt, refresh restoration, no localStorage state, no failed HTTP responses/console errors, and desktop/mobile horizontal-overflow checks.
 - Desktop `1280x720` and mobile `390x844` Agent screenshots passed visual inspection with readable citations, stable composer dimensions, and no incoherent overlap.
+- Agent Catalog release `9a6ffee` changed prompt composition from a hard-coded marker to the authenticated `@agent` trigger, displayed exact `Enterprise Agent · v1` Run provenance, and passed the real Agent E2E plus the complete seven-scenario Node2 suite in 106.5 seconds.
 
 ## Open questions
 

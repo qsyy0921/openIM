@@ -1,23 +1,39 @@
 import {
   CbEvents,
   getSDK,
+  GroupMemberFilter,
+  GroupMemberRole,
+  GroupType,
+  MessageReceiveOptType,
   MessageStatus,
   MessageType,
   SessionType,
   ViewType,
   type ConversationItem,
+  type GroupItem,
+  type GroupMemberItem,
   type MessageItem,
+  type ReceiptInfo,
+  type RevokedInfo,
   type WSEvent
 } from "@openim/wasm-client-sdk";
 
 export type ChatState = {
   conversations: ConversationItem[];
+  conversationQuery: string;
+  conversationActionByID: Record<string, "pin" | "mute">;
   totalUnread: number;
   activeConversationID: string | null;
   messages: MessageItem[];
   historyEnded: boolean;
   loadingHistory: boolean;
+  groupMembers: GroupMemberItem[];
+  loadingGroupMembers: boolean;
+  groupAction: { groupID: string; kind: "invite" | "remove" | "leave" | "dismiss"; userID?: string } | null;
+  messageAction: { kind: "quote" | "forward" | "revoke"; clientMsgID: string; targetConversationID?: string } | null;
+  searchTargetClientMsgID: string | null;
   restoring: boolean;
+  uploadProgressByClientMsgID: Record<string, number>;
   error: string | null;
 };
 
@@ -25,29 +41,59 @@ export type ChatEvents = {
   conversationsChanged: (items: ConversationItem[]) => void;
   totalUnreadChanged: (count: number) => void;
   messagesReceived: (items: MessageItem[]) => void;
+  uploadProgress: (clientMsgID: string, progress: number) => void;
+  groupMembersChanged: (groupID: string) => void;
+  groupUnavailable: (groupID: string) => void;
+  messageRevoked: (info: RevokedInfo) => void;
+  c2cReadReceipts: (receipts: ReceiptInfo[]) => void;
 };
 
 export type ChatPort = {
   listConversations: () => Promise<ConversationItem[]>;
+  setConversation: (conversationID: string, patch: { isPinned?: boolean; recvMsgOpt?: MessageReceiveOptType }) => Promise<void>;
   totalUnread: () => Promise<number>;
-  oneConversation: (userID: string) => Promise<ConversationItem>;
+  oneConversation: (sourceID: string, sessionType: SessionType) => Promise<ConversationItem>;
   history: (conversationID: string, startClientMsgID: string) => Promise<{ isEnd: boolean; messageList: MessageItem[] }>;
+  surrounding: (conversationID: string, message: MessageItem) => Promise<MessageItem[]>;
   createText: (text: string) => Promise<MessageItem>;
-  send: (receiverID: string, message: MessageItem) => Promise<MessageItem>;
+  createQuote: (text: string, source: MessageItem) => Promise<MessageItem>;
+  createForward: (source: MessageItem) => Promise<MessageItem>;
+  createImage: (file: File) => Promise<MessageItem>;
+  createFile: (file: File) => Promise<MessageItem>;
+  send: (conversation: ConversationItem, message: MessageItem) => Promise<MessageItem>;
+  createGroup: (name: string, memberUserIDs: string[]) => Promise<ConversationItem>;
+  groupMembers: (groupID: string) => Promise<GroupMemberItem[]>;
+  inviteGroupMembers: (groupID: string, userIDs: string[]) => Promise<void>;
+  removeGroupMember: (groupID: string, userID: string) => Promise<void>;
+  leaveGroup: (groupID: string) => Promise<void>;
+  dismissGroup: (groupID: string) => Promise<void>;
+  revokeMessage: (conversationID: string, clientMsgID: string) => Promise<void>;
   markRead: (conversationID: string) => Promise<void>;
   subscribe: (events: ChatEvents) => () => void;
 };
 
 export const initialChatState: ChatState = {
   conversations: [],
+  conversationQuery: "",
+  conversationActionByID: {},
   totalUnread: 0,
   activeConversationID: null,
   messages: [],
   historyEnded: true,
   loadingHistory: false,
+  groupMembers: [],
+  loadingGroupMembers: false,
+  groupAction: null,
+  messageAction: null,
+  searchTargetClientMsgID: null,
   restoring: false,
+  uploadProgressByClientMsgID: {},
   error: null
 };
+
+export const MAX_IMAGE_BYTES = 20 * 1024 * 1024;
+export const MAX_FILE_BYTES = 100 * 1024 * 1024;
+const SUPPORTED_IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/gif", "image/webp"]);
 
 function errorMessage(error: unknown): string {
   if (error instanceof Error) return error.message;
@@ -58,14 +104,73 @@ function errorMessage(error: unknown): string {
   return "OpenIM operation failed";
 }
 
-function singleConversations(items: ConversationItem[]): ConversationItem[] {
+function supportedConversations(items: ConversationItem[]): ConversationItem[] {
   return items
-    .filter((item) => item.conversationType === SessionType.Single)
+    .filter((item) => item.conversationType === SessionType.Single ||
+      (item.conversationType === SessionType.Group && !item.isNotInGroup))
     .sort((left, right) => Number(right.isPinned) - Number(left.isPinned) || right.latestMsgSendTime - left.latestMsgSendTime);
 }
 
-function textMessages(items: MessageItem[]): MessageItem[] {
-  return items.filter((item) => item.sessionType === SessionType.Single && item.contentType === MessageType.TextMessage);
+export function filterConversations(items: ConversationItem[], query: string): ConversationItem[] {
+  const normalized = query.trim().toLowerCase();
+  if (!normalized) return items;
+  return items.filter((item) => [item.showName, item.userID, item.groupID]
+    .some((value) => value?.toLowerCase().includes(normalized)));
+}
+
+export function canInviteGroupMembers(members: GroupMemberItem[], selfUserID: string): boolean {
+  const role = members.find((member) => member.userID === selfUserID)?.roleLevel;
+  return role === GroupMemberRole.Owner || role === GroupMemberRole.Admin;
+}
+
+export function canRemoveGroupMember(members: GroupMemberItem[], selfUserID: string, targetUserID: string): boolean {
+  if (!targetUserID || targetUserID === selfUserID) return false;
+  const self = members.find((member) => member.userID === selfUserID);
+  const target = members.find((member) => member.userID === targetUserID);
+  if (!self || !target || target.roleLevel === GroupMemberRole.Owner) return false;
+  if (self.roleLevel === GroupMemberRole.Owner) return true;
+  return self.roleLevel === GroupMemberRole.Admin && target.roleLevel === GroupMemberRole.Normal;
+}
+
+function supportedMessages(items: MessageItem[]): MessageItem[] {
+  return items.filter((item) =>
+    (item.sessionType === SessionType.Single || item.sessionType === SessionType.Group) &&
+    (item.contentType === MessageType.TextMessage || item.contentType === MessageType.PictureMessage ||
+      item.contentType === MessageType.FileMessage || item.contentType === MessageType.QuoteMessage ||
+      item.contentType === MessageType.RevokeMessage)
+  );
+}
+
+const QUOTE_SOURCE_TYPES = new Set([MessageType.TextMessage, MessageType.PictureMessage, MessageType.FileMessage]);
+const FORWARD_SOURCE_TYPES = new Set([MessageType.TextMessage, MessageType.PictureMessage, MessageType.FileMessage]);
+
+export function canQuoteMessage(message: MessageItem): boolean {
+  return message.status === MessageStatus.Succeed && QUOTE_SOURCE_TYPES.has(message.contentType);
+}
+
+export function canForwardMessage(message: MessageItem): boolean {
+  return message.status === MessageStatus.Succeed && FORWARD_SOURCE_TYPES.has(message.contentType);
+}
+
+export function canRequestRevoke(message: MessageItem): boolean {
+  return message.status === MessageStatus.Succeed && message.contentType !== MessageType.RevokeMessage;
+}
+
+function validateFileName(file: File): void {
+  if (!file.name.trim()) throw new Error("文件名不能为空");
+  if (file.name.length > 255) throw new Error("文件名不能超过 255 个字符");
+  if (file.size <= 0) throw new Error("不能发送空文件");
+}
+
+export function validateImage(file: File): void {
+  validateFileName(file);
+  if (!SUPPORTED_IMAGE_TYPES.has(file.type.toLowerCase())) throw new Error("仅支持 JPEG、PNG、GIF 和 WebP 图片");
+  if (file.size > MAX_IMAGE_BYTES) throw new Error("图片不能超过 20 MiB");
+}
+
+export function validateFile(file: File): void {
+  validateFileName(file);
+  if (file.size > MAX_FILE_BYTES) throw new Error("文件不能超过 100 MiB");
 }
 
 function mergeMessages(current: MessageItem[], incoming: MessageItem[]): MessageItem[] {
@@ -79,19 +184,23 @@ function mergeMessages(current: MessageItem[], incoming: MessageItem[]): Message
 
 function upsertConversations(current: ConversationItem[], incoming: ConversationItem[]): ConversationItem[] {
   const merged = new Map(current.map((item) => [item.conversationID, item]));
-  for (const item of singleConversations(incoming)) merged.set(item.conversationID, item);
-  return singleConversations([...merged.values()]);
+  for (const item of supportedConversations(incoming)) merged.set(item.conversationID, item);
+  return supportedConversations([...merged.values()]);
 }
 
-export class SingleChatController {
+export class ConversationController {
   private state: ChatState = initialChatState;
   private listeners = new Set<(state: ChatState) => void>();
   private unsubscribePort: (() => void) | null = null;
   private selfUserID = "";
+  private groupMemberRequest = 0;
+  private unavailableGroupIDs = new Set<string>();
 
   constructor(private readonly port: ChatPort) {}
 
   getState = (): ChatState => this.state;
+
+  visibleConversations = (): ConversationItem[] => filterConversations(this.state.conversations, this.state.conversationQuery);
 
   subscribe = (listener: (state: ChatState) => void): (() => void) => {
     this.listeners.add(listener);
@@ -104,9 +213,14 @@ export class SingleChatController {
     this.selfUserID = selfUserID;
     this.unsubscribePort?.();
     this.unsubscribePort = this.port.subscribe({
-      conversationsChanged: (items) => this.update({ conversations: upsertConversations(this.state.conversations, items) }),
+      conversationsChanged: (items) => this.mergeConversationEvents(items),
       totalUnreadChanged: (count) => this.update({ totalUnread: count }),
-      messagesReceived: (items) => void this.receive(items)
+      messagesReceived: (items) => void this.receive(items),
+      uploadProgress: (clientMsgID, progress) => this.applyUploadProgress(clientMsgID, progress),
+      groupMembersChanged: (groupID) => this.handleGroupMembersChanged(groupID),
+      groupUnavailable: (groupID) => this.clearUnavailableGroup(groupID),
+      messageRevoked: (info) => this.applyRevokedMessage(info),
+      c2cReadReceipts: (receipts) => this.applyC2CReadReceipts(receipts)
     });
     await this.restore();
   }
@@ -122,7 +236,8 @@ export class SingleChatController {
       const [conversations, totalUnread] = await Promise.all([this.port.listConversations(), this.port.totalUnread()]);
       const active = this.state.activeConversationID;
       const priorActive = this.state.conversations.find((item) => item.conversationID === active);
-      this.update({ conversations: priorActive ? upsertConversations([priorActive], conversations) : singleConversations(conversations), totalUnread });
+      const available = conversations.filter((item) => !item.groupID || !this.unavailableGroupIDs.has(item.groupID));
+      this.update({ conversations: priorActive ? upsertConversations([priorActive], available) : supportedConversations(available), totalUnread });
       if (active) {
         await this.loadHistory(active, false);
         await this.markRead(active);
@@ -138,7 +253,7 @@ export class SingleChatController {
     const target = userID.trim();
     if (!target || target === this.selfUserID) throw new Error("a different OpenIM user ID is required");
     try {
-      const conversation = await this.port.oneConversation(target);
+      const conversation = await this.port.oneConversation(target, SessionType.Single);
       this.update({ conversations: upsertConversations(this.state.conversations, [conversation]) });
       await this.select(conversation.conversationID);
     } catch (error) {
@@ -147,12 +262,105 @@ export class SingleChatController {
     }
   }
 
-  async select(conversationID: string): Promise<void> {
+  async select(conversationID: string, loadExistingHistory = true): Promise<void> {
     const conversation = this.state.conversations.find((item) => item.conversationID === conversationID);
-    if (!conversation || conversation.conversationType !== SessionType.Single) throw new Error("single conversation is unavailable");
-    this.update({ activeConversationID: conversationID, messages: [], historyEnded: false, error: null });
-    await this.loadHistory(conversationID, false);
+    if (!conversation || (conversation.conversationType !== SessionType.Single && conversation.conversationType !== SessionType.Group)) {
+      throw new Error("conversation is unavailable");
+    }
+    this.groupMemberRequest += 1;
+    this.update({ activeConversationID: conversationID, messages: [], uploadProgressByClientMsgID: {}, historyEnded: !loadExistingHistory, groupMembers: [], loadingGroupMembers: false, messageAction: null, searchTargetClientMsgID: null, error: null });
+    if (loadExistingHistory) await this.loadHistory(conversationID, false);
     await this.markRead(conversationID);
+    if (conversation.conversationType === SessionType.Group) await this.loadGroupMembers(conversation.groupID);
+  }
+
+  setConversationQuery(query: string): void {
+    this.update({ conversationQuery: query });
+  }
+
+  async setPinned(conversationID: string, isPinned: boolean): Promise<void> {
+    await this.updateConversationSetting(conversationID, "pin", { isPinned });
+  }
+
+  async setMuted(conversationID: string, isMuted: boolean): Promise<void> {
+    const conversation = this.state.conversations.find((item) => item.conversationID === conversationID);
+    if (conversation?.recvMsgOpt === MessageReceiveOptType.NotReceive) {
+      const error = new Error("当前会话处于不接收消息状态，不能在此切换免打扰");
+      this.fail(error);
+      throw error;
+    }
+    await this.updateConversationSetting(conversationID, "mute", {
+      recvMsgOpt: isMuted ? MessageReceiveOptType.NotNotify : MessageReceiveOptType.Normal
+    });
+  }
+
+  async createGroup(name: string, memberUserIDs: string[]): Promise<void> {
+    const groupName = name.trim();
+    const members = [...new Set(memberUserIDs.map((value) => value.trim()).filter((value) => value && value !== this.selfUserID))];
+    if (!groupName) throw new Error("group name is required");
+    if (groupName.length > 60) throw new Error("group name exceeds 60 characters");
+    if (members.length < 1) throw new Error("at least one other OpenIM user is required");
+    try {
+      const conversation = await this.port.createGroup(groupName, members);
+      this.unavailableGroupIDs.delete(conversation.groupID);
+      this.update({ conversations: upsertConversations(this.state.conversations, [conversation]), error: null });
+      await this.select(conversation.conversationID, false);
+    } catch (error) {
+      this.fail(error);
+      throw error;
+    }
+  }
+
+  async refreshGroupMembers(): Promise<void> {
+    const conversation = this.activeConversation();
+    if (!conversation || conversation.conversationType !== SessionType.Group) return;
+    await this.loadGroupMembers(conversation.groupID);
+  }
+
+  async inviteGroupMembers(userIDs: string[]): Promise<void> {
+    const group = this.activeGroup();
+    if (!group) this.reject("邀请成员前请选择群聊");
+    if (!canInviteGroupMembers(this.state.groupMembers, this.selfUserID)) this.reject("当前角色不能邀请群成员");
+    const existing = new Set(this.state.groupMembers.map((member) => member.userID));
+    const candidates = [...new Set(userIDs.map((userID) => userID.trim()).filter((userID) => userID && userID !== this.selfUserID && !existing.has(userID)))];
+    if (candidates.length === 0) this.reject("请选择尚未入群的成员");
+    await this.runGroupAction({ groupID: group.groupID, kind: "invite" }, async () => {
+      await this.port.inviteGroupMembers(group.groupID, candidates);
+      await this.loadGroupMembers(group.groupID);
+    });
+  }
+
+  async removeGroupMember(userID: string): Promise<void> {
+    const group = this.activeGroup();
+    if (!group) this.reject("移除成员前请选择群聊");
+    if (!canRemoveGroupMember(this.state.groupMembers, this.selfUserID, userID)) this.reject("当前角色不能移除该成员");
+    await this.runGroupAction({ groupID: group.groupID, kind: "remove", userID }, async () => {
+      await this.port.removeGroupMember(group.groupID, userID);
+      await this.loadGroupMembers(group.groupID);
+    });
+  }
+
+  async leaveActiveGroup(): Promise<void> {
+    const group = this.activeGroup();
+    if (!group) this.reject("退出前请选择群聊");
+    const self = this.state.groupMembers.find((member) => member.userID === this.selfUserID);
+    if (!self) this.reject("当前用户不在群成员列表中");
+    if (self.roleLevel === GroupMemberRole.Owner) this.reject("群主不能退出群聊，请解散群聊");
+    await this.runGroupAction({ groupID: group.groupID, kind: "leave" }, async () => {
+      await this.port.leaveGroup(group.groupID);
+      this.clearUnavailableGroup(group.groupID);
+    });
+  }
+
+  async dismissActiveGroup(): Promise<void> {
+    const group = this.activeGroup();
+    if (!group) this.reject("解散前请选择群聊");
+    const self = this.state.groupMembers.find((member) => member.userID === this.selfUserID);
+    if (self?.roleLevel !== GroupMemberRole.Owner) this.reject("只有群主可以解散群聊");
+    await this.runGroupAction({ groupID: group.groupID, kind: "dismiss" }, async () => {
+      await this.port.dismissGroup(group.groupID);
+      this.clearUnavailableGroup(group.groupID);
+    });
   }
 
   async loadOlder(): Promise<void> {
@@ -164,7 +372,7 @@ export class SingleChatController {
   async sendText(text: string): Promise<void> {
     const content = text.trim();
     const conversation = this.activeConversation();
-    if (!conversation) throw new Error("select a single conversation before sending");
+    if (!conversation) throw new Error("select a conversation before sending");
     if (!content) throw new Error("message text is required");
     if (content.length > 6000) throw new Error("message text exceeds 6000 characters");
 
@@ -175,18 +383,109 @@ export class SingleChatController {
       this.fail(error);
       throw error;
     }
-    draft = { ...draft, status: MessageStatus.Sending };
-    this.update({ messages: mergeMessages(this.state.messages, [draft]), error: null });
+    await this.sendDraft(conversation, draft, false);
+  }
+
+  async openSearchResult(conversationID: string, message: MessageItem): Promise<void> {
+    const conversation = this.state.conversations.find((item) => item.conversationID === conversationID);
+    if (!conversation || !message.clientMsgID) this.reject("搜索结果对应的会话或消息已不可用");
     try {
-      const sent = await this.port.send(conversation.userID, draft);
-      this.update({ messages: mergeMessages(this.state.messages, [{ ...sent, status: MessageStatus.Succeed }]) });
-    } catch (error) {
+      const context = supportedMessages(await this.port.surrounding(conversationID, message));
+      if (!context.some((item) => item.clientMsgID === message.clientMsgID)) this.reject("OpenIM 未返回搜索消息上下文");
+      this.groupMemberRequest += 1;
       this.update({
-        messages: mergeMessages(this.state.messages, [{ ...draft, status: MessageStatus.Failed }]),
-        error: `发送失败：${errorMessage(error)}`
+        activeConversationID: conversationID,
+        messages: mergeMessages([], context),
+        uploadProgressByClientMsgID: {},
+        historyEnded: false,
+        groupMembers: [],
+        loadingGroupMembers: false,
+        messageAction: null,
+        searchTargetClientMsgID: message.clientMsgID,
+        error: null
       });
+      await this.markRead(conversationID);
+      if (conversation.conversationType === SessionType.Group) await this.loadGroupMembers(conversation.groupID);
+    } catch (error) {
+      this.fail(error);
       throw error;
     }
+  }
+
+  async sendQuote(text: string, sourceClientMsgID: string): Promise<void> {
+    const content = text.trim();
+    const conversation = this.activeConversation();
+    if (!conversation) this.reject("引用回复前请选择会话");
+    if (!content) this.reject("引用回复内容不能为空");
+    if (content.length > 6000) this.reject("引用回复不能超过 6000 个字符");
+    const source = this.activeMessage(sourceClientMsgID);
+    if (!source || !canQuoteMessage(source)) this.reject("该消息当前不能被引用回复");
+    await this.runMessageAction({ kind: "quote", clientMsgID: sourceClientMsgID }, async () => {
+      const draft = await this.port.createQuote(content, source);
+      await this.sendDraft(conversation, draft, false);
+    });
+  }
+
+  async forwardMessage(sourceClientMsgID: string, targetConversationID: string): Promise<void> {
+    const source = this.activeMessage(sourceClientMsgID);
+    if (!source || !canForwardMessage(source)) this.reject("该消息当前不能被转发");
+    const target = this.state.conversations.find((item) => item.conversationID === targetConversationID);
+    if (!target || (target.conversationType !== SessionType.Single && target.conversationType !== SessionType.Group)) this.reject("请选择有效的转发目标会话");
+    await this.runMessageAction({ kind: "forward", clientMsgID: sourceClientMsgID, targetConversationID }, async () => {
+      const draft = await this.port.createForward(source);
+      await this.sendDraft(target, draft, false, target.conversationID === this.state.activeConversationID);
+    });
+  }
+
+  async revokeMessage(clientMsgID: string): Promise<void> {
+    const conversation = this.activeConversation();
+    if (!conversation) this.reject("撤回消息前请选择会话");
+    const source = this.activeMessage(clientMsgID);
+    if (!source || !canRequestRevoke(source)) this.reject("该消息当前不能撤回");
+    await this.runMessageAction({ kind: "revoke", clientMsgID }, async () => {
+      await this.port.revokeMessage(conversation.conversationID, clientMsgID);
+      this.applyRevokedMessage({
+        clientMsgID,
+        revokerID: this.selfUserID,
+        revokerRole: 0,
+        revokerNickname: this.selfUserID,
+        revokeTime: Math.floor(Date.now() / 1000),
+        sourceMessageSendTime: source.sendTime,
+        sourceMessageSendID: source.sendID,
+        sourceMessageSenderNickname: source.senderNickname,
+        sessionType: source.sessionType,
+        seq: source.seq,
+        ex: source.ex || ""
+      });
+    });
+  }
+
+  async sendImage(file: File): Promise<void> {
+    const conversation = this.activeConversation();
+    if (!conversation) throw new Error("发送图片前请选择会话");
+    let draft: MessageItem;
+    try {
+      validateImage(file);
+      draft = await this.port.createImage(file);
+    } catch (error) {
+      this.fail(error);
+      throw error;
+    }
+    await this.sendDraft(conversation, draft, true);
+  }
+
+  async sendFile(file: File): Promise<void> {
+    const conversation = this.activeConversation();
+    if (!conversation) throw new Error("发送文件前请选择会话");
+    let draft: MessageItem;
+    try {
+      validateFile(file);
+      draft = await this.port.createFile(file);
+    } catch (error) {
+      this.fail(error);
+      throw error;
+    }
+    await this.sendDraft(conversation, draft, true);
   }
 
   clearError(): void {
@@ -199,9 +498,10 @@ export class SingleChatController {
     try {
       const result = await this.port.history(conversationID, start);
       if (this.state.activeConversationID !== conversationID) return;
-      const incoming = textMessages(result.messageList);
+      const incoming = supportedMessages(result.messageList);
       this.update({
         messages: older ? mergeMessages(incoming, this.state.messages) : mergeMessages([], incoming),
+        uploadProgressByClientMsgID: older ? this.state.uploadProgressByClientMsgID : {},
         historyEnded: result.isEnd,
         loadingHistory: false
       });
@@ -213,14 +513,31 @@ export class SingleChatController {
 
   private async receive(items: MessageItem[]): Promise<void> {
     const active = this.activeConversation();
-    const incoming = textMessages(items).filter((message) => {
+    const incoming = supportedMessages(items).filter((message) => {
       if (!active) return false;
+      if (active.conversationType === SessionType.Group) return message.groupID === active.groupID;
       return (message.sendID === active.userID && message.recvID === this.selfUserID) ||
         (message.sendID === this.selfUserID && message.recvID === active.userID);
     });
     if (incoming.length === 0 || !active) return;
     this.update({ messages: mergeMessages(this.state.messages, incoming) });
-    if (incoming.some((message) => message.sendID === active.userID)) await this.markRead(active.conversationID);
+    if (incoming.some((message) => message.sendID !== this.selfUserID)) await this.markRead(active.conversationID);
+  }
+
+  private async loadGroupMembers(groupID: string): Promise<void> {
+    const request = ++this.groupMemberRequest;
+    this.update({ loadingGroupMembers: true, error: null });
+    try {
+      const members = await this.port.groupMembers(groupID);
+      if (request !== this.groupMemberRequest) return;
+      const active = this.activeConversation();
+      if (!active || active.groupID !== groupID) return;
+      this.update({ groupMembers: members, loadingGroupMembers: false });
+    } catch (error) {
+      if (request !== this.groupMemberRequest) return;
+      this.fail(new Error(`加载群成员失败：${errorMessage(error)}`), { loadingGroupMembers: false });
+      throw error;
+    }
   }
 
   private async markRead(conversationID: string): Promise<void> {
@@ -241,8 +558,212 @@ export class SingleChatController {
     return this.state.conversations.find((item) => item.conversationID === this.state.activeConversationID) ?? null;
   }
 
+  private activeGroup(): ConversationItem | null {
+    const active = this.activeConversation();
+    return active?.conversationType === SessionType.Group ? active : null;
+  }
+
+  private activeMessage(clientMsgID: string): MessageItem | null {
+    return this.state.messages.find((message) => message.clientMsgID === clientMsgID) ?? null;
+  }
+
+  private async runMessageAction(
+    action: { kind: "quote" | "forward" | "revoke"; clientMsgID: string; targetConversationID?: string },
+    operation: () => Promise<void>
+  ): Promise<void> {
+    if (this.state.messageAction) this.reject("消息操作正在执行");
+    this.update({ messageAction: action, error: null });
+    try {
+      await operation();
+    } catch (error) {
+      this.fail(error);
+      throw error;
+    } finally {
+      this.update({ messageAction: null });
+    }
+  }
+
+  private applyRevokedMessage(info: RevokedInfo): void {
+    const source = this.activeMessage(info.clientMsgID);
+    if (!source) return;
+    const revoked = this.toRevokedMessage(source, info);
+    this.update({
+      messages: this.state.messages.map((message) => {
+        if (message.clientMsgID === info.clientMsgID) return revoked;
+        if (message.contentType === MessageType.QuoteMessage && message.quoteElem?.quoteMessage.clientMsgID === info.clientMsgID) {
+          return { ...message, quoteElem: { ...message.quoteElem, quoteMessage: revoked } };
+        }
+        return message;
+      })
+    });
+  }
+
+  private toRevokedMessage(source: MessageItem, info: RevokedInfo): MessageItem {
+    return {
+      ...source,
+      contentType: MessageType.RevokeMessage,
+      content: JSON.stringify({ detail: JSON.stringify(info) }),
+      textElem: undefined,
+      pictureElem: undefined,
+      fileElem: undefined,
+      quoteElem: undefined,
+      notificationElem: { detail: JSON.stringify(info) },
+      status: MessageStatus.Succeed
+    };
+  }
+
+  private applyC2CReadReceipts(receipts: ReceiptInfo[]): void {
+    const active = this.activeConversation();
+    if (!active || active.conversationType !== SessionType.Single) return;
+    const matching = receipts.filter((receipt) => receipt.userID === active.userID && receipt.sessionType === SessionType.Single);
+    if (matching.length === 0) return;
+    const readByID = new Map<string, number>();
+    for (const receipt of matching) for (const clientMsgID of receipt.msgIDList) readByID.set(clientMsgID, receipt.readTime);
+    if (readByID.size === 0) return;
+    this.update({
+      messages: this.state.messages.map((message) => {
+        const readTime = readByID.get(message.clientMsgID);
+        if (readTime === undefined || message.sendID !== this.selfUserID || message.sessionType !== SessionType.Single || message.isRead) return message;
+        return {
+          ...message,
+          isRead: true,
+          attachedInfoElem: message.attachedInfoElem ? { ...message.attachedInfoElem, hasReadTime: readTime } : message.attachedInfoElem
+        };
+      })
+    });
+  }
+
+  private async runGroupAction(
+    action: { groupID: string; kind: "invite" | "remove" | "leave" | "dismiss"; userID?: string },
+    operation: () => Promise<void>
+  ): Promise<void> {
+    if (this.state.groupAction) {
+      const error = new Error("群聊操作正在执行");
+      this.fail(error);
+      throw error;
+    }
+    this.update({ groupAction: action, error: null });
+    try {
+      await operation();
+    } catch (error) {
+      this.fail(error);
+      throw error;
+    } finally {
+      this.update({ groupAction: null });
+    }
+  }
+
+  private handleGroupMembersChanged(groupID: string): void {
+    const active = this.activeGroup();
+    if (!active || active.groupID !== groupID) return;
+    void this.loadGroupMembers(groupID).catch(() => undefined);
+  }
+
+  private mergeConversationEvents(items: ConversationItem[]): void {
+    const available = items.filter((item) => !item.groupID || !this.unavailableGroupIDs.has(item.groupID));
+    this.update({ conversations: upsertConversations(this.state.conversations, available) });
+  }
+
+  private clearUnavailableGroup(groupID: string): void {
+    this.unavailableGroupIDs.add(groupID);
+    const active = this.activeGroup();
+    const clearsActive = active?.groupID === groupID;
+    if (clearsActive) this.groupMemberRequest += 1;
+    this.update({
+      conversations: this.state.conversations.filter((item) => item.groupID !== groupID),
+      ...(clearsActive ? {
+        activeConversationID: null,
+        messages: [],
+        groupMembers: [],
+        loadingGroupMembers: false,
+        uploadProgressByClientMsgID: {},
+        historyEnded: true
+      } : {})
+    });
+  }
+
+  private async updateConversationSetting(
+    conversationID: string,
+    action: "pin" | "mute",
+    patch: { isPinned?: boolean; recvMsgOpt?: MessageReceiveOptType }
+  ): Promise<void> {
+    const conversation = this.state.conversations.find((item) => item.conversationID === conversationID);
+    if (!conversation) {
+      const error = new Error("会话不可用");
+      this.fail(error);
+      throw error;
+    }
+    if (this.state.conversationActionByID[conversationID]) {
+      const error = new Error("该会话设置正在更新");
+      this.fail(error);
+      throw error;
+    }
+    this.update({
+      conversationActionByID: { ...this.state.conversationActionByID, [conversationID]: action },
+      error: null
+    });
+    try {
+      await this.port.setConversation(conversationID, patch);
+      const current = this.state.conversations.find((item) => item.conversationID === conversationID) ?? conversation;
+      this.update({ conversations: upsertConversations(this.state.conversations, [{ ...current, ...patch }]) });
+    } catch (error) {
+      this.fail(error);
+      throw error;
+    } finally {
+      const next = { ...this.state.conversationActionByID };
+      delete next[conversationID];
+      this.update({ conversationActionByID: next });
+    }
+  }
+
+  private async sendDraft(conversation: ConversationItem, message: MessageItem, tracksUpload: boolean, projectToActive = true): Promise<void> {
+    const draft = { ...message, status: MessageStatus.Sending };
+    const progress = tracksUpload
+      ? { ...this.state.uploadProgressByClientMsgID, [draft.clientMsgID]: 0 }
+      : this.state.uploadProgressByClientMsgID;
+    this.update({
+      ...(projectToActive ? { messages: mergeMessages(this.state.messages, [draft]) } : {}),
+      uploadProgressByClientMsgID: progress,
+      error: null
+    });
+    try {
+      const sent = await this.port.send(conversation, draft);
+      const nextProgress = { ...this.state.uploadProgressByClientMsgID };
+      delete nextProgress[draft.clientMsgID];
+      this.update({
+        ...(projectToActive ? { messages: mergeMessages(this.state.messages, [{ ...sent, status: MessageStatus.Succeed }]) } : {}),
+        uploadProgressByClientMsgID: nextProgress
+      });
+    } catch (error) {
+      this.update({
+        ...(projectToActive ? { messages: mergeMessages(this.state.messages, [{ ...draft, status: MessageStatus.Failed }]) } : {}),
+        error: `发送失败：${errorMessage(error)}`
+      });
+      throw error;
+    }
+  }
+
+  private applyUploadProgress(clientMsgID: string, progress: number): void {
+    if (!Number.isFinite(progress)) return;
+    const message = this.state.messages.find((item) => item.clientMsgID === clientMsgID);
+    if (!message || message.status !== MessageStatus.Sending ||
+      (message.contentType !== MessageType.PictureMessage && message.contentType !== MessageType.FileMessage)) return;
+    this.update({
+      uploadProgressByClientMsgID: {
+        ...this.state.uploadProgressByClientMsgID,
+        [clientMsgID]: Math.max(0, Math.min(100, Math.round(progress)))
+      }
+    });
+  }
+
   private fail(error: unknown, patch: Partial<ChatState> = {}): void {
     this.update({ ...patch, error: errorMessage(error) });
+  }
+
+  private reject(message: string): never {
+    const error = new Error(message);
+    this.fail(error);
+    throw error;
   }
 
   private update(patch: Partial<ChatState>): void {
@@ -253,10 +774,12 @@ export class SingleChatController {
 
 export function createOpenIMChatPort(): ChatPort {
   const sdk = getSDK();
+  const localPreviewURLs = new Map<string, string>();
   return {
     listConversations: async () => (await sdk.getConversationListSplit({ offset: 0, count: 200 })).data,
+    setConversation: async (conversationID, patch) => { await sdk.setConversation({ conversationID, ...patch }); },
     totalUnread: async () => (await sdk.getTotalUnreadMsgCount()).data,
-    oneConversation: async (userID) => (await sdk.getOneConversation({ sourceID: userID, sessionType: SessionType.Single })).data,
+    oneConversation: async (sourceID, sessionType) => (await sdk.getOneConversation({ sourceID, sessionType })).data,
     history: async (conversationID, startClientMsgID) => {
       const { data } = await sdk.getAdvancedHistoryMessageList({
         conversationID,
@@ -266,24 +789,181 @@ export function createOpenIMChatPort(): ChatPort {
       });
       return data;
     },
+    surrounding: async (conversationID, message) => {
+      const params = {
+        conversationID,
+        startClientMsgID: message.clientMsgID,
+        count: 20,
+        viewType: ViewType.Search
+      };
+      const [before, after] = await Promise.all([
+        sdk.getAdvancedHistoryMessageList(params),
+        sdk.getAdvancedHistoryMessageListReverse(params)
+      ]);
+      return [...before.data.messageList, message, ...after.data.messageList];
+    },
     createText: async (text) => (await sdk.createTextMessage(text)).data,
-    send: async (receiverID, message) => (await sdk.sendMessage({ recvID: receiverID, groupID: "", message })).data,
+    createQuote: async (text, source) => (await sdk.createQuoteMessage({ text, message: JSON.stringify(source) })).data,
+    createForward: async (source) => (await sdk.createForwardMessage(source)).data,
+    createImage: async (file) => {
+      const { width, height } = await readImageDimensions(file);
+      const previewURL = URL.createObjectURL(file);
+      const base = {
+        uuid: secureUUID(),
+        type: file.type,
+        size: file.size,
+        width,
+        height,
+        url: previewURL
+      };
+      try {
+        const message = (await sdk.createImageMessageByFile({
+          sourcePicture: { ...base },
+          bigPicture: { ...base },
+          snapshotPicture: { ...base },
+          sourcePath: "",
+          file
+        })).data;
+        localPreviewURLs.set(message.clientMsgID, previewURL);
+        return message;
+      } catch (error) {
+        URL.revokeObjectURL(previewURL);
+        throw error;
+      }
+    },
+    createFile: async (file) => (await sdk.createFileMessageByFile({
+      filePath: "",
+      fileName: file.name,
+      uuid: secureUUID(),
+      sourceUrl: "",
+      fileSize: file.size,
+      fileType: file.type || "application/octet-stream",
+      file
+    })).data,
+    send: async (conversation, message) => {
+      const sent = (await sdk.sendMessage({
+        recvID: conversation.conversationType === SessionType.Single ? conversation.userID : "",
+        groupID: conversation.conversationType === SessionType.Group ? conversation.groupID : "",
+        message
+      })).data;
+      const previewURL = localPreviewURLs.get(message.clientMsgID);
+      if (previewURL) {
+        URL.revokeObjectURL(previewURL);
+        localPreviewURLs.delete(message.clientMsgID);
+      }
+      return sent;
+    },
+    createGroup: async (name, memberUserIDs) => {
+      let expectedGroupID = "";
+      const observed = new Map<string, ConversationItem>();
+      let resolveReady: ((conversation: ConversationItem) => void) | null = null;
+      const ready = new Promise<ConversationItem>((resolve) => { resolveReady = resolve; });
+      const observe = ({ data }: WSEvent<ConversationItem[]>) => {
+        for (const conversation of data) {
+          if (conversation.conversationType !== SessionType.Group) continue;
+          observed.set(conversation.groupID, conversation);
+          if (conversation.groupID === expectedGroupID) resolveReady?.(conversation);
+        }
+      };
+      sdk.on(CbEvents.OnNewConversation, observe);
+      sdk.on(CbEvents.OnConversationChanged, observe);
+      let timeoutID = 0;
+      try {
+        const group = (await sdk.createGroup({
+          groupInfo: { groupName: name, groupType: GroupType.WorkingGroup },
+          memberUserIDs,
+          adminUserIDs: []
+        })).data;
+        expectedGroupID = group.groupID;
+        const alreadyObserved = observed.get(expectedGroupID);
+        if (alreadyObserved) return alreadyObserved;
+        return await Promise.race([
+          ready,
+          new Promise<never>((_, reject) => {
+            timeoutID = window.setTimeout(() => reject(new Error("OpenIM group conversation synchronization timed out")), 15_000);
+          })
+        ]);
+      } finally {
+        window.clearTimeout(timeoutID);
+        sdk.off(CbEvents.OnNewConversation, observe);
+        sdk.off(CbEvents.OnConversationChanged, observe);
+      }
+    },
+    groupMembers: async (groupID) => (await sdk.getGroupMemberList({
+      groupID,
+      filter: GroupMemberFilter.All,
+      offset: 0,
+      count: 200
+    })).data,
+    inviteGroupMembers: async (groupID, userIDs) => { await sdk.inviteUserToGroup({ groupID, reason: "", userIDList: userIDs }); },
+    removeGroupMember: async (groupID, userID) => { await sdk.kickGroupMember({ groupID, reason: "", userIDList: [userID] }); },
+    leaveGroup: async (groupID) => { await sdk.quitGroup(groupID); },
+    dismissGroup: async (groupID) => { await sdk.dismissGroup(groupID); },
+    revokeMessage: async (conversationID, clientMsgID) => { await sdk.revokeMessage({ conversationID, clientMsgID }); },
     markRead: async (conversationID) => { await sdk.markConversationMessageAsRead(conversationID); },
     subscribe: (events) => {
       const conversationsChanged = ({ data }: WSEvent<ConversationItem[]>) => events.conversationsChanged(data);
       const newConversation = ({ data }: WSEvent<ConversationItem[]>) => events.conversationsChanged(data);
       const totalUnreadChanged = ({ data }: WSEvent<number>) => events.totalUnreadChanged(data);
       const messagesReceived = ({ data }: WSEvent<MessageItem[]>) => events.messagesReceived(data);
+      const uploadProgress = ({ data }: WSEvent<{ progress: number; clientMsgID: string }>) => events.uploadProgress(data.clientMsgID, data.progress);
+      const groupMemberChanged = ({ data }: WSEvent<GroupMemberItem>) => events.groupMembersChanged(data.groupID);
+      const groupUnavailable = ({ data }: WSEvent<GroupItem>) => events.groupUnavailable(data.groupID);
+      const messageRevoked = ({ data }: WSEvent<RevokedInfo>) => events.messageRevoked(data);
+      const c2cReadReceipts = ({ data }: WSEvent<ReceiptInfo[]>) => events.c2cReadReceipts(data);
       sdk.on(CbEvents.OnConversationChanged, conversationsChanged);
       sdk.on(CbEvents.OnNewConversation, newConversation);
       sdk.on(CbEvents.OnTotalUnreadMessageCountChanged, totalUnreadChanged);
       sdk.on(CbEvents.OnRecvNewMessages, messagesReceived);
+      sdk.on(CbEvents.OnProgress, uploadProgress);
+      sdk.on(CbEvents.OnGroupMemberAdded, groupMemberChanged);
+      sdk.on(CbEvents.OnGroupMemberDeleted, groupMemberChanged);
+      sdk.on(CbEvents.OnGroupMemberInfoChanged, groupMemberChanged);
+      sdk.on(CbEvents.OnJoinedGroupDeleted, groupUnavailable);
+      sdk.on(CbEvents.OnGroupDismissed, groupUnavailable);
+      sdk.on(CbEvents.OnNewRecvMessageRevoked, messageRevoked);
+      sdk.on(CbEvents.OnRecvC2CReadReceipt, c2cReadReceipts);
       return () => {
         sdk.off(CbEvents.OnConversationChanged, conversationsChanged);
         sdk.off(CbEvents.OnNewConversation, newConversation);
         sdk.off(CbEvents.OnTotalUnreadMessageCountChanged, totalUnreadChanged);
         sdk.off(CbEvents.OnRecvNewMessages, messagesReceived);
+        sdk.off(CbEvents.OnProgress, uploadProgress);
+        sdk.off(CbEvents.OnGroupMemberAdded, groupMemberChanged);
+        sdk.off(CbEvents.OnGroupMemberDeleted, groupMemberChanged);
+        sdk.off(CbEvents.OnGroupMemberInfoChanged, groupMemberChanged);
+        sdk.off(CbEvents.OnJoinedGroupDeleted, groupUnavailable);
+        sdk.off(CbEvents.OnGroupDismissed, groupUnavailable);
+        sdk.off(CbEvents.OnNewRecvMessageRevoked, messageRevoked);
+        sdk.off(CbEvents.OnRecvC2CReadReceipt, c2cReadReceipts);
+        for (const previewURL of localPreviewURLs.values()) URL.revokeObjectURL(previewURL);
+        localPreviewURLs.clear();
       };
     }
   };
+}
+
+function secureUUID(): string {
+  if (!globalThis.crypto?.randomUUID) throw new Error("浏览器不支持安全的媒体标识生成");
+  return globalThis.crypto.randomUUID();
+}
+
+function readImageDimensions(file: File): Promise<{ width: number; height: number }> {
+  return new Promise((resolve, reject) => {
+    const source = URL.createObjectURL(file);
+    const image = new Image();
+    const release = () => URL.revokeObjectURL(source);
+    image.onload = () => {
+      const width = image.naturalWidth;
+      const height = image.naturalHeight;
+      release();
+      if (width <= 0 || height <= 0) reject(new Error("无法读取图片尺寸"));
+      else resolve({ width, height });
+    };
+    image.onerror = () => {
+      release();
+      reject(new Error("图片无法解码"));
+    };
+    image.src = source;
+  });
 }

@@ -60,6 +60,61 @@ WHERE m.issuer = $1
 	return member, nil
 }
 
+func (s *PostgresStore) ListMemberDevices(ctx context.Context, memberID string) ([]EnrolledDevice, error) {
+	const query = `
+SELECT device_id, platform_id, status, created_at, updated_at
+FROM identity.member_devices
+WHERE member_id = $1::uuid
+ORDER BY platform_id, device_id`
+	rows, err := s.pool.Query(ctx, query, memberID)
+	if err != nil {
+		return nil, fmt.Errorf("list member devices: %w", err)
+	}
+	defer rows.Close()
+	devices := make([]EnrolledDevice, 0)
+	for rows.Next() {
+		var device EnrolledDevice
+		if err := rows.Scan(&device.DeviceID, &device.PlatformID, &device.Status, &device.CreatedAt, &device.UpdatedAt); err != nil {
+			return nil, fmt.Errorf("scan member device: %w", err)
+		}
+		devices = append(devices, device)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("read member devices: %w", err)
+	}
+	return devices, nil
+}
+
+func (s *PostgresStore) ReadyOpenIMUserID(ctx context.Context, memberID string) (string, error) {
+	const query = `
+SELECT openim_user_id
+FROM identity.identity_links
+WHERE member_id = $1::uuid AND provisioning_state = 'ready'`
+	var userID string
+	if err := s.pool.QueryRow(ctx, query, memberID).Scan(&userID); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return "", ErrIdentityLinkNotReady
+		}
+		return "", fmt.Errorf("read ready identity link: %w", err)
+	}
+	return userID, nil
+}
+
+func (s *PostgresStore) ReadyTelegramUserID(ctx context.Context, tenantID, memberID string) (string, error) {
+	const query = `
+SELECT telegram_user_id::text
+FROM channel.telegram_principals
+WHERE tenant_id = $1::uuid AND member_id = $2::uuid AND enabled`
+	var userID string
+	if err := s.pool.QueryRow(ctx, query, tenantID, memberID).Scan(&userID); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return "", ErrIdentityLinkNotReady
+		}
+		return "", fmt.Errorf("read ready Telegram identity link: %w", err)
+	}
+	return userID, nil
+}
+
 func (s *PostgresStore) AcquireLink(
 	ctx context.Context,
 	member Member,
