@@ -94,6 +94,11 @@ knowledge-rag-admin -mode finalize `
   -output eval/enterprise-rag-final.json
 ```
 
+Node2 长任务由 `ops/run-node2-enterprise-rag-evaluation.sh` 串联后两段。
+脚本先独立校验 1,120 条检索报告的全部发布门槛，只有通过才运行
+`60 + 60` Terra 生成评测；已有报告必须通过同一契约才会复用，失败报告
+不会被静默覆盖。
+
 ## 6. 当前证据
 
 - 新 pgvector 索引在隔离数据库完成 `2704/2704` 当前发布 Chunk 投影；
