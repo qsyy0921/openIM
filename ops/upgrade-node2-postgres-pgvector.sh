@@ -19,6 +19,10 @@ docker inspect "$postgres_container" >/dev/null 2>&1 || {
   echo "platform PostgreSQL container is missing" >&2
   exit 1
 }
+docker image inspect "$target_image" >/dev/null 2>&1 || {
+  echo "locked pgvector image is not pre-provisioned" >&2
+  exit 1
+}
 docker exec "$postgres_container" pg_isready -U platform -d platform >/dev/null
 
 server_major="$(docker exec "$postgres_container" psql -At -U platform -d platform \
@@ -67,7 +71,7 @@ done
 
 restore_previous_image() {
   cp -- "$compose_backup" "$compose_file"
-  docker compose -f "$compose_file" up -d --no-deps --force-recreate postgres >/dev/null
+  docker compose -f "$compose_file" up -d --no-deps --force-recreate --pull never postgres >/dev/null
   for _ in $(seq 1 60); do
     docker exec "$postgres_container" pg_isready -U platform -d platform >/dev/null 2>&1 && break
     sleep 2
@@ -119,8 +123,7 @@ lines[image_indexes[0]] = f"    image: {target}"
 path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 PY
 
-docker compose -f "$compose_file" pull postgres >/dev/null
-docker compose -f "$compose_file" up -d --no-deps --force-recreate postgres >/dev/null
+docker compose -f "$compose_file" up -d --no-deps --force-recreate --pull never postgres >/dev/null
 for _ in $(seq 1 60); do
   docker exec "$postgres_container" pg_isready -U platform -d platform >/dev/null 2>&1 && break
   sleep 2
