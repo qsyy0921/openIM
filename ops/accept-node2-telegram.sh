@@ -160,6 +160,8 @@ LIMIT 2")"
   echo "telegram_binding=ready"
   echo "telegram_user_id=$user_id"
   echo "telegram_chat_id=$chat_id"
+  echo "telegram_bootstrap_update_id=$update_id"
+  echo "telegram_bootstrap_message_id=$message_id"
   echo "telegram_verify_baseline=$next_offset"
 }
 
