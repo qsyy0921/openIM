@@ -408,6 +408,33 @@ states. Desktop and mobile layouts use the existing workspace design language.
 | Terra | existing bounded retry, then failed Run |
 | Citation reauthorization/checksum/support | failed Run, no delivery |
 
+### Node2 fault-injection contract
+
+Production acceptance uses a temporary loopback-only conditional proxy between
+Agent Runtime and the locked retrieval or generation Worker. The proxy rejects
+only the selected endpoint when the request body contains a unique acceptance
+batch marker. It never binds a LAN address, changes an upstream model, retries a
+request, or forwards a failed request to another endpoint.
+
+- Embedding injection rejects `/v1/embeddings` before any evidence query.
+- Reranker injection forwards the required embedding request and rejects only
+  `/v1/rerank`.
+- Terra injection forwards the persisted `/v1/routes` decision and rejects only
+  `/v1/candidates`.
+- Each phase persists its send intent immediately before the OpenIM side effect,
+  after local token and request preparation has completed; it reconciles
+  uncertain sends and requires exactly three bounded model-phase attempts.
+- A passing fault phase has a terminal failed Run, the exact typed 503 error,
+  no Candidate/model/provider response, no Citation, no reply message, and no
+  Delivery row.
+- The runtime URL override lives only under `/run/systemd/system` and is removed
+  after the exact Run reaches a terminal state. Direct loopback `18082` and
+  `18083` health and process environment are rechecked after restoration.
+
+The proxy is not a production fallback or chaos layer. It is an acceptance-only
+fault boundary documented in
+`docs/runbooks/node2-enterprise-rag-e2e.md`.
+
 Error messages returned to members are stable codes with safe summaries. Raw
 source content, query text, object key, model output, and credentials are not
 logged.

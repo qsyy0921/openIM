@@ -44,7 +44,7 @@ This unit records slice state, durable evidence, and the next idempotent action.
 | Fixed multilingual reranker | node2_eval_verified | retrieval-only service exposes no generation routes; real 32-passage locked rerank is `3.378s` warm and 8-way embedding benchmark is `6.034s/32` | preserve exact model/revision and complete full evaluation |
 | Trusted citations and Knowledge Web | local_verified | post-generation checksum/support reauthorization, atomic save-time grant lock, durable authorized excerpts, role-gated Web module and 128 Web tests pass | complete visual and real channel acceptance |
 | Enterprise RAG evaluation | node2_retrieval_running | full 1,120-case retrieval uses the exact release binary SHA-256 `430a3082...8818`; gated 120-case Terra generation is queued behind the retrieval service and cannot start unless every retrieval threshold passes | inspect the two user services and reports; never restart an active stage |
-| Node2 enterprise RAG E2E | pending | no upload/version/failure-injection E2E exists | deploy immutable release and execute Web/OpenIM/Telegram matrix |
+| Node2 enterprise RAG E2E | local_harness_verified_remote_pending | four-format fixture generation, phase-separated Playwright, isolated A/B identity lifecycle, OpenIM/Telegram phase reconciliation, exact cleanup, and marker-scoped embedding/reranker/Terra failure harness are locally implemented; no Node2 RAG E2E has run | wait for the locked evaluation, deploy the immutable release, then execute the ordered three-channel matrix |
 | Enterprise RAG GitHub delivery | local_committed | implementation, offline Node2 deployment guard, and gated evaluation orchestration are committed on the feature branch; push and Draft PR remain gated on remote acceptance | preserve commits, then add measured evidence before push and Draft PR |
 | Migrations 0009-0031 | node2_verified | the Terra transition preserves canonical Luna history, and Node2 reports `31|sql/0031_telegram_identity_linking.sql` on release `akashic-node2-20260723-oidc-renew1` | preserve immutable-version and deployment guards |
 | Fixed Responses generation | node2_verified | source and deployed catalog require `gpt-5.6-terra`, `reasoning.effort=high`, `POST /v1/responses`, `stream=false`, and no fallback; real Responses, OpenIM ACL-RAG, and cited Telegram delivery pass | preserve candidate-only, ACL, citation, and no-fallback boundaries |
@@ -114,6 +114,21 @@ The Codex task may use the 15-minute `OpenIM Akashic Goal 心跳` to re-enter th
 
 ## Latest local evidence
 
+- On 2026-07-24, the pending Node2 E2E gained a phase-separated acceptance
+  harness without claiming remote success: a shared OpenIM/Telegram contract
+  permits authorized/denied/revoked checks before version 2 exists and requires
+  version 2 only for the version phase; isolated A/B identity state and Memory
+  isolation have deterministic tests; the loopback fault proxy rejects only a
+  batch-marked embedding, reranker, or Candidate request and records bounded
+  counters; the Windows Web wrapper keeps test passwords out of arguments and
+  restores process environment; Telegram cleanup validates one exact bounded
+  message set and records an uncertain external deletion before issuing it;
+  identity preparation rejects residual Runs, grants, Telegram, Memory,
+  unexpected authorization, or foreign OpenIM links before resetting either
+  isolated account. Python acceptance tests pass `22/22`, shell syntax, Python
+  compilation, Ruff, the fixture Go package, and `git diff --check` pass. This
+  is local harness evidence only; the full retrieval service remains active and
+  no production switch or channel message was attempted.
 - On 2026-07-24, commit `bcedbe7959c391d5e46df2599df8e2d077697c43`
   produced clean immutable release `akashic-node2-20260724-enterprise-rag2`
   with 697 verified manifest entries and archive SHA-256
