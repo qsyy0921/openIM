@@ -114,6 +114,13 @@ The Codex task may use the 15-minute `OpenIM Akashic Goal 心跳` to re-enter th
 
 ## Latest local evidence
 
+- On 2026-07-24 at 14:05 +08:00, the locked Node2 retrieval evaluation was
+  still active and had completed `664/1120` rerank requests, with one additional
+  32-candidate rerank request in flight. The retrieval Worker was consuming
+  approximately 24 CPU cores; the completed reranks totalled `44345.023s`
+  (`66.8s` mean per request). Retrieval, generation, and final reports were all
+  absent, so this is progress/performance evidence only. The run is CPU-bound,
+  not idle, and must not be restarted or reconfigured.
 - On 2026-07-24, the pending Node2 E2E gained a phase-separated acceptance
   harness without claiming remote success: a shared OpenIM/Telegram contract
   permits authorized/denied/revoked checks before version 2 exists and requires
