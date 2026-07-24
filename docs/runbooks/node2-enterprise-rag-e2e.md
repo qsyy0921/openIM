@@ -1,7 +1,8 @@
 # Node2 enterprise RAG production acceptance
 
-Status: executable acceptance procedure; no remote pass is claimed until every
-result named below exists and the final cleanup checks return zero.
+Status: prepared acceptance procedure; production roots remain intentionally
+unset until evaluation passes. No remote pass is claimed until every result
+named below exists and the final cleanup checks return zero.
 
 ## Scope
 
@@ -59,8 +60,9 @@ $WebOutput = Join-Path $Runtime "$Batch-web-output"
 Node2:
 
 ```bash
-deploy_root=/home/qsyy0921/MFL/deploy/node2-native-bcedbe7
-release_root=/home/qsyy0921/MFL/releases/akashic-node2-20260724-enterprise-rag2
+deploy_root=<activated-deploy-root-built-from-evaluated-commit>
+release_root=<immutable-release-built-from-evaluated-commit>
+evaluated_application_commit=393cf18a5459c38ebef87a6dfc5672451f561510
 work_root=/home/qsyy0921/MFL/staging/enterprise-rag-e2e
 batch_id=<generated-batch-id>
 tenant_id=<tenant-uuid>
@@ -68,9 +70,10 @@ member_a=<authorized-member-uuid>
 member_b=<denied-member-uuid>
 ```
 
-Replace `deploy_root` and `release_root` only with the production deployment and
-immutable release actually selected after evaluation. Never modify release
-contents in place.
+Set `deploy_root` and `release_root` only to the production deployment and
+immutable release built from `evaluated_application_commit` after evaluation
+passes. Never substitute the preserved pre-remediation deployment or modify
+release contents in place.
 
 ## Gate 1: evaluation
 
@@ -78,8 +81,7 @@ Read the user services and reports. Do not restart an active stage:
 
 ```bash
 systemctl --user show \
-  openim-rag-retrieval-evaluation.service \
-  openim-rag-generation-evaluation.service \
+  openim-rag-enterprise-evaluation.service \
   -p Id -p ActiveState -p SubState -p Result -p ExecMainStatus
 
 test -f /home/qsyy0921/MFL/eval/enterprise-rag/retrieval-report.json
@@ -88,11 +90,15 @@ test -f /home/qsyy0921/MFL/eval/enterprise-rag/final-report.json
 ```
 
 The final report must identify application commit
-`bcedbe7959c391d5e46df2599df8e2d077697c43`, embedding
+`393cf18a5459c38ebef87a6dfc5672451f561510`, projection
+`document-title-content-v1`, embedding
 `qwen3-embedding:4b`, reranker revision
 `953dc6f6f85a1b2dbfca4c34a2796e7dde08d41e`, generation model
 `gpt-5.6-terra`, and `passed=true`. A report file existing is not sufficient;
-the locked finalizer must accept it.
+`ops/run-node2-enterprise-rag-evaluation.sh` must accept the immutable
+retrieval, generation, and final reports together. Tooling-only commits may be
+newer, but any application change after the evaluated commit requires a new
+index and full evaluation.
 
 ## Gate 2: generate isolated fixtures
 

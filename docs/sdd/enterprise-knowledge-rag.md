@@ -332,6 +332,11 @@ retrieval report atomically only when that report is absent; an existing report
 is immutable evidence and must pass the same schema, projection, security, and
 quality gates. Generation and finalization are unreachable until retrieval
 passes, so a failed report cannot be replaced by an automatic retry.
+The runner rejects missing, non-finite, or out-of-range required metrics,
+recomputes every generation release threshold from measured fields, locks the
+final threshold object, and requires the final report's embedded retrieval and
+generation objects to equal their immutable source reports. A top-level
+`passed` flag is never accepted as standalone evidence.
 
 ## Retrieval flow
 
