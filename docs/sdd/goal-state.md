@@ -115,6 +115,14 @@ The Codex task may use the 15-minute `OpenIM Akashic Goal 心跳` to re-enter th
 
 ## Latest local evidence
 
+- On 2026-07-25, a read-only Node2 storage audit confirmed that
+  `/home/qsyy0921/MFL`, the evaluation PostgreSQL bind mount, local model
+  directory and Docker root all resolve to ext4 `/dev/nvme0n1p3` on the
+  465.8-GiB `KINGSTON SA2000M8500G` NVMe device. The filesystem reports
+  `457G total / 109G used / 325G available` (`26%` used); the live projection
+  database was only `70 MB`. Docker reports `28.33 GB` of images, `766.5 MB`
+  of containers and `15.5 GB` of volumes. No prune, migration, restart or
+  storage write was performed during this audit.
 - On 2026-07-25, exact tooling commit
   `ac8b94519c1ea04cfc2dbad2ad9e7cf55263703a` was exported directly with
   `git archive` into the ignored 30,720-byte local bundle
