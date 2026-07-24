@@ -115,6 +115,17 @@ The Codex task may use the 15-minute `OpenIM Akashic Goal 心跳` to re-enter th
 
 ## Latest local evidence
 
+- On 2026-07-25,
+  `ops/prepare_node2_enterprise_rag_evaluation.py` added the gated handoff
+  from the 158-case projection regression to a new full-evaluation root. It
+  requires the active `2704/2704` source index and passing regression, locks
+  application, runner, QA and database-wrapper digests, preserves the original
+  regression evidence, creates the target atomically and treats every retry as
+  byte-for-byte verification. It emits an inert owner-only user-service file
+  but does not install or start it. The preparation harness passed `3/3`, the
+  runner harness remained `5/5`, and the Windows ops suite passed `30` tests
+  with those eight POSIX-only cases skipped. No Node2 directory, service,
+  database row or channel request was changed by this local check.
 - On 2026-07-25, the Node2 evaluation runner was completed as one strict
   three-stage workflow: it atomically creates the full retrieval report only
   when absent, validates immutable existing evidence, and reaches Terra

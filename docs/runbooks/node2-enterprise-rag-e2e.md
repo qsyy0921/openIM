@@ -62,6 +62,7 @@ Node2:
 ```bash
 deploy_root=<activated-deploy-root-built-from-evaluated-commit>
 release_root=<immutable-release-built-from-evaluated-commit>
+tooling_root=<read-only-ops-root-built-from-tooling-commit>
 evaluated_application_commit=393cf18a5459c38ebef87a6dfc5672451f561510
 work_root=/home/qsyy0921/MFL/staging/enterprise-rag-e2e
 batch_id=<generated-batch-id>
@@ -77,7 +78,56 @@ release contents in place.
 
 ## Gate 1: evaluation
 
-Read the user services and reports. Do not restart an active stage:
+The failed-case regression must finish before a full-evaluation root is
+created. Verify its existing reports without restarting it:
+
+```bash
+source_root=/home/qsyy0921/MFL/eval/enterprise-rag-projection-0033
+evaluation_root=/home/qsyy0921/MFL/eval/enterprise-rag-full-393cf18
+
+test -f "$source_root/index-report.json"
+test -f "$source_root/retrieval-regression-report.json"
+```
+
+Copy `prepare_node2_enterprise_rag_evaluation.py` and
+`run-node2-enterprise-rag-evaluation.sh` from one exact tooling commit to the
+read-only `tooling_root`. Pin that full tooling commit and these audited
+digests; do not calculate a new expected value after a mismatch:
+
+```bash
+tooling_commit=<full-40-character-tooling-commit>
+admin_sha256=3b09ecc685502a88176ab9cbd7061e373ae9a634aea8ca8c6d8e487ef0deaf1c
+runner_sha256=8d157408224331aa11faaece445301c05506cbc76277e3749eabc046bff92592
+qa_sha256=b9f163665f40c3f2e8392d00aa38080520144cf6dcff2e4236563703e0674c61
+database_runner_sha256=9081908e5d2a27d67b08053434f22e928a31fe606f5bcefa498f52e27399f36c
+
+python3 "$tooling_root/ops/prepare_node2_enterprise_rag_evaluation.py" \
+  "$source_root" "$evaluation_root" \
+  "$tooling_root/ops/run-node2-enterprise-rag-evaluation.sh" \
+  "$evaluated_application_commit" "$tooling_commit" \
+  "$admin_sha256" "$runner_sha256" "$qa_sha256" \
+  "$database_runner_sha256"
+```
+
+The helper fails before creating the target when the 158-case gate, source
+manifest, digest or projection contract differs. A retry only verifies an
+already prepared root. It emits but does not install or start this user unit:
+
+```bash
+unit_name=openim-rag-enterprise-evaluation.service
+unit_source="$evaluation_root/$unit_name"
+unit_target="$HOME/.config/systemd/user/$unit_name"
+
+if test -e "$unit_target"; then
+  cmp -s "$unit_source" "$unit_target"
+else
+  install -m 0600 "$unit_source" "$unit_target"
+fi
+systemctl --user daemon-reload
+systemctl --user start "$unit_name"
+```
+
+Read the user service and reports. Do not restart an active stage:
 
 ```bash
 systemctl --user show \

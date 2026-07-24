@@ -338,6 +338,17 @@ final threshold object, and requires the final report's embedded retrieval and
 generation objects to equal their immutable source reports. A top-level
 `passed` flag is never accepted as standalone evidence.
 
+`ops/prepare_node2_enterprise_rag_evaluation.py` is the only supported handoff
+from the bounded projection regression to the full evaluation. It requires the
+active `2704/2704` index report and passing 158-case regression, verifies the
+application binary, evaluation runner, QA dataset and database wrapper against
+operator-pinned SHA-256 values, preserves the original working-tree regression
+manifest as evidence, and atomically creates a new owner-only evaluation root.
+A repeated call validates the existing root byte-for-byte and never repairs or
+overwrites it. The generated user-service file is inert until explicitly
+installed and started after the regression gate; preparation itself does not
+send a request, mutate the evaluation database, or start an evaluation.
+
 ## Retrieval flow
 
 ```text
