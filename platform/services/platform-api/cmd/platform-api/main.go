@@ -77,7 +77,9 @@ func main() {
 	knowledgeStore, err := knowledge.NewStore(pool, knowledge.StoreConfig{
 		Bucket: cfg.KnowledgeMinIOBucket, ParserRevision: cfg.KnowledgeParserRevision,
 		EmbeddingRevision:  cfg.RetrievalEmbeddingModel,
-		EmbeddingDimension: cfg.RetrievalEmbeddingDimension, MaxAttempts: cfg.KnowledgeMaxAttempts,
+		EmbeddingDimension: cfg.RetrievalEmbeddingDimension,
+		ProjectionRevision: cfg.RetrievalProjectionRevision,
+		MaxAttempts:        cfg.KnowledgeMaxAttempts,
 	})
 	if err != nil {
 		slog.Error("configure knowledge repository failed", "error", err)

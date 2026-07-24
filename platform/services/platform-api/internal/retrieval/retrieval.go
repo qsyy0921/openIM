@@ -15,6 +15,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/qsyy0921/openim/platform/services/platform-api/internal/knowledgeprojection"
 )
 
 const (
@@ -25,6 +26,7 @@ const (
 	maxEvidenceItems     = 8
 	maxEvidenceBytes     = 24 << 10
 	maxChunksPerDocument = 3
+	maxRerankerTextBytes = 8000
 	rrfK                 = 60
 )
 
@@ -56,19 +58,20 @@ type Query struct {
 }
 
 type Evidence struct {
-	CitationID    string  `json:"citation_id"`
-	DocumentID    string  `json:"document_id"`
-	VersionID     string  `json:"version_id"`
-	ChunkID       string  `json:"chunk_id"`
-	Title         string  `json:"title"`
-	SourceURI     string  `json:"source_uri"`
-	Checksum      string  `json:"checksum"`
-	Content       string  `json:"content"`
-	LexicalRank   int     `json:"lexical_rank,omitempty"`
-	DenseRank     int     `json:"dense_rank,omitempty"`
-	FusionScore   float64 `json:"fusion_score,omitempty"`
-	RerankerScore float64 `json:"reranker_score,omitempty"`
-	IndexRevision string  `json:"index_revision,omitempty"`
+	CitationID         string  `json:"citation_id"`
+	DocumentID         string  `json:"document_id"`
+	VersionID          string  `json:"version_id"`
+	ChunkID            string  `json:"chunk_id"`
+	Title              string  `json:"title"`
+	SourceURI          string  `json:"source_uri"`
+	Checksum           string  `json:"checksum"`
+	Content            string  `json:"content"`
+	LexicalRank        int     `json:"lexical_rank,omitempty"`
+	DenseRank          int     `json:"dense_rank,omitempty"`
+	FusionScore        float64 `json:"fusion_score,omitempty"`
+	RerankerScore      float64 `json:"reranker_score,omitempty"`
+	IndexRevision      string  `json:"index_revision,omitempty"`
+	ProjectionRevision string  `json:"projection_revision,omitempty"`
 }
 
 type EmbeddingBatch struct {
@@ -83,6 +86,7 @@ type EmbeddingProvider interface {
 
 type Config struct {
 	ModelRevision      string
+	ProjectionRevision string
 	Dimension          int
 	DenseMinSimilarity float64
 	MaxCandidates      int
@@ -94,6 +98,9 @@ type Config struct {
 func (c Config) validate() error {
 	if strings.TrimSpace(c.ModelRevision) == "" || c.Dimension != 2560 {
 		return errors.New("retrieval embedding model contract is invalid")
+	}
+	if c.ProjectionRevision != knowledgeprojection.Revision {
+		return errors.New("retrieval projection revision contract is invalid")
 	}
 	if c.DenseMinSimilarity < -1 || c.DenseMinSimilarity > 1 {
 		return errors.New("retrieval dense minimum similarity must be in [-1, 1]")
@@ -193,9 +200,17 @@ func (s *Store) rerankedCandidatesWithVector(ctx context.Context, query Query, t
 	}
 	rerankInput := make([]RerankCandidate, len(candidates))
 	for index := range candidates {
+		content, err := knowledgeprojection.RerankerText(
+			candidates[index].evidence.Title,
+			candidates[index].evidence.Content,
+			maxRerankerTextBytes,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("build knowledge reranker projection: %w", err)
+		}
 		rerankInput[index] = RerankCandidate{
 			CandidateID: candidates[index].evidence.ChunkID,
-			Content:     candidates[index].evidence.Content,
+			Content:     content,
 		}
 	}
 	reranked, err := s.reranker.Rerank(ctx, query.Text, rerankInput)
@@ -223,7 +238,8 @@ func (s *Store) authorizedCandidates(ctx context.Context, query Query, terms []s
 	byID := make(map[string]*candidate, maxFusionCandidates)
 	lexicalQuery := lexicalTSQuery(terms)
 	rows, err := tx.Query(ctx, authorizedLexicalSQL, query.TenantID, query.MemberID,
-		s.config.ModelRevision, s.config.Dimension, lexicalQuery, s.config.MaxCandidates)
+		s.config.ModelRevision, s.config.Dimension, s.config.ProjectionRevision,
+		lexicalQuery, s.config.MaxCandidates)
 	if err != nil {
 		return nil, fmt.Errorf("query authorized lexical candidates: %w", err)
 	}
@@ -246,7 +262,8 @@ func (s *Store) authorizedCandidates(ctx context.Context, query Query, terms []s
 	}
 	rows.Close()
 	rows, err = tx.Query(ctx, authorizedDenseSQL, query.TenantID, query.MemberID,
-		s.config.ModelRevision, s.config.Dimension, halfVectorLiteral(queryVector),
+		s.config.ModelRevision, s.config.Dimension, s.config.ProjectionRevision,
+		halfVectorLiteral(queryVector),
 		s.config.DenseMinSimilarity, s.config.MaxCandidates)
 	if err != nil {
 		return nil, fmt.Errorf("query authorized dense candidates: %w", err)
@@ -303,7 +320,7 @@ func (s *Store) authorizedCandidates(ctx context.Context, query Query, terms []s
 const authorizedLexicalSQL = `
 SELECT document.id::text, version.id::text, chunk.id::text,
        document.title, document.source_uri, chunk.checksum, chunk.content,
-       generation.model_revision
+       generation.model_revision, generation.projection_revision
 FROM knowledge.documents AS document
 JOIN identity.members AS member
   ON member.tenant_id = document.tenant_id
@@ -327,11 +344,13 @@ JOIN knowledge.index_generations AS generation
  AND generation.state = 'active'
  AND generation.model_revision = $3
  AND generation.dimension = $4
+ AND generation.projection_revision = $5
 JOIN knowledge.chunk_search_indexes AS search
   ON search.tenant_id = chunk.tenant_id
  AND search.generation_id = generation.id
  AND search.chunk_id = chunk.id
  AND search.model_revision = generation.model_revision
+ AND search.projection_revision = generation.projection_revision
  AND search.dimension = generation.dimension
  AND search.content_checksum = chunk.checksum
 WHERE document.tenant_id = $1::uuid
@@ -339,14 +358,14 @@ WHERE document.tenant_id = $1::uuid
   AND version.status = 'published'
   AND version.ingestion_state IN ('legacy_indexed', 'indexed')
   AND document.classification IN ('public', 'internal')
-  AND search.search_vector @@ to_tsquery('simple', $5)
-ORDER BY ts_rank_cd(search.search_vector, to_tsquery('simple', $5)) DESC, chunk.id
-LIMIT $6`
+  AND search.search_vector @@ to_tsquery('simple', $6)
+ORDER BY ts_rank_cd(search.search_vector, to_tsquery('simple', $6)) DESC, chunk.id
+LIMIT $7`
 
 const authorizedDenseSQL = `
 SELECT document.id::text, version.id::text, chunk.id::text,
        document.title, document.source_uri, chunk.checksum, chunk.content,
-       generation.model_revision
+       generation.model_revision, generation.projection_revision
 FROM knowledge.documents AS document
 JOIN identity.members AS member
   ON member.tenant_id = document.tenant_id
@@ -370,11 +389,13 @@ JOIN knowledge.index_generations AS generation
  AND generation.state = 'active'
  AND generation.model_revision = $3
  AND generation.dimension = $4
+ AND generation.projection_revision = $5
 JOIN knowledge.chunk_search_indexes AS search
   ON search.tenant_id = chunk.tenant_id
  AND search.generation_id = generation.id
  AND search.chunk_id = chunk.id
  AND search.model_revision = generation.model_revision
+ AND search.projection_revision = generation.projection_revision
  AND search.dimension = generation.dimension
  AND search.content_checksum = chunk.checksum
 WHERE document.tenant_id = $1::uuid
@@ -382,9 +403,9 @@ WHERE document.tenant_id = $1::uuid
   AND version.status = 'published'
   AND version.ingestion_state IN ('legacy_indexed', 'indexed')
   AND document.classification IN ('public', 'internal')
-  AND 1 - (search.embedding <=> $5::halfvec) >= $6
-ORDER BY search.embedding <=> $5::halfvec, chunk.id
-LIMIT $7`
+  AND 1 - (search.embedding <=> $6::halfvec) >= $7
+ORDER BY search.embedding <=> $6::halfvec, chunk.id
+LIMIT $8`
 
 type candidateScanner interface {
 	Scan(...any) error
@@ -396,6 +417,7 @@ func scanCandidate(row candidateScanner) (candidate, error) {
 		&item.evidence.DocumentID, &item.evidence.VersionID, &item.evidence.ChunkID,
 		&item.evidence.Title, &item.evidence.SourceURI, &item.evidence.Checksum,
 		&item.evidence.Content, &item.evidence.IndexRevision,
+		&item.evidence.ProjectionRevision,
 	); err != nil {
 		return candidate{}, fmt.Errorf("scan authorized retrieval candidate: %w", err)
 	}

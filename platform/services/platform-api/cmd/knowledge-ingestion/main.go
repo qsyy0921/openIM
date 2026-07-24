@@ -13,6 +13,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/qsyy0921/openim/platform/services/platform-api/internal/knowledge"
+	"github.com/qsyy0921/openim/platform/services/platform-api/internal/knowledgeprojection"
 	"github.com/qsyy0921/openim/platform/services/platform-api/internal/retrieval"
 )
 
@@ -55,6 +56,16 @@ func run() error {
 	dimension, err := integerEnv("PLATFORM_RETRIEVAL_EMBEDDING_DIMENSION", 2560, 2560)
 	if err != nil {
 		return err
+	}
+	projectionRevision, err := required("PLATFORM_RETRIEVAL_PROJECTION_REVISION")
+	if err != nil {
+		return err
+	}
+	if projectionRevision != knowledgeprojection.Revision {
+		return fmt.Errorf(
+			"PLATFORM_RETRIEVAL_PROJECTION_REVISION must equal %s",
+			knowledgeprojection.Revision,
+		)
 	}
 	parserRevision, err := required("PLATFORM_KNOWLEDGE_PARSER_REVISION")
 	if err != nil {
@@ -122,7 +133,8 @@ func run() error {
 	}
 	store, err := knowledge.NewStore(pool, knowledge.StoreConfig{
 		Bucket: minioBucket, ParserRevision: parserRevision, EmbeddingRevision: embeddingRevision,
-		EmbeddingDimension: dimension, MaxAttempts: maxAttempts,
+		EmbeddingDimension: dimension, ProjectionRevision: projectionRevision,
+		MaxAttempts: maxAttempts,
 	})
 	if err != nil {
 		return err
@@ -144,7 +156,13 @@ func run() error {
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	slog.Info("knowledge ingestion started", "owner", owner, "parser_revision", parserRevision, "embedding_revision", embeddingRevision)
+	slog.Info(
+		"knowledge ingestion started",
+		"owner", owner,
+		"parser_revision", parserRevision,
+		"embedding_revision", embeddingRevision,
+		"projection_revision", projectionRevision,
+	)
 	return worker.Run(ctx)
 }
 

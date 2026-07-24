@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/IBM/sarama"
+	"github.com/qsyy0921/openim/platform/services/platform-api/internal/knowledgeprojection"
 )
 
 type Config struct {
@@ -28,6 +29,7 @@ type Config struct {
 	IntelligenceURL                            string
 	RetrievalIntelligenceURL                   string
 	RetrievalModelRevision                     string
+	RetrievalProjectionRevision                string
 	RetrievalRerankerModel                     string
 	RetrievalRerankerRevision                  string
 	RetrievalDimension, RetrievalMaxCandidates int
@@ -122,6 +124,16 @@ func LoadConfig() (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	retrievalProjection, err := env("PLATFORM_RETRIEVAL_PROJECTION_REVISION")
+	if err != nil {
+		return Config{}, err
+	}
+	if retrievalProjection != knowledgeprojection.Revision {
+		return Config{}, fmt.Errorf(
+			"PLATFORM_RETRIEVAL_PROJECTION_REVISION must equal %s",
+			knowledgeprojection.Revision,
+		)
+	}
 	retrievalCandidates, err := intEnv("PLATFORM_RETRIEVAL_MAX_CANDIDATES", 1, 10000)
 	if err != nil {
 		return Config{}, err
@@ -162,7 +174,8 @@ func LoadConfig() (Config, error) {
 		MCPReconcileInterval:     mcpReconcile, OpenIMAPIURL: strings.TrimRight(openIMAPIURL, "/"),
 		OpenIMSecret: openIMSecret, OpenIMAdminUserID: openIMAdminUserID,
 		RetrievalModelRevision: retrievalModel, RetrievalDimension: retrievalDimension,
-		RetrievalRerankerModel: retrievalRerankerModel, RetrievalRerankerRevision: retrievalRerankerRevision,
+		RetrievalProjectionRevision: retrievalProjection,
+		RetrievalRerankerModel:      retrievalRerankerModel, RetrievalRerankerRevision: retrievalRerankerRevision,
 		RetrievalMaxCandidates: retrievalCandidates, RetrievalHNSWEFSearch: retrievalHNSWEFSearch,
 		RetrievalDenseMinSimilarity: retrievalDenseMinimum,
 		A2AAllowedHosts:             a2aHosts, A2AAllowedPrivateCIDRs: csvEnv("PLATFORM_A2A_ALLOWED_PRIVATE_CIDRS"), A2ATimeout: a2aTimeout}, nil

@@ -4,9 +4,7 @@ import (
 	"crypto/sha256"
 	"fmt"
 	"regexp"
-	"sort"
 	"strings"
-	"unicode"
 	"unicode/utf8"
 
 	"github.com/google/uuid"
@@ -55,7 +53,7 @@ func ChunkSections(versionID string, sections []Section) ([]Chunk, error) {
 			ordinal := len(result)
 			id := uuid.NewSHA1(namespace, []byte(fmt.Sprintf("%d\x00%s", ordinal, checksum))).String()
 			result = append(result, Chunk{
-				ID: id, Ordinal: ordinal, Content: content, Checksum: checksum, Lexemes: lexicalDocument(content),
+				ID: id, Ordinal: ordinal, Content: content, Checksum: checksum,
 			})
 			if len(result) > maxChunksPerVersion {
 				return processingError("CHUNK_COUNT_EXCEEDED", "document produces too many chunks", false)
@@ -190,53 +188,4 @@ func trailingRunes(value string, count int) string {
 func checksumText(value string) string {
 	digest := sha256.Sum256([]byte(value))
 	return fmt.Sprintf("sha256:%x", digest)
-}
-
-func lexicalDocument(value string) string {
-	seen := make(map[string]struct{})
-	terms := make([]string, 0, 128)
-	add := func(term string) {
-		term = strings.ToLower(strings.TrimSpace(term))
-		if term == "" {
-			return
-		}
-		if _, exists := seen[term]; exists {
-			return
-		}
-		seen[term] = struct{}{}
-		terms = append(terms, term)
-	}
-	fields := strings.FieldsFunc(value, func(char rune) bool {
-		return unicode.IsSpace(char) || unicode.IsPunct(char) || unicode.IsSymbol(char)
-	})
-	for _, field := range fields {
-		var latin strings.Builder
-		var han []rune
-		flushLatin := func() {
-			if utf8.RuneCountInString(latin.String()) >= 2 {
-				add(latin.String())
-			}
-			latin.Reset()
-		}
-		for _, char := range field {
-			switch {
-			case unicode.Is(unicode.Han, char):
-				flushLatin()
-				han = append(han, char)
-			case unicode.IsLetter(char) || unicode.IsDigit(char):
-				latin.WriteRune(char)
-			default:
-				flushLatin()
-			}
-		}
-		flushLatin()
-		for index := 0; index+1 < len(han); index++ {
-			add(string(han[index : index+2]))
-		}
-		if len(han) == 1 {
-			add(string(han))
-		}
-	}
-	sort.Strings(terms)
-	return strings.Join(terms, " ")
 }

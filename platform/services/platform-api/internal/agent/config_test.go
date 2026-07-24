@@ -30,6 +30,15 @@ func TestLoadConfigRequiresSeparateRetrievalEndpoint(t *testing.T) {
 	}
 }
 
+func TestLoadConfigRejectsHistoricalRetrievalProjection(t *testing.T) {
+	setAgentConfigEnvironment(t)
+	t.Setenv("PLATFORM_RETRIEVAL_PROJECTION_REVISION", "chunk-content-v1")
+	if _, err := LoadConfig(); err == nil ||
+		!strings.Contains(err.Error(), "PLATFORM_RETRIEVAL_PROJECTION_REVISION") {
+		t.Fatalf("historical retrieval projection error = %v", err)
+	}
+}
+
 func setAgentConfigEnvironment(t *testing.T) {
 	t.Helper()
 	values := map[string]string{
@@ -50,6 +59,7 @@ func setAgentConfigEnvironment(t *testing.T) {
 		"PLATFORM_MCP_RECONCILE_INTERVAL":         "5s",
 		"PLATFORM_RETRIEVAL_EMBEDDING_MODEL":      "qwen3-embedding:4b",
 		"PLATFORM_RETRIEVAL_EMBEDDING_DIMENSION":  "2560",
+		"PLATFORM_RETRIEVAL_PROJECTION_REVISION":  "document-title-content-v1",
 		"PLATFORM_RETRIEVAL_MAX_CANDIDATES":       "32",
 		"PLATFORM_RETRIEVAL_RERANKER_MODEL":       "BAAI/bge-reranker-v2-m3",
 		"PLATFORM_RETRIEVAL_RERANKER_REVISION":    "953dc6f6f85a1b2dbfca4c34a2796e7dde08d41e",

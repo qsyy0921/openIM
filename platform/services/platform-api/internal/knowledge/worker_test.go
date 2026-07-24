@@ -3,8 +3,12 @@ package knowledge
 import (
 	"context"
 	"errors"
+	"os"
+	"strings"
 	"testing"
 	"time"
+
+	"github.com/qsyy0921/openim/platform/services/platform-api/internal/knowledgeprojection"
 )
 
 func TestWorkerProcessesObjectCleanupBeforeIngestion(t *testing.T) {
@@ -59,6 +63,55 @@ func TestWorkerRecordsCleanupFailureWithoutFalseCompletion(t *testing.T) {
 	found, err = worker.ProcessOne(context.Background())
 	if !found || !errors.Is(err, deleteErr) || !errors.Is(err, ErrLeaseLost) {
 		t.Fatalf("unrecorded cleanup failure = %v, %v", found, err)
+	}
+}
+
+func TestWorkerEmbedsTheVersionedTitleContentProjection(t *testing.T) {
+	content := []byte("The approval retention period is seven years.")
+	objects := &workerObjectStoreStub{downloadContent: content}
+	embedder := &recordingWorkerEmbedder{}
+	worker, err := NewWorker(
+		&workerRepositoryStub{},
+		objects,
+		NewParser(),
+		embedder,
+		WorkerConfig{
+			Owner: "worker-test", LeaseDuration: time.Minute,
+			PollInterval: 100 * time.Millisecond, BatchSize: 8,
+			TempDirectory: t.TempDir(),
+		},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	job := Job{
+		ID: "job-1", TenantID: "tenant-1", DocumentID: "document-1",
+		DocumentTitle: "Third-party approval policy",
+		VersionID:     "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+		Bucket:        "knowledge", ObjectKey: "tenant/document/version/source",
+		SourceFormat: FormatText, SizeBytes: int64(len(content)),
+		Checksum:          checksumText(string(content)),
+		EmbeddingRevision: "qwen3-embedding:4b", EmbeddingDimension: 2560,
+		ProjectionRevision: knowledgeprojection.Revision,
+	}
+	indexed, err := worker.buildIndex(context.Background(), job)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(indexed) != 1 || len(embedder.texts) != 1 {
+		t.Fatalf("indexed=%d embedding inputs=%d", len(indexed), len(embedder.texts))
+	}
+	if !strings.HasPrefix(
+		embedder.texts[0],
+		"Third-party approval policy\n\n",
+	) {
+		t.Fatalf("embedding input omitted document identity: %q", embedder.texts[0])
+	}
+	if strings.TrimPrefix(
+		embedder.texts[0],
+		"Third-party approval policy\n\n",
+	) != string(content) {
+		t.Fatalf("embedding input changed Chunk content: %q", embedder.texts[0])
 	}
 }
 
@@ -119,16 +172,20 @@ func (*workerRepositoryStub) FailJob(context.Context, Job, error) error {
 }
 
 type workerObjectStoreStub struct {
-	deleteErr   error
-	deleteCalls int
+	deleteErr       error
+	deleteCalls     int
+	downloadContent []byte
 }
 
 func (*workerObjectStoreStub) Put(context.Context, string, string, string, int64, string, string) error {
 	return nil
 }
 
-func (*workerObjectStoreStub) Download(context.Context, string, string, string) error {
-	return nil
+func (s *workerObjectStoreStub) Download(_ context.Context, _, _, destination string) error {
+	if s.downloadContent == nil {
+		return nil
+	}
+	return os.WriteFile(destination, s.downloadContent, 0o600)
 }
 
 func (s *workerObjectStoreStub) Delete(context.Context, string, string) error {
@@ -140,4 +197,20 @@ type workerEmbeddingStub struct{}
 
 func (workerEmbeddingStub) Embed(context.Context, []string) (EmbeddingBatch, error) {
 	return EmbeddingBatch{}, nil
+}
+
+type recordingWorkerEmbedder struct {
+	texts []string
+}
+
+func (e *recordingWorkerEmbedder) Embed(_ context.Context, texts []string) (EmbeddingBatch, error) {
+	e.texts = append(e.texts, texts...)
+	vectors := make([][]float32, len(texts))
+	for index := range vectors {
+		vectors[index] = make([]float32, 2560)
+		vectors[index][0] = 1
+	}
+	return EmbeddingBatch{
+		Model: "qwen3-embedding:4b", Dimension: 2560, Vectors: vectors,
+	}, nil
 }

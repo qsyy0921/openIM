@@ -18,9 +18,10 @@ intelligence_ssh_target="${OPENIM_INTELLIGENCE_SSH_TARGET:-10495@172.31.50.1}"
 windows_embedding_forward_port="${OPENIM_INTELLIGENCE_WINDOWS_EMBEDDING_FORWARD_PORT:-11435}"
 embedding_model="${OPENIM_INTELLIGENCE_EMBEDDING_MODEL:-qwen3-embedding:4b}"
 embedding_dimension="${OPENIM_INTELLIGENCE_EMBEDDING_DIMENSION:-2560}"
+projection_revision="document-title-content-v1"
 embedding_timeout="${OPENIM_INTELLIGENCE_EMBEDDING_TIMEOUT_SECONDS:-180}"
 knowledge_index_batch_size="${OPENIM_KNOWLEDGE_INDEX_BATCH_SIZE:-4}"
-knowledge_index_embedding_workers="${OPENIM_KNOWLEDGE_INDEX_EMBEDDING_WORKERS:-8}"
+knowledge_index_embedding_workers="${OPENIM_KNOWLEDGE_INDEX_EMBEDDING_WORKERS:-2}"
 reranker_model="${OPENIM_INTELLIGENCE_RERANKER_MODEL:-BAAI/bge-reranker-v2-m3}"
 reranker_revision="${OPENIM_INTELLIGENCE_RERANKER_REVISION:-953dc6f6f85a1b2dbfca4c34a2796e7dde08d41e}"
 reranker_path="${OPENIM_INTELLIGENCE_RERANKER_PATH:-$mfl_root/models/bge-reranker-v2-m3-${reranker_revision:0:12}}"
@@ -76,6 +77,10 @@ intelligence_wheel="${intelligence_wheels[0]}"
 }
 [[ "$embedding_model" == "qwen3-embedding:4b" && "$embedding_dimension" == "2560" ]] || {
   echo "retrieval embedding model contract is invalid" >&2
+  exit 1
+}
+[[ "$projection_revision" == "document-title-content-v1" ]] || {
+  echo "retrieval projection revision contract is invalid" >&2
   exit 1
 }
 [[ "$reranker_model" == "BAAI/bge-reranker-v2-m3" && \
@@ -602,33 +607,80 @@ database_url="$(sed -n 's/^PLATFORM_DATABASE_URL=//p' "$config_dir/platform.env"
   echo "platform database URL is missing or malformed" >&2
   exit 1
 }
+
+knowledge_tenant_output="$(
+  docker exec "$postgres_container" psql -At -U platform -d platform -c "
+SELECT DISTINCT document.tenant_id::text
+FROM knowledge.documents AS document
+JOIN knowledge.document_versions AS version
+  ON version.tenant_id = document.tenant_id
+ AND version.document_id = document.id
+ AND version.id = document.current_version_id
+WHERE document.status = 'active'
+  AND version.status = 'published'
+ORDER BY document.tenant_id::text"
+)"
+mapfile -t knowledge_tenant_ids < <(printf '%s' "$knowledge_tenant_output")
+unset knowledge_tenant_output
+
 index_report="$(mktemp)"
 trap 'rm -f "$index_report"' EXIT
-runuser -u "$runtime_user" -- env \
-  PLATFORM_DATABASE_URL="$database_url" \
-  PLATFORM_RETRIEVAL_INTELLIGENCE_URL=http://127.0.0.1:18083 \
-  PLATFORM_RETRIEVAL_EMBEDDING_MODEL="$embedding_model" \
-  PLATFORM_RETRIEVAL_EMBEDDING_DIMENSION="$embedding_dimension" \
-  "$bin_dir/knowledge-rag-admin" \
-    -mode index \
-    -intelligence-url http://127.0.0.1:18083 \
-    -batch-size "$knowledge_index_batch_size" \
-    -embedding-workers "$knowledge_index_embedding_workers" \
-    -timeout "$((embedding_timeout * 2))s" >"$index_report"
-unset database_url
-"$retrieval_venv/bin/python" - "$index_report" <<'PY'
+knowledge_indexed_total=0
+for tenant_id in "${knowledge_tenant_ids[@]}"; do
+  [[ "$tenant_id" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$ ]] || {
+    echo "knowledge index tenant ID is malformed" >&2
+    exit 1
+  }
+  runuser -u "$runtime_user" -- env \
+    PLATFORM_DATABASE_URL="$database_url" \
+    PLATFORM_RETRIEVAL_INTELLIGENCE_URL=http://127.0.0.1:18083 \
+    PLATFORM_RETRIEVAL_EMBEDDING_MODEL="$embedding_model" \
+    PLATFORM_RETRIEVAL_EMBEDDING_DIMENSION="$embedding_dimension" \
+    PLATFORM_RETRIEVAL_PROJECTION_REVISION="$projection_revision" \
+    "$bin_dir/knowledge-rag-admin" \
+      -mode index \
+      -tenant-id "$tenant_id" \
+      -intelligence-url http://127.0.0.1:18083 \
+      -model "$embedding_model" \
+      -projection-revision "$projection_revision" \
+      -dimension "$embedding_dimension" \
+      -batch-size "$knowledge_index_batch_size" \
+      -embedding-workers "$knowledge_index_embedding_workers" \
+      -timeout "$((embedding_timeout * 2))s" >"$index_report"
+  read -r indexed expected < <(
+    "$retrieval_venv/bin/python" - "$index_report" "$projection_revision" <<'PY'
 import json
 import sys
+import uuid
 
-with open(sys.argv[1], encoding="utf-8") as handle:
+path, expected_projection = sys.argv[1:]
+with open(path, encoding="utf-8") as handle:
     body = json.load(handle)
-indexed = body.get("indexed")
-if not isinstance(indexed, int) or indexed < 0:
-    raise SystemExit("knowledge embedding index report is invalid")
-print(f"knowledge_embeddings_indexed={indexed}")
+try:
+    uuid.UUID(body.get("generation_id", ""), version=4)
+except (AttributeError, TypeError, ValueError):
+    raise SystemExit("knowledge index generation ID is invalid")
+expected = body.get("expected_chunks")
+indexed = body.get("indexed_chunks")
+if (
+    body.get("projection_revision") != expected_projection
+    or body.get("state") != "active"
+    or body.get("activated") is not True
+    or not isinstance(expected, int)
+    or expected < 1
+    or indexed != expected
+):
+    raise SystemExit("knowledge embedding index report violates the activation contract")
+print(indexed, expected)
 PY
+  )
+  knowledge_indexed_total=$((knowledge_indexed_total + indexed))
+done
+unset database_url
 rm -f "$index_report"
 trap - EXIT
+echo "knowledge_index_tenants=${#knowledge_tenant_ids[@]}"
+echo "knowledge_embeddings_indexed=$knowledge_indexed_total"
 
 systemctl restart openim-agent-runtime.service openim-memory-extractor.service \
   openim-proactive-runtime.service openim-knowledge-ingestion.service

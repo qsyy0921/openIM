@@ -39,7 +39,7 @@ func TestLoadRequiresEveryValue(t *testing.T) {
 		openIMWSURLKey, openIMSecretKey, openIMAdminUserKey, knowledgeMinIOURLKey,
 		knowledgeMinIOAccessKey, knowledgeMinIOSecretKey, knowledgeMinIOBucketKey,
 		knowledgeParserRevisionKey, knowledgeMaxAttemptsKey, retrievalEmbeddingModelKey,
-		retrievalEmbeddingDimensionKey,
+		retrievalEmbeddingDimensionKey, retrievalProjectionRevisionKey,
 	} {
 		t.Run(key, func(t *testing.T) {
 			values := make(map[string]string, len(base))
@@ -71,6 +71,7 @@ func TestLoadRejectsInvalidValues(t *testing.T) {
 		{name: "OIDC URL", key: oidcIssuerKey, value: "ftp://issuer.example", needle: oidcIssuerKey},
 		{name: "OpenIM API URL", key: openIMAPIURLKey, value: "ws://127.0.0.1", needle: openIMAPIURLKey},
 		{name: "OpenIM WS URL", key: openIMWSURLKey, value: "http://127.0.0.1", needle: openIMWSURLKey},
+		{name: "retrieval projection", key: retrievalProjectionRevisionKey, value: "chunk-content-v1", needle: retrievalProjectionRevisionKey},
 	}
 
 	for _, tt := range tests {
@@ -107,6 +108,7 @@ func validValues() map[string]string {
 		knowledgeMaxAttemptsKey:        "3",
 		retrievalEmbeddingModelKey:     "qwen3-embedding:4b",
 		retrievalEmbeddingDimensionKey: "2560",
+		retrievalProjectionRevisionKey: "document-title-content-v1",
 	}
 }
 

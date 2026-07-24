@@ -8,6 +8,7 @@ member_id="bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
 retrieval_url="http://127.0.0.1:18083"
 generation_url="http://127.0.0.1:18082"
 embedding_model="qwen3-embedding:4b"
+projection_revision="document-title-content-v1"
 generation_model="gpt-5.6-terra"
 reranker_revision="953dc6f6f85a1b2dbfca4c34a2796e7dde08d41e"
 
@@ -46,7 +47,8 @@ import sys
 with open(sys.argv[1], encoding="utf-8") as stream:
     report = json.load(stream)
 expected = {
-    "schema_version": 4,
+    "schema_version": 5,
+    "projection_revision": "document-title-content-v1",
     "cases": 1120,
     "acl_denied_cases": 1120,
 }
@@ -100,9 +102,10 @@ import sys
 with open(sys.argv[1], encoding="utf-8") as stream:
     report = json.load(stream)
 if (
-    report.get("schema_version") != 1
+    report.get("schema_version") != 2
     or report.get("application_commit") != sys.argv[2]
     or report.get("embedding_revision") != "qwen3-embedding:4b"
+    or report.get("projection_revision") != "document-title-content-v1"
     or report.get("reranker_revision")
     != "953dc6f6f85a1b2dbfca4c34a2796e7dde08d41e"
     or report.get("generation_model") != "gpt-5.6-terra"
@@ -132,6 +135,7 @@ else
     -intelligence-url "$retrieval_url" \
     -generation-url "$generation_url" \
     -model "$embedding_model" \
+    -projection-revision "$projection_revision" \
     -generation-model "$generation_model" \
     -generation-answerable 60 \
     -generation-unanswerable 60 \
@@ -154,6 +158,7 @@ trap 'rm -f -- "${generation_tmp:-}" "${final_tmp:-}"' EXIT
   -application-commit "$application_commit" \
   -dataset-revision enterprise-knowledge/v1 \
   -model "$embedding_model" \
+  -projection-revision "$projection_revision" \
   -reranker-revision "$reranker_revision" \
   -generation-model "$generation_model" \
   -qa "$qa" \

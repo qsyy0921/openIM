@@ -75,7 +75,9 @@ func run() error {
 		return err
 	}
 	retriever, err := retrieval.NewStore(pool, embeddingClient, reranker, retrieval.Config{
-		ModelRevision: cfg.RetrievalModelRevision, Dimension: cfg.RetrievalDimension,
+		ModelRevision:      cfg.RetrievalModelRevision,
+		ProjectionRevision: cfg.RetrievalProjectionRevision,
+		Dimension:          cfg.RetrievalDimension,
 		DenseMinSimilarity: cfg.RetrievalDenseMinSimilarity, MaxCandidates: cfg.RetrievalMaxCandidates,
 		RerankerModel: cfg.RetrievalRerankerModel, RerankerRevision: cfg.RetrievalRerankerRevision,
 		HNSWEFSearch: cfg.RetrievalHNSWEFSearch,

@@ -3,6 +3,8 @@ package retrieval
 import (
 	"strings"
 	"testing"
+
+	"github.com/qsyy0921/openim/platform/services/platform-api/internal/knowledgeprojection"
 )
 
 func TestBuildProductionEvaluationReportAppliesLockedGates(t *testing.T) {
@@ -62,20 +64,28 @@ func TestBuildProductionEvaluationReportRejectsUnlockedMetadata(t *testing.T) {
 	if _, err := BuildProductionEvaluationReport(config, validRetrievalEvaluationReport(), validGenerationEvaluationReport()); err == nil {
 		t.Fatal("invalid dataset digest was accepted")
 	}
+	config = validProductionEvaluationConfig()
+	config.ProjectionRevision = knowledgeprojection.HistoricalRevision
+	if _, err := BuildProductionEvaluationReport(config, validRetrievalEvaluationReport(), validGenerationEvaluationReport()); err == nil {
+		t.Fatal("historical projection revision was accepted")
+	}
 }
 
 func validProductionEvaluationConfig() ProductionEvaluationConfig {
 	return ProductionEvaluationConfig{
 		TenantID: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", DatasetRevision: "enterprise-knowledge/v1",
 		DatasetDigest: "sha256:" + strings.Repeat("a", 64), ApplicationCommit: strings.Repeat("b", 40),
-		EmbeddingRevision: "qwen3-embedding:4b", RerankerRevision: LockedRerankerRevision,
-		GenerationModel: LockedGenerationModel,
+		EmbeddingRevision:  "qwen3-embedding:4b",
+		ProjectionRevision: knowledgeprojection.Revision,
+		RerankerRevision:   LockedRerankerRevision,
+		GenerationModel:    LockedGenerationModel,
 	}
 }
 
 func validRetrievalEvaluationReport() EvaluationReport {
 	return EvaluationReport{
-		SchemaVersion: 4, Cases: 1120, AnswerableCases: 1040, UnanswerableCases: 80,
+		SchemaVersion: 5, ProjectionRevision: knowledgeprojection.Revision,
+		Cases: 1120, AnswerableCases: 1040, UnanswerableCases: 80,
 		ACLDeniedCases: 1120, RecallAt5: 0.90, RecallAt10: 0.95, MRR: 0.75,
 		ACLLeakageRate: 0, ProvenanceIntegrity: 1, ChecksumIntegrity: 1,
 	}

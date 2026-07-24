@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/qsyy0921/openim/platform/services/platform-api/internal/knowledgeprojection"
 )
 
 func TestStoreIngestionPublicationAndImmediateRevocation(t *testing.T) {
@@ -52,18 +53,19 @@ VALUES ($1::uuid, $2::uuid, 'test', $3, 'Knowledge admin', 'active')`,
 	})
 	store, err := NewStore(pool, StoreConfig{
 		Bucket: "knowledge-test", ParserRevision: ParserRevision,
-		EmbeddingRevision: "qwen3-embedding:4b", EmbeddingDimension: 2560, MaxAttempts: 3,
+		EmbeddingRevision: "qwen3-embedding:4b", EmbeddingDimension: 2560,
+		ProjectionRevision: knowledgeprojection.Revision, MaxAttempts: 3,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	checksum := checksumText("Retention policy is seven years.")
+	checksum := checksumText("The records are retained for seven years.")
 	command := UploadCommand{
-		TenantID: tenantID, ActorMemberID: memberID, Title: "Retention policy",
+		TenantID: tenantID, ActorMemberID: memberID, Title: "Governance handbook",
 		Classification: "internal", IdempotencyKey: "knowledge-integration-upload-1",
 		File: UploadFile{
 			OriginalFilename: "retention.txt", DeclaredType: "text/plain", DetectedType: "text/plain",
-			Format: FormatText, Size: 32, Checksum: checksum,
+			Format: FormatText, Size: 41, Checksum: checksum,
 		},
 	}
 	reservation, err := store.ReserveUpload(ctx, command)
@@ -86,7 +88,7 @@ VALUES ($1::uuid, $2::uuid, 'test', $3, 'Knowledge admin', 'active')`,
 	if err := store.RenewJobLease(ctx, job, 5*time.Minute); err != nil {
 		t.Fatalf("renew job lease: %v", err)
 	}
-	chunks, err := ChunkSections(reservation.VersionID, []Section{{Heading: "Retention", Text: "Retention policy is seven years."}})
+	chunks, err := ChunkSections(reservation.VersionID, []Section{{Heading: "Retention", Text: "The records are retained for seven years."}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -120,6 +122,22 @@ WHERE document.tenant_id = $1::uuid AND document.id = $2::uuid`,
 	}
 	if currentVersion != reservation.VersionID || projectionCount != 1 {
 		t.Fatalf("publication projection mismatch: current=%s count=%d", currentVersion, projectionCount)
+	}
+	var titleIndexed bool
+	if err := pool.QueryRow(ctx, `
+SELECT search.search_vector @@ to_tsquery('simple', 'governance')
+FROM knowledge.chunk_search_indexes AS search
+JOIN knowledge.index_generations AS generation
+  ON generation.id = search.generation_id
+WHERE search.tenant_id = $1::uuid
+  AND search.chunk_id = $2::uuid
+  AND generation.state = 'active'
+  AND generation.projection_revision = $3`,
+		tenantID, chunks[0].ID, knowledgeprojection.Revision).Scan(&titleIndexed); err != nil {
+		t.Fatal(err)
+	}
+	if !titleIndexed {
+		t.Fatal("document title was not included in the active lexical projection")
 	}
 	documents, err := store.ListDocuments(ctx, tenantID)
 	if err != nil || len(documents) != 1 || documents[0].GrantCount != 1 ||
@@ -212,7 +230,8 @@ VALUES ($1::uuid, $2::uuid, 'test', $3, 'Cleanup admin', 'active')`,
 	})
 	store, err := NewStore(pool, StoreConfig{
 		Bucket: "knowledge-cleanup", ParserRevision: ParserRevision,
-		EmbeddingRevision: "qwen3-embedding:4b", EmbeddingDimension: 2560, MaxAttempts: 3,
+		EmbeddingRevision: "qwen3-embedding:4b", EmbeddingDimension: 2560,
+		ProjectionRevision: knowledgeprojection.Revision, MaxAttempts: 3,
 	})
 	if err != nil {
 		t.Fatal(err)

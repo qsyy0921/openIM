@@ -10,6 +10,7 @@ depends_on:
   - adr-0003
   - adr-0007
   - adr-0010
+  - adr-0011
 ---
 
 # Enterprise Knowledge RAG
@@ -271,6 +272,60 @@ Bucket, URL, SQL identifier, log field, or authorization decision.
   outside database transactions; all completed batches are validated before
   deterministic persistence. Any request failure fails the generation and
   never selects another model or endpoint.
+- Node2 uses four texts per request and two concurrent requests by default.
+  A 2026-07-25 benchmark on real title-plus-content projections measured a warm
+  four-text batch at `56.920s`, eight texts at `121.823s`, and a sixteen-text
+  batch exceeded the Worker's fixed `180s` dependency timeout. Higher
+  concurrency remains an explicit operator override, not an automatic retry or
+  fallback.
+- Production deployment enumerates the PostgreSQL tenants that own a current
+  published knowledge version and invokes the index builder once per tenant.
+  It does not use the evaluation tenant as a production default. Every returned
+  generation must be active, use `document-title-content-v1`, and report a
+  positive exact `indexed_chunks == expected_chunks` count before Agent and
+  ingestion services restart.
+
+## Retrieval-quality remediation (implemented locally; activation proposed)
+
+The first complete schema-v4 Node2 retrieval evaluation finished all 1,120
+cases but failed the release gate: Recall@5 was `0.768269`, Recall@10 was
+`0.848077`, MRR was `0.480470`, and 158 answerable cases did not retrieve their
+expected evidence. ACL leakage and stale-version leakage remained `0`, while
+provenance and checksum integrity remained `1.0`. The gated generation service
+therefore stopped before making any Terra request.
+
+The failure is concentrated in `single_document`, `version_awareness`, and
+`numeric` questions. A read-only replay of the lexical candidate query found the
+expected evidence in the lexical Top-32 for only 39 of the 158 failed cases; the
+other 119 had a lexical match below Top-32. Source inspection of the evaluated
+implementation explains this candidate-recall loss:
+
+- ingestion and bulk reindex embed only `chunk.content`;
+- the FTS projection is derived only from `chunk.content`;
+- the reranker receives only `chunk.content`;
+- the authorized SQL already loads `document.title`, but the title is not part
+  of any retrieval-model input;
+- dataset questions often identify the governing document or topic by title
+  while the relevant Chunk contains only the section body.
+
+ADR-0011 defines one deterministic
+`document-title-content-v1` retrieval projection. It concatenates the
+authorized current document title and original Chunk content for embedding,
+lexical indexing, and reranking. The original Chunk body, checksum, Citation
+excerpt, and authorization predicates do not change.
+
+Migration 0033 and the application now make the projection contract explicit in
+ingestion jobs, index generations, search rows, EvaluationRuns, configuration,
+and reports. A new application fails closed when only the historical
+`chunk-content-v1` generation is active; it must build, verify, and atomically
+activate the new projection instead of silently reusing the old index.
+Disposable PostgreSQL 17/pgvector 0.8.5 upgrade, fresh-install, repeat-run,
+historical-backfill, and Knowledge/Retrieval integration checks pass.
+
+Production activation remains **proposed** until a bounded failed-case
+regression passes. Only then may the full 1,120-case evaluation be started
+again. Thresholds, candidate limits, models, ACL order, and no-fallback
+behavior remain unchanged.
 
 ## Retrieval flow
 
@@ -468,7 +523,7 @@ Record bounded metadata only:
 - active model/index revisions;
 - evaluation run ID, dataset digest, metrics, and failure QA IDs.
 
-The finalizer accepts only schema-v4 retrieval and locked Terra generation
+The finalizer accepts only schema-v5 retrieval and locked Terra generation
 reports, recomputes the QA file digest, applies the frozen thresholds, derives a
 deterministic EvaluationRun ID, and records one idempotent terminal row in
 `knowledge.evaluation_runs`.

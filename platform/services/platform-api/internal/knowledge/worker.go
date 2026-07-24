@@ -12,6 +12,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/qsyy0921/openim/platform/services/platform-api/internal/knowledgeprojection"
 )
 
 type JobRepository interface {
@@ -178,6 +180,14 @@ func (w *Worker) renewLease(ctx context.Context, job Job, cancel context.CancelF
 }
 
 func (w *Worker) buildIndex(ctx context.Context, job Job) ([]IndexedChunk, error) {
+	if job.ProjectionRevision != knowledgeprojection.Revision ||
+		strings.TrimSpace(job.DocumentTitle) == "" {
+		return nil, processingError(
+			"PROJECTION_CONTRACT_VIOLATION",
+			"knowledge retrieval projection revision is invalid",
+			false,
+		)
+	}
 	directory, err := os.MkdirTemp(w.config.TempDirectory, "knowledge-"+job.ID+"-")
 	if err != nil {
 		return nil, processingError("TEMPORARY_STORAGE_FAILED", "temporary ingestion directory cannot be created", true)
@@ -203,7 +213,15 @@ func (w *Worker) buildIndex(ctx context.Context, job Job) ([]IndexedChunk, error
 		end := min(start+w.config.BatchSize, len(chunks))
 		texts := make([]string, end-start)
 		for index := start; index < end; index++ {
-			texts[index-start] = chunks[index].Content
+			projection, err := knowledgeprojection.Build(job.DocumentTitle, chunks[index].Content)
+			if err != nil {
+				return nil, processingError(
+					"PROJECTION_CONTRACT_VIOLATION",
+					"knowledge retrieval projection input is invalid",
+					false,
+				)
+			}
+			texts[index-start] = projection.Text
 		}
 		batch, err := w.embedder.Embed(ctx, texts)
 		if err != nil {

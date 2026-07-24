@@ -9,6 +9,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/qsyy0921/openim/platform/services/platform-api/internal/knowledgeprojection"
 )
 
 const (
@@ -31,6 +33,7 @@ const (
 	knowledgeMaxAttemptsKey        = "PLATFORM_KNOWLEDGE_INGESTION_MAX_ATTEMPTS"
 	retrievalEmbeddingModelKey     = "PLATFORM_RETRIEVAL_EMBEDDING_MODEL"
 	retrievalEmbeddingDimensionKey = "PLATFORM_RETRIEVAL_EMBEDDING_DIMENSION"
+	retrievalProjectionRevisionKey = "PLATFORM_RETRIEVAL_PROJECTION_REVISION"
 )
 
 type Config struct {
@@ -53,6 +56,7 @@ type Config struct {
 	KnowledgeMaxAttempts        int
 	RetrievalEmbeddingModel     string
 	RetrievalEmbeddingDimension int
+	RetrievalProjectionRevision string
 	A2AAllowedHosts             []string
 	A2AAllowedPrivateCIDRs      []string
 	A2ATimeout                  time.Duration
@@ -157,6 +161,17 @@ func Load(lookup LookupEnv) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	retrievalProjectionRevision, err := required(lookup, retrievalProjectionRevisionKey)
+	if err != nil {
+		return Config{}, err
+	}
+	if retrievalProjectionRevision != knowledgeprojection.Revision {
+		return Config{}, fmt.Errorf(
+			"%s: must equal %s",
+			retrievalProjectionRevisionKey,
+			knowledgeprojection.Revision,
+		)
+	}
 	a2aHosts := optionalCSV(lookup, "PLATFORM_A2A_ALLOWED_HOSTS")
 	var a2aTimeout time.Duration
 	if len(a2aHosts) > 0 {
@@ -186,6 +201,7 @@ func Load(lookup LookupEnv) (Config, error) {
 		KnowledgeMaxAttempts:        knowledgeMaxAttempts,
 		RetrievalEmbeddingModel:     retrievalEmbeddingModel,
 		RetrievalEmbeddingDimension: retrievalEmbeddingDimension,
+		RetrievalProjectionRevision: retrievalProjectionRevision,
 		A2AAllowedHosts:             a2aHosts,
 		A2AAllowedPrivateCIDRs:      optionalCSV(lookup, "PLATFORM_A2A_ALLOWED_PRIVATE_CIDRS"),
 		A2ATimeout:                  a2aTimeout,

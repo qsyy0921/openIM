@@ -1,6 +1,6 @@
 # OpenIM 企业知识库 RAG 评测报告
 
-- 状态：`in_progress`
+- 状态：`retrieval_gate_failed`
 - 数据集：`enterprise-knowledge/v1`
 - 数据集发布摘要：
   `sha256:35fe1582af8f380cabd5d80f5fd2a19f099055ec2e7056df0a5c521658ffa157`
@@ -50,14 +50,14 @@ Judge 代替确定性 ACL、checksum、金标事实和引用集合判断。
 
 | 门槛 | 要求 | 当前 |
 | --- | ---: | --- |
-| 全量检索样本 | 1,120 | 运行中 |
-| Recall@5 | >= 0.85 | 待结果 |
-| Recall@10 对比历史 Recall@8 | >= 0.928846 | 待结果 |
-| MRR | >= 0.70 | 待结果 |
-| ACL leakage | 0 | 待结果 |
-| 旧版本泄漏 | 0 | 待结果 |
-| 来源与 checksum 完整性 | 1.0 | 待结果 |
-| 生成样本 | >= 120 | 待运行 |
+| 全量检索样本 | 1,120 | 1,120，完成 |
+| Recall@5 | >= 0.85 | 0.768269，失败 |
+| Recall@10 对比历史 Recall@8 | >= 0.928846 | 0.848077，失败 |
+| MRR | >= 0.70 | 0.480470，失败 |
+| ACL leakage | 0 | 0，通过 |
+| 旧版本泄漏 | 0 | 0，通过 |
+| 来源与 checksum 完整性 | 1.0 | 1.0，通过 |
+| 生成样本 | >= 120 | 前置门槛失败，未运行 |
 | Candidate 契约成功率 | 1.0 | 待结果 |
 | 不可回答拒答 | >= 0.95 | 待结果 |
 | 引用 Precision | >= 0.95 | 待结果 |
@@ -107,17 +107,34 @@ Node2 长任务由 `ops/run-node2-enterprise-rag-evaluation.sh` 串联后两段�
   `520 documents / 624 versions / 3224 chunks / 520 grants / 2 members`；
 - ACL、撤权、旧版本、checksum、伪引用、固定 reranker/no-fallback 和
   EvaluationRun 幂等集成测试通过；
-- 全量检索评测已于 2026-07-24 01:35 +08:00 使用与发布包一致的
-  `knowledge-rag-admin` SHA-256 `430a3082...8818` 启动；门槛检查后的
-  Terra 生成评测已排队，尚未把运行中状态记为通过；
-- 2026-07-24 14:05 +08:00 的只读检查显示已完成 `664/1120` 次重排，
-  另有一次 32 候选重排正在执行；Worker 约占用 24 个 CPU 核，已完成
-  重排平均耗时约 `66.8s`。检索、生成和最终报告均尚未生成，因此该证据
-  只证明评测仍在 CPU 满载推进，不代表任何指标已通过，也不应重启评测；
-- Terra 120 条生成评测、Node2 导入和 Web/OpenIM/Telegram E2E 尚未
+- 全量检索评测使用与发布包一致的 `knowledge-rag-admin` SHA-256
+  `430a3082...8818` 完成 1,120 条样本。结果为 Recall@5 `0.768269`、
+  Recall@10 `0.848077`、MRR `0.480470`、nDCG@10 `0.515241`、
+  Precision@5 `0.182115`、Precision@10 `0.105000`；
+- 1,040 条可回答问题中有 158 条未召回金标证据。ACL leakage 和旧版本
+  leakage 都是 `0`，provenance 与 checksum integrity 都是 `1.0`；
+- `openim-rag-retrieval-evaluation` 正常退出。门禁随后以
+  `retrieval gate failed: recall_at_5` 阻止
+  `openim-rag-generation-evaluation`，因此不存在生成报告或最终报告，
+  也没有把接口探测冒充生成评测；
+- 失败分布集中在 `single_document`、`version_awareness` 和 `numeric`。
+  对 158 条失败用同一 ACL/current-version 条件做只读词法候选诊断：
+  39 条金标位于 Top-32，119 条位于 Top-32 之后，0 条完全无词法匹配；
+- 源码调查确认当前 embedding、FTS 和 reranker 都只接收 Chunk 正文，
+  没有使用 SQL 已授权加载的文档标题。ADR-0011 已将
+  `document-title-content-v1` 标为 proposed；
+- ADR-0011 的代码和迁移 0033 已完成本地精确测试，并在 Node2 的隔离
+  PostgreSQL 17/pgvector 0.8.5 中通过 0032 升级、四类历史行回填、全新
+  安装、重复执行和真实 Knowledge/Retrieval 集成测试。该证据不等于
+  评测数据库迁移或新索引激活；在 158 条失败集小规模回归通过前，不重跑
+  全量评测；
+- Terra 120 条生成评测、生产发布和 Web/OpenIM/Telegram E2E 尚未
   完成。
 
 ## 7. 最终结论
 
-待全量报告、Node2 三通道和故障注入完成后填写。在此之前，本报告不声称
-企业知识库生产验收通过。
+当前实现未通过检索质量门槛，不能进入生成评测或生产切换。安全与完整性
+指标通过只说明 ACL-first 边界保持正确，不代表检索质量合格。下一步是按
+ADR-0011 实现版本化结构感知投影，先做失败集回归，再决定是否重跑全量。
+在完整门槛、Node2 三通道和故障注入完成前，本报告不声称企业知识库生产
+验收通过。

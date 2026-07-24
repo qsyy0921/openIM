@@ -118,6 +118,7 @@ type Job struct {
 	ID                 string
 	TenantID           string
 	DocumentID         string
+	DocumentTitle      string
 	VersionID          string
 	Bucket             string
 	ObjectKey          string
@@ -130,6 +131,7 @@ type Job struct {
 	ParserRevision     string
 	EmbeddingRevision  string
 	EmbeddingDimension int
+	ProjectionRevision string
 }
 
 type ObjectCleanup struct {
@@ -153,7 +155,6 @@ type Chunk struct {
 	Ordinal  int
 	Content  string
 	Checksum string
-	Lexemes  string
 }
 
 type IndexedChunk struct {

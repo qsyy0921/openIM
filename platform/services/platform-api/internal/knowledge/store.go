@@ -15,6 +15,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/qsyy0921/openim/platform/services/platform-api/internal/knowledgeprojection"
 )
 
 type StoreConfig struct {
@@ -22,6 +23,7 @@ type StoreConfig struct {
 	ParserRevision     string
 	EmbeddingRevision  string
 	EmbeddingDimension int
+	ProjectionRevision string
 	MaxAttempts        int
 }
 
@@ -34,6 +36,7 @@ func NewStore(pool *pgxpool.Pool, config StoreConfig) (*Store, error) {
 	if pool == nil || len(config.Bucket) < 3 || len(config.Bucket) > 63 ||
 		strings.TrimSpace(config.ParserRevision) == "" ||
 		strings.TrimSpace(config.EmbeddingRevision) == "" ||
+		config.ProjectionRevision != knowledgeprojection.Revision ||
 		config.EmbeddingDimension != 2560 || config.MaxAttempts < 1 || config.MaxAttempts > 8 {
 		return nil, errors.New("knowledge store configuration is invalid")
 	}
@@ -243,10 +246,11 @@ WHERE tenant_id = $1::uuid AND id = $2::uuid AND ingestion_state = 'uploading'`,
 	if _, err := tx.Exec(ctx, `
 INSERT INTO knowledge.ingestion_jobs
     (id, tenant_id, document_id, version_id, state, max_attempts,
-     parser_revision, embedding_revision, embedding_dimension)
-VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, 'queued', $5, $6, $7, $8)`,
+     parser_revision, embedding_revision, embedding_dimension, projection_revision)
+VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, 'queued', $5, $6, $7, $8, $9)`,
 		jobID, tenantID, reservation.DocumentID, reservation.VersionID, s.config.MaxAttempts,
-		s.config.ParserRevision, s.config.EmbeddingRevision, s.config.EmbeddingDimension); err != nil {
+		s.config.ParserRevision, s.config.EmbeddingRevision, s.config.EmbeddingDimension,
+		s.config.ProjectionRevision); err != nil {
 		return fmt.Errorf("create knowledge ingestion job: %w", err)
 	}
 	if err := auditKnowledge(ctx, tx, tenantID, actorMemberID, reservation.DocumentID, reservation.VersionID, jobID,
@@ -495,12 +499,12 @@ FOR UPDATE OF version, document`, tenantID, documentID, versionID).Scan(&ingesti
 	if classification != "public" && classification != "internal" {
 		return ErrConflict
 	}
-	var generationID, modelRevision string
+	var generationID, modelRevision, projectionRevision string
 	if err := tx.QueryRow(ctx, `
-SELECT id::text, model_revision
+SELECT id::text, model_revision, projection_revision
 FROM knowledge.index_generations
 WHERE tenant_id = $1::uuid AND state = 'active'
-FOR UPDATE`, tenantID).Scan(&generationID, &modelRevision); err != nil {
+FOR UPDATE`, tenantID).Scan(&generationID, &modelRevision, &projectionRevision); err != nil {
 		return fmt.Errorf("load active knowledge index generation: %w", err)
 	}
 	var chunks, projections int
@@ -508,7 +512,8 @@ FOR UPDATE`, tenantID).Scan(&generationID, &modelRevision); err != nil {
 SELECT count(*)::integer,
        count(index.chunk_id) FILTER (
            WHERE index.model_revision = $4
-             AND index.dimension = $5
+             AND index.projection_revision = $5
+             AND index.dimension = $6
              AND index.content_checksum = chunk.checksum
        )::integer
 FROM knowledge.chunks AS chunk
@@ -516,10 +521,13 @@ LEFT JOIN knowledge.chunk_search_indexes AS index
   ON index.tenant_id = chunk.tenant_id AND index.chunk_id = chunk.id
  AND index.generation_id = $3::uuid
 WHERE chunk.tenant_id = $1::uuid AND chunk.version_id = $2::uuid`,
-		tenantID, versionID, generationID, modelRevision, s.config.EmbeddingDimension).Scan(&chunks, &projections); err != nil {
+		tenantID, versionID, generationID, modelRevision, projectionRevision,
+		s.config.EmbeddingDimension).Scan(&chunks, &projections); err != nil {
 		return fmt.Errorf("verify knowledge publication projection: %w", err)
 	}
-	if chunks < 1 || projections != chunks || modelRevision != s.config.EmbeddingRevision {
+	if chunks < 1 || projections != chunks ||
+		modelRevision != s.config.EmbeddingRevision ||
+		projectionRevision != s.config.ProjectionRevision {
 		return ErrConflict
 	}
 	if _, err := tx.Exec(ctx, `
@@ -547,7 +555,8 @@ WHERE tenant_id = $1::uuid AND id = $2::uuid`, tenantID, documentID, versionID);
 		return err
 	}
 	if err := auditKnowledge(ctx, tx, tenantID, actorMemberID, documentID, versionID, "", "version_published",
-		`jsonb_build_object('generation_id', $6::text)`, generationID); err != nil {
+		`jsonb_build_object('generation_id', $6::text, 'projection_revision', $7::text)`,
+		generationID, projectionRevision); err != nil {
 		return err
 	}
 	if err := tx.Commit(ctx); err != nil {
@@ -802,17 +811,22 @@ SET state = 'leased',
     failure_code = NULL,
     failure_detail = NULL,
     updated_at = now()
-FROM candidate, knowledge.document_source_objects AS source
-WHERE job.id = candidate.id AND source.version_id = job.version_id
+FROM candidate, knowledge.document_source_objects AS source,
+     knowledge.documents AS document
+WHERE job.id = candidate.id
+  AND source.version_id = job.version_id
+  AND document.tenant_id = job.tenant_id
+  AND document.id = job.document_id
 RETURNING job.id::text, job.tenant_id::text, job.document_id::text, job.version_id::text,
-          source.bucket, source.object_key, source.source_format, source.size_bytes,
+          document.title, source.bucket, source.object_key, source.source_format, source.size_bytes,
           source.checksum, job.lease_token::text, job.attempts, job.max_attempts,
-          job.parser_revision, job.embedding_revision, job.embedding_dimension`,
+          job.parser_revision, job.embedding_revision, job.embedding_dimension,
+          job.projection_revision`,
 		owner, leaseToken, leaseSeconds).Scan(
-		&job.ID, &job.TenantID, &job.DocumentID, &job.VersionID, &job.Bucket,
+		&job.ID, &job.TenantID, &job.DocumentID, &job.VersionID, &job.DocumentTitle, &job.Bucket,
 		&job.ObjectKey, &job.SourceFormat, &job.SizeBytes, &job.Checksum, &job.LeaseToken,
 		&job.Attempts, &job.MaxAttempts, &job.ParserRevision, &job.EmbeddingRevision,
-		&job.EmbeddingDimension,
+		&job.EmbeddingDimension, &job.ProjectionRevision,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		if err := tx.Commit(ctx); err != nil {
@@ -861,6 +875,8 @@ func (s *Store) CompleteJob(ctx context.Context, job Job, chunks []IndexedChunk)
 	if job.ParserRevision != s.config.ParserRevision ||
 		job.EmbeddingRevision != s.config.EmbeddingRevision ||
 		job.EmbeddingDimension != s.config.EmbeddingDimension ||
+		job.ProjectionRevision != s.config.ProjectionRevision ||
+		strings.TrimSpace(job.DocumentTitle) == "" ||
 		len(chunks) < 1 || len(chunks) > maxChunksPerVersion {
 		return ErrInvalidInput
 	}
@@ -904,6 +920,10 @@ WHERE tenant_id = $1::uuid AND version_id = $2::uuid`, job.TenantID, job.Version
 		return fmt.Errorf("replace knowledge chunks: %w", err)
 	}
 	for _, chunk := range chunks {
+		projection, err := knowledgeprojection.Build(job.DocumentTitle, chunk.Content)
+		if err != nil {
+			return ErrInvalidInput
+		}
 		if _, err := tx.Exec(ctx, `
 INSERT INTO knowledge.chunks
     (id, tenant_id, document_id, version_id, ordinal, content, checksum)
@@ -914,13 +934,13 @@ VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, $5, $6, $7)`,
 		}
 		if _, err := tx.Exec(ctx, `
 INSERT INTO knowledge.chunk_search_indexes
-    (generation_id, tenant_id, chunk_id, model_revision, dimension,
-     content_checksum, embedding, search_vector, normalized)
-VALUES ($1::uuid, $2::uuid, $3::uuid, $4, $5, $6, $7::halfvec,
-        to_tsvector('simple', $8), true)`,
+    (generation_id, tenant_id, chunk_id, model_revision, projection_revision,
+     dimension, content_checksum, embedding, search_vector, normalized)
+VALUES ($1::uuid, $2::uuid, $3::uuid, $4, $5, $6, $7, $8::halfvec,
+        to_tsvector('simple', $9), true)`,
 			generationID, job.TenantID, chunk.ID, job.EmbeddingRevision,
-			job.EmbeddingDimension, chunk.Checksum, halfVectorLiteral(chunk.Embedding),
-			chunk.Lexemes); err != nil {
+			job.ProjectionRevision, job.EmbeddingDimension, chunk.Checksum,
+			halfVectorLiteral(chunk.Embedding), projection.Lexemes); err != nil {
 			return fmt.Errorf("index knowledge chunk %d: %w", chunk.Ordinal, err)
 		}
 	}
@@ -1006,15 +1026,18 @@ WHERE tenant_id = $1::uuid AND id = $2::uuid`,
 }
 
 func (s *Store) ensureActiveGeneration(ctx context.Context, tx pgx.Tx, tenantID string) (string, error) {
-	var generationID, model string
+	var generationID, model, projection string
 	err := tx.QueryRow(ctx, `
-SELECT id::text, model_revision
+SELECT id::text, model_revision, projection_revision
 FROM knowledge.index_generations
 WHERE tenant_id = $1::uuid AND state = 'active'
-FOR UPDATE`, tenantID).Scan(&generationID, &model)
+FOR UPDATE`, tenantID).Scan(&generationID, &model, &projection)
 	if err == nil {
 		if model != s.config.EmbeddingRevision {
 			return "", errors.New("active knowledge index uses a different embedding revision")
+		}
+		if projection != s.config.ProjectionRevision {
+			return "", errors.New("active knowledge index uses a different projection revision")
 		}
 		return generationID, nil
 	}
@@ -1027,11 +1050,12 @@ FOR UPDATE`, tenantID).Scan(&generationID, &model)
 	}
 	if _, err := tx.Exec(ctx, `
 INSERT INTO knowledge.index_generations
-    (id, tenant_id, model_revision, dimension, storage_type, distance_metric,
-     state, expected_chunk_count, indexed_chunk_count, activated_at)
-VALUES ($1::uuid, $2::uuid, $3, $4, 'halfvec', 'cosine',
+    (id, tenant_id, model_revision, projection_revision, dimension, storage_type,
+     distance_metric, state, expected_chunk_count, indexed_chunk_count, activated_at)
+VALUES ($1::uuid, $2::uuid, $3, $4, $5, 'halfvec', 'cosine',
         'active', 0, 0, now())`,
-		generationID, tenantID, s.config.EmbeddingRevision, s.config.EmbeddingDimension); err != nil {
+		generationID, tenantID, s.config.EmbeddingRevision,
+		s.config.ProjectionRevision, s.config.EmbeddingDimension); err != nil {
 		return "", fmt.Errorf("create active knowledge index generation: %w", err)
 	}
 	return generationID, nil

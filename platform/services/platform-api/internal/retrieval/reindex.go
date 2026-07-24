@@ -10,6 +10,7 @@ import (
 	"sync"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/qsyy0921/openim/platform/services/platform-api/internal/knowledgeprojection"
 )
 
 const (
@@ -18,15 +19,17 @@ const (
 )
 
 type ReindexStats struct {
-	GenerationID string `json:"generation_id"`
-	State        string `json:"state"`
-	Expected     int    `json:"expected_chunks"`
-	Indexed      int    `json:"indexed_chunks"`
-	Activated    bool   `json:"activated"`
+	GenerationID       string `json:"generation_id"`
+	ProjectionRevision string `json:"projection_revision"`
+	State              string `json:"state"`
+	Expected           int    `json:"expected_chunks"`
+	Indexed            int    `json:"indexed_chunks"`
+	Activated          bool   `json:"activated"`
 }
 
 type reindexItem struct {
 	ChunkID  string
+	Title    string
 	Content  string
 	Checksum string
 }
@@ -121,7 +124,12 @@ func (s *Store) embedReindexBatches(
 			defer wait.Done()
 			texts := make([]string, len(results[index].items))
 			for itemIndex, item := range results[index].items {
-				texts[itemIndex] = item.Content
+				projection, err := knowledgeprojection.Build(item.Title, item.Content)
+				if err != nil {
+					results[index].err = fmt.Errorf("build knowledge reindex projection: %w", err)
+					return
+				}
+				texts[itemIndex] = projection.Text
 			}
 			batch, err := s.embedder.Embed(ctx, texts)
 			if err == nil {
@@ -149,21 +157,24 @@ func (s *Store) beginIndexGeneration(ctx context.Context, tenantID string) (Rein
 	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtext($1))`, tenantID); err != nil {
 		return ReindexStats{}, fmt.Errorf("lock knowledge reindex generation: %w", err)
 	}
-	var currentID, currentModel string
+	var currentID, currentModel, currentProjection string
 	var currentDimension, currentExpected, currentIndexed int
 	err = tx.QueryRow(ctx, `
-SELECT id::text, model_revision, dimension, expected_chunk_count, indexed_chunk_count
+SELECT id::text, model_revision, projection_revision, dimension,
+       expected_chunk_count, indexed_chunk_count
 FROM knowledge.index_generations
 WHERE tenant_id = $1::uuid AND state = 'active'
 FOR UPDATE`, tenantID).Scan(
-		&currentID, &currentModel, &currentDimension, &currentExpected, &currentIndexed,
+		&currentID, &currentModel, &currentProjection, &currentDimension,
+		&currentExpected, &currentIndexed,
 	)
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		return ReindexStats{}, fmt.Errorf("load active knowledge index generation: %w", err)
 	}
 	if err == nil && currentModel == s.config.ModelRevision &&
+		currentProjection == s.config.ProjectionRevision &&
 		currentDimension == s.config.Dimension {
-		expected, indexed, countErr := countGeneration(ctx, tx, tenantID, currentID)
+		expected, indexed, countErr := s.countGeneration(ctx, tx, tenantID, currentID)
 		if countErr != nil {
 			return ReindexStats{}, countErr
 		}
@@ -181,7 +192,8 @@ WHERE tenant_id = $1::uuid AND id = $2::uuid AND state = 'active'`,
 			return ReindexStats{}, fmt.Errorf("commit existing knowledge index generation: %w", err)
 		}
 		return ReindexStats{
-			GenerationID: currentID, State: "active", Expected: expected,
+			GenerationID: currentID, ProjectionRevision: currentProjection,
+			State: "active", Expected: expected,
 			Indexed: indexed, Activated: true,
 		}, nil
 	}
@@ -190,10 +202,11 @@ WHERE tenant_id = $1::uuid AND id = $2::uuid AND state = 'active'`,
 SELECT id::text
 FROM knowledge.index_generations
 WHERE tenant_id = $1::uuid AND model_revision = $2 AND dimension = $3
-  AND state = 'building'
+  AND projection_revision = $4 AND state = 'building'
 ORDER BY created_at, id
 LIMIT 1
-FOR UPDATE`, tenantID, s.config.ModelRevision, s.config.Dimension).Scan(&generationID)
+FOR UPDATE`, tenantID, s.config.ModelRevision, s.config.Dimension,
+		s.config.ProjectionRevision).Scan(&generationID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		generationID, err = randomReindexUUID()
 		if err != nil {
@@ -201,15 +214,17 @@ FOR UPDATE`, tenantID, s.config.ModelRevision, s.config.Dimension).Scan(&generat
 		}
 		if _, err := tx.Exec(ctx, `
 INSERT INTO knowledge.index_generations
-    (id, tenant_id, model_revision, dimension, storage_type, distance_metric, state)
-VALUES ($1::uuid, $2::uuid, $3, $4, 'halfvec', 'cosine', 'building')`,
-			generationID, tenantID, s.config.ModelRevision, s.config.Dimension); err != nil {
+    (id, tenant_id, model_revision, projection_revision, dimension,
+     storage_type, distance_metric, state)
+VALUES ($1::uuid, $2::uuid, $3, $4, $5, 'halfvec', 'cosine', 'building')`,
+			generationID, tenantID, s.config.ModelRevision,
+			s.config.ProjectionRevision, s.config.Dimension); err != nil {
 			return ReindexStats{}, fmt.Errorf("create knowledge index generation: %w", err)
 		}
 	} else if err != nil {
 		return ReindexStats{}, fmt.Errorf("load building knowledge index generation: %w", err)
 	}
-	expected, indexed, err := countGeneration(ctx, tx, tenantID, generationID)
+	expected, indexed, err := s.countGeneration(ctx, tx, tenantID, generationID)
 	if err != nil {
 		return ReindexStats{}, err
 	}
@@ -224,14 +239,15 @@ WHERE tenant_id = $1::uuid AND id = $2::uuid AND state = 'building'`,
 		return ReindexStats{}, fmt.Errorf("commit building knowledge index generation: %w", err)
 	}
 	return ReindexStats{
-		GenerationID: generationID, State: "building",
+		GenerationID: generationID, ProjectionRevision: s.config.ProjectionRevision,
+		State:    "building",
 		Expected: expected, Indexed: indexed,
 	}, nil
 }
 
 func (s *Store) loadReindexBatch(ctx context.Context, tenantID, generationID string, limit int) ([]reindexItem, error) {
 	rows, err := s.pool.Query(ctx, `
-SELECT chunk.id::text, chunk.content, chunk.checksum
+SELECT chunk.id::text, document.title, chunk.content, chunk.checksum
 FROM knowledge.documents AS document
 JOIN knowledge.document_versions AS version
   ON version.tenant_id = document.tenant_id
@@ -246,7 +262,8 @@ LEFT JOIN knowledge.chunk_search_indexes AS search
  AND search.chunk_id = chunk.id
  AND search.generation_id = $2::uuid
  AND search.model_revision = $3
- AND search.dimension = $4
+ AND search.projection_revision = $4
+ AND search.dimension = $5
  AND search.content_checksum = chunk.checksum
 WHERE document.tenant_id = $1::uuid
   AND document.status = 'active'
@@ -254,7 +271,8 @@ WHERE document.tenant_id = $1::uuid
   AND version.ingestion_state IN ('legacy_indexed', 'indexed')
   AND search.chunk_id IS NULL
 ORDER BY chunk.id
-LIMIT $5`, tenantID, generationID, s.config.ModelRevision, s.config.Dimension, limit)
+LIMIT $6`, tenantID, generationID, s.config.ModelRevision,
+		s.config.ProjectionRevision, s.config.Dimension, limit)
 	if err != nil {
 		return nil, fmt.Errorf("load knowledge reindex batch: %w", err)
 	}
@@ -262,7 +280,7 @@ LIMIT $5`, tenantID, generationID, s.config.ModelRevision, s.config.Dimension, l
 	items := make([]reindexItem, 0, limit)
 	for rows.Next() {
 		var item reindexItem
-		if err := rows.Scan(&item.ChunkID, &item.Content, &item.Checksum); err != nil {
+		if err := rows.Scan(&item.ChunkID, &item.Title, &item.Content, &item.Checksum); err != nil {
 			return nil, fmt.Errorf("scan knowledge reindex chunk: %w", err)
 		}
 		items = append(items, item)
@@ -285,16 +303,16 @@ func (s *Store) persistReindexBatch(ctx context.Context, tenantID, generationID 
 		if err != nil {
 			return 0, fmt.Errorf("normalize knowledge reindex chunk: %w", err)
 		}
-		lexemes := strings.Join(lexicalTerms(item.Content), " ")
-		if lexemes == "" {
-			return 0, errors.New("knowledge reindex chunk has no lexical projection")
+		projection, err := knowledgeprojection.Build(item.Title, item.Content)
+		if err != nil {
+			return 0, fmt.Errorf("build knowledge reindex projection: %w", err)
 		}
 		result, err := tx.Exec(ctx, `
 INSERT INTO knowledge.chunk_search_indexes
-    (generation_id, tenant_id, chunk_id, model_revision, dimension,
-     content_checksum, embedding, search_vector, normalized)
-SELECT $2::uuid, chunk.tenant_id, chunk.id, $3, $4, chunk.checksum,
-       $5::halfvec, to_tsvector('simple', $6), true
+    (generation_id, tenant_id, chunk_id, model_revision, projection_revision,
+     dimension, content_checksum, embedding, search_vector, normalized)
+SELECT $2::uuid, chunk.tenant_id, chunk.id, $3, $4, $5, chunk.checksum,
+       $6::halfvec, to_tsvector('simple', $7), true
 FROM knowledge.documents AS document
 JOIN knowledge.document_versions AS version
   ON version.tenant_id = document.tenant_id
@@ -308,18 +326,20 @@ WHERE document.tenant_id = $1::uuid
   AND document.status = 'active'
   AND version.status = 'published'
   AND version.ingestion_state IN ('legacy_indexed', 'indexed')
-  AND chunk.id = $7::uuid
-  AND chunk.checksum = $8
+  AND chunk.id = $8::uuid
+  AND chunk.checksum = $9
 ON CONFLICT (generation_id, chunk_id) DO UPDATE SET
     model_revision = EXCLUDED.model_revision,
+    projection_revision = EXCLUDED.projection_revision,
     dimension = EXCLUDED.dimension,
     content_checksum = EXCLUDED.content_checksum,
     embedding = EXCLUDED.embedding,
     search_vector = EXCLUDED.search_vector,
     normalized = true,
     indexed_at = now()`,
-			tenantID, generationID, s.config.ModelRevision, s.config.Dimension,
-			halfVectorLiteral(vector), lexemes, item.ChunkID, item.Checksum)
+			tenantID, generationID, s.config.ModelRevision, s.config.ProjectionRevision,
+			s.config.Dimension, halfVectorLiteral(vector),
+			projection.Lexemes, item.ChunkID, item.Checksum)
 		if err != nil {
 			return 0, fmt.Errorf("persist knowledge reindex chunk: %w", err)
 		}
@@ -340,14 +360,16 @@ func (s *Store) activateIndexGeneration(ctx context.Context, tenantID, generatio
 	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtext($1))`, tenantID); err != nil {
 		return ReindexStats{}, fmt.Errorf("lock knowledge index activation: %w", err)
 	}
-	expected, indexed, err := countGeneration(ctx, tx, tenantID, generationID)
+	expected, indexed, err := s.countGeneration(ctx, tx, tenantID, generationID)
 	if err != nil {
 		return ReindexStats{}, err
 	}
 	if expected != indexed {
 		return ReindexStats{
-			GenerationID: generationID, State: "building",
-			Expected: expected, Indexed: indexed,
+			GenerationID:       generationID,
+			ProjectionRevision: s.config.ProjectionRevision,
+			State:              "building",
+			Expected:           expected, Indexed: indexed,
 		}, errors.New("knowledge index generation changed before activation")
 	}
 	if _, err := tx.Exec(ctx, `
@@ -363,8 +385,10 @@ SET state = 'active', expected_chunk_count = $3, indexed_chunk_count = $3,
     activated_at = COALESCE(activated_at, now()), updated_at = now()
 WHERE tenant_id = $1::uuid AND id = $2::uuid
   AND model_revision = $4 AND dimension = $5
+  AND projection_revision = $6
   AND state IN ('building', 'active')`,
-		tenantID, generationID, expected, s.config.ModelRevision, s.config.Dimension)
+		tenantID, generationID, expected, s.config.ModelRevision,
+		s.config.Dimension, s.config.ProjectionRevision)
 	if err != nil {
 		return ReindexStats{}, fmt.Errorf("activate knowledge index generation: %w", err)
 	}
@@ -375,20 +399,24 @@ WHERE tenant_id = $1::uuid AND id = $2::uuid
 INSERT INTO audit.knowledge_events (tenant_id, event_type, evidence)
 VALUES ($1::uuid, 'index_generation_activated',
         jsonb_build_object('generation_id', $2::text, 'model_revision', $3::text,
-                           'chunk_count', $4::integer))`,
-		tenantID, generationID, s.config.ModelRevision, expected); err != nil {
+                           'projection_revision', $4::text,
+                           'chunk_count', $5::integer))`,
+		tenantID, generationID, s.config.ModelRevision,
+		s.config.ProjectionRevision, expected); err != nil {
 		return ReindexStats{}, fmt.Errorf("audit knowledge index generation activation: %w", err)
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return ReindexStats{}, fmt.Errorf("commit knowledge index activation: %w", err)
 	}
 	return ReindexStats{
-		GenerationID: generationID, State: "active",
-		Expected: expected, Indexed: indexed, Activated: true,
+		GenerationID:       generationID,
+		ProjectionRevision: s.config.ProjectionRevision,
+		State:              "active",
+		Expected:           expected, Indexed: indexed, Activated: true,
 	}, nil
 }
 
-func countGeneration(ctx context.Context, tx pgx.Tx, tenantID, generationID string) (int, int, error) {
+func (s *Store) countGeneration(ctx context.Context, tx pgx.Tx, tenantID, generationID string) (int, int, error) {
 	var expected, indexed int
 	if err := tx.QueryRow(ctx, `
 SELECT count(*)::integer,
@@ -408,11 +436,12 @@ LEFT JOIN knowledge.chunk_search_indexes AS search
   ON search.tenant_id = chunk.tenant_id
  AND search.chunk_id = chunk.id
  AND search.generation_id = $2::uuid
+ AND search.projection_revision = $3
 WHERE document.tenant_id = $1::uuid
   AND document.status = 'active'
   AND version.status = 'published'
   AND version.ingestion_state IN ('legacy_indexed', 'indexed')`,
-		tenantID, generationID).Scan(&expected, &indexed); err != nil {
+		tenantID, generationID, s.config.ProjectionRevision).Scan(&expected, &indexed); err != nil {
 		return 0, 0, fmt.Errorf("count knowledge index generation: %w", err)
 	}
 	return expected, indexed, nil

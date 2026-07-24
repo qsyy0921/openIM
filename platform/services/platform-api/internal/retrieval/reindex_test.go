@@ -8,14 +8,20 @@ import (
 )
 
 type measuringEmbedder struct {
-	mu        sync.Mutex
-	active    int
-	maxActive int
+	mu          sync.Mutex
+	active      int
+	maxActive   int
+	invalidText bool
 }
 
 func (e *measuringEmbedder) Embed(_ context.Context, texts []string) (EmbeddingBatch, error) {
 	e.mu.Lock()
 	e.active++
+	for _, text := range texts {
+		if text != "Policy\n\ncontent" {
+			e.invalidText = true
+		}
+	}
 	if e.active > e.maxActive {
 		e.maxActive = e.active
 	}
@@ -39,13 +45,18 @@ func TestEmbedReindexBatchesUsesExplicitBoundedConcurrency(t *testing.T) {
 	store := &Store{
 		embedder: embedder,
 		config: Config{
-			ModelRevision: "qwen3-embedding:4b",
-			Dimension:     2560,
+			ModelRevision:      "qwen3-embedding:4b",
+			ProjectionRevision: "document-title-content-v1",
+			Dimension:          2560,
 		},
 	}
 	items := make([]reindexItem, 32)
 	for index := range items {
-		items[index] = reindexItem{ChunkID: string(rune('a' + index)), Content: "content"}
+		items[index] = reindexItem{
+			ChunkID: string(rune('a' + index)),
+			Title:   "Policy",
+			Content: "content",
+		}
 	}
 	batches, err := store.embedReindexBatches(context.Background(), items, 4, 8)
 	if err != nil {
@@ -60,6 +71,9 @@ func TestEmbedReindexBatchesUsesExplicitBoundedConcurrency(t *testing.T) {
 	if maxActive != 8 {
 		t.Fatalf("maximum embedding concurrency = %d, want 8", maxActive)
 	}
+	if embedder.invalidText {
+		t.Fatal("reindex embedder did not receive the title/content projection")
+	}
 	for index, batch := range batches {
 		if len(batch.items) != 4 || len(batch.embedding.Vectors) != 4 {
 			t.Fatalf("batch %d violated its fixed size", index)
@@ -69,7 +83,7 @@ func TestEmbedReindexBatchesUsesExplicitBoundedConcurrency(t *testing.T) {
 
 func TestEmbedReindexBatchesRejectsUnboundedConcurrency(t *testing.T) {
 	store := &Store{}
-	items := []reindexItem{{ChunkID: "chunk", Content: "content"}}
+	items := []reindexItem{{ChunkID: "chunk", Title: "Policy", Content: "content"}}
 	if _, err := store.embedReindexBatches(
 		context.Background(),
 		items,

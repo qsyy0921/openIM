@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/qsyy0921/openim/platform/services/platform-api/internal/knowledgeprojection"
 )
 
 func TestSearchEnforcesTenantGrantClassificationAndRevocation(t *testing.T) {
@@ -74,7 +75,8 @@ func TestSearchEnforcesTenantGrantClassificationAndRevocation(t *testing.T) {
 	seedProjection(t, ctx, pool, otherGenerationID, otherTenant, crossTenant)
 
 	store, err := NewStore(pool, fixtureEmbedder{}, fixtureReranker{baseScore: 1}, Config{
-		ModelRevision: "qwen3-embedding:4b", Dimension: 2560,
+		ModelRevision:      "qwen3-embedding:4b",
+		ProjectionRevision: knowledgeprojection.Revision, Dimension: 2560,
 		DenseMinSimilarity: 0.9, MaxCandidates: 32,
 		RerankerModel: LockedRerankerModel, RerankerRevision: LockedRerankerRevision,
 		HNSWEFSearch: 100,
@@ -117,7 +119,8 @@ func TestSearchEnforcesTenantGrantClassificationAndRevocation(t *testing.T) {
 	}
 	nextModel := "qwen3-embedding:4b-generation-2"
 	nextStore, err := NewStore(pool, fixtureEmbedder{model: nextModel}, fixtureReranker{baseScore: 1}, Config{
-		ModelRevision: nextModel, Dimension: 2560,
+		ModelRevision:      nextModel,
+		ProjectionRevision: knowledgeprojection.Revision, Dimension: 2560,
 		DenseMinSimilarity: 0.9, MaxCandidates: 32,
 		RerankerModel: LockedRerankerModel, RerankerRevision: LockedRerankerRevision,
 		HNSWEFSearch: 100,
@@ -182,6 +185,7 @@ type testDocument struct {
 	documentID string
 	chunkID    string
 	checksum   string
+	title      string
 	content    string
 }
 
@@ -209,7 +213,13 @@ func seedDocument(t *testing.T, ctx context.Context, pool *pgxpool.Pool, tenantI
 	if err := tx.Commit(ctx); err != nil {
 		t.Fatal(err)
 	}
-	return testDocument{documentID: documentID, chunkID: chunkID, checksum: chunkChecksum, content: content}
+	return testDocument{
+		documentID: documentID,
+		chunkID:    chunkID,
+		checksum:   chunkChecksum,
+		title:      title,
+		content:    content,
+	}
 }
 
 func seedGeneration(t *testing.T, ctx context.Context, pool *pgxpool.Pool, tenantID string, chunkCount int) string {
@@ -217,10 +227,12 @@ func seedGeneration(t *testing.T, ctx context.Context, pool *pgxpool.Pool, tenan
 	generationID := testUUID(t)
 	if _, err := pool.Exec(ctx, `
 INSERT INTO knowledge.index_generations
-    (id, tenant_id, model_revision, dimension, storage_type, distance_metric,
-     state, expected_chunk_count, indexed_chunk_count, activated_at)
-VALUES ($1::uuid, $2::uuid, 'qwen3-embedding:4b', 2560, 'halfvec', 'cosine',
-        'active', $3, $3, now())`, generationID, tenantID, chunkCount); err != nil {
+    (id, tenant_id, model_revision, projection_revision, dimension,
+     storage_type, distance_metric, state, expected_chunk_count,
+     indexed_chunk_count, activated_at)
+VALUES ($1::uuid, $2::uuid, 'qwen3-embedding:4b', $3, 2560, 'halfvec', 'cosine',
+        'active', $4, $4, now())`,
+		generationID, tenantID, knowledgeprojection.Revision, chunkCount); err != nil {
 		t.Fatal(err)
 	}
 	return generationID
@@ -228,14 +240,18 @@ VALUES ($1::uuid, $2::uuid, 'qwen3-embedding:4b', 2560, 'halfvec', 'cosine',
 
 func seedProjection(t *testing.T, ctx context.Context, pool *pgxpool.Pool, generationID, tenantID string, document testDocument) {
 	t.Helper()
+	projection, err := knowledgeprojection.Build(document.title, document.content)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if _, err := pool.Exec(ctx, `
 INSERT INTO knowledge.chunk_search_indexes
-    (generation_id, tenant_id, chunk_id, model_revision, dimension,
-     content_checksum, embedding, search_vector, normalized)
-VALUES ($1::uuid, $2::uuid, $3::uuid, 'qwen3-embedding:4b', 2560,
-        $4, $5::halfvec, to_tsvector('simple', 'retention policy'), true)`,
-		generationID, tenantID, document.chunkID, document.checksum,
-		halfVectorLiteral(testVector())); err != nil {
+    (generation_id, tenant_id, chunk_id, model_revision, projection_revision,
+     dimension, content_checksum, embedding, search_vector, normalized)
+VALUES ($1::uuid, $2::uuid, $3::uuid, 'qwen3-embedding:4b', $4, 2560,
+        $5, $6::halfvec, to_tsvector('simple', $7), true)`,
+		generationID, tenantID, document.chunkID, knowledgeprojection.Revision,
+		document.checksum, halfVectorLiteral(testVector()), projection.Lexemes); err != nil {
 		t.Fatal(err)
 	}
 }

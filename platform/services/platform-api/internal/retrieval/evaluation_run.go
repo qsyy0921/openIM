@@ -14,21 +14,23 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/qsyy0921/openim/platform/services/platform-api/internal/knowledgeprojection"
 )
 
 const (
-	productionEvaluationSchemaVersion = 1
+	productionEvaluationSchemaVersion = 2
 	frozenBaselineRecallAt8           = 0.928846
 )
 
 type ProductionEvaluationConfig struct {
-	TenantID          string
-	DatasetRevision   string
-	DatasetDigest     string
-	ApplicationCommit string
-	EmbeddingRevision string
-	RerankerRevision  string
-	GenerationModel   string
+	TenantID           string
+	DatasetRevision    string
+	DatasetDigest      string
+	ApplicationCommit  string
+	EmbeddingRevision  string
+	ProjectionRevision string
+	RerankerRevision   string
+	GenerationModel    string
 }
 
 type ProductionEvaluationThresholds struct {
@@ -49,21 +51,22 @@ type ProductionEvaluationThresholds struct {
 }
 
 type ProductionEvaluationReport struct {
-	SchemaVersion     int                            `json:"schema_version"`
-	EvaluationRunID   string                         `json:"evaluation_run_id"`
-	TenantID          string                         `json:"tenant_id"`
-	DatasetRevision   string                         `json:"dataset_revision"`
-	DatasetDigest     string                         `json:"dataset_digest"`
-	ApplicationCommit string                         `json:"application_commit"`
-	EmbeddingRevision string                         `json:"embedding_revision"`
-	RerankerRevision  string                         `json:"reranker_revision"`
-	GenerationModel   string                         `json:"generation_model"`
-	Thresholds        ProductionEvaluationThresholds `json:"thresholds"`
-	Retrieval         EvaluationReport               `json:"retrieval"`
-	Generation        GenerationEvaluationReport     `json:"generation"`
-	Passed            bool                           `json:"passed"`
-	FailureCaseIDs    []string                       `json:"failure_case_ids"`
-	RecordedAt        time.Time                      `json:"recorded_at"`
+	SchemaVersion      int                            `json:"schema_version"`
+	EvaluationRunID    string                         `json:"evaluation_run_id"`
+	TenantID           string                         `json:"tenant_id"`
+	DatasetRevision    string                         `json:"dataset_revision"`
+	DatasetDigest      string                         `json:"dataset_digest"`
+	ApplicationCommit  string                         `json:"application_commit"`
+	EmbeddingRevision  string                         `json:"embedding_revision"`
+	ProjectionRevision string                         `json:"projection_revision"`
+	RerankerRevision   string                         `json:"reranker_revision"`
+	GenerationModel    string                         `json:"generation_model"`
+	Thresholds         ProductionEvaluationThresholds `json:"thresholds"`
+	Retrieval          EvaluationReport               `json:"retrieval"`
+	Generation         GenerationEvaluationReport     `json:"generation"`
+	Passed             bool                           `json:"passed"`
+	FailureCaseIDs     []string                       `json:"failure_case_ids"`
+	RecordedAt         time.Time                      `json:"recorded_at"`
 }
 
 func BuildProductionEvaluationReport(config ProductionEvaluationConfig, retrievalReport EvaluationReport, generationReport GenerationEvaluationReport) (ProductionEvaluationReport, error) {
@@ -71,10 +74,12 @@ func BuildProductionEvaluationReport(config ProductionEvaluationConfig, retrieva
 	if err := validateProductionEvaluationConfig(config); err != nil {
 		return ProductionEvaluationReport{}, err
 	}
-	if retrievalReport.SchemaVersion != 4 || retrievalReport.Cases < 1 ||
+	if retrievalReport.SchemaVersion != 5 ||
+		retrievalReport.ProjectionRevision != config.ProjectionRevision ||
+		retrievalReport.Cases < 1 ||
 		retrievalReport.AnswerableCases+retrievalReport.UnanswerableCases != retrievalReport.Cases ||
 		retrievalReport.ACLDeniedCases != retrievalReport.Cases {
-		return ProductionEvaluationReport{}, errors.New("retrieval evaluation report violates the schema-v4 contract")
+		return ProductionEvaluationReport{}, errors.New("retrieval evaluation report violates the schema-v5 contract")
 	}
 	if generationReport.SchemaVersion != 1 || generationReport.Cases < 1 ||
 		generationReport.AnswerableCases+generationReport.UnanswerableCases != generationReport.Cases ||
@@ -102,7 +107,8 @@ func BuildProductionEvaluationReport(config ProductionEvaluationConfig, retrieva
 		SchemaVersion: productionEvaluationSchemaVersion, EvaluationRunID: runID,
 		TenantID: config.TenantID, DatasetRevision: config.DatasetRevision, DatasetDigest: config.DatasetDigest,
 		ApplicationCommit: config.ApplicationCommit, EmbeddingRevision: config.EmbeddingRevision,
-		RerankerRevision: config.RerankerRevision, GenerationModel: config.GenerationModel,
+		ProjectionRevision: config.ProjectionRevision,
+		RerankerRevision:   config.RerankerRevision, GenerationModel: config.GenerationModel,
 		Thresholds: thresholds, Retrieval: retrievalReport, Generation: generationReport,
 		FailureCaseIDs: evaluationFailureIDs(retrievalReport, generationReport),
 		RecordedAt:     time.Now().UTC(),
@@ -128,8 +134,10 @@ func RecordProductionEvaluation(ctx context.Context, pool *pgxpool.Pool, report 
 	expected, err := BuildProductionEvaluationReport(ProductionEvaluationConfig{
 		TenantID: report.TenantID, DatasetRevision: report.DatasetRevision,
 		DatasetDigest: report.DatasetDigest, ApplicationCommit: report.ApplicationCommit,
-		EmbeddingRevision: report.EmbeddingRevision, RerankerRevision: report.RerankerRevision,
-		GenerationModel: report.GenerationModel,
+		EmbeddingRevision:  report.EmbeddingRevision,
+		ProjectionRevision: report.ProjectionRevision,
+		RerankerRevision:   report.RerankerRevision,
+		GenerationModel:    report.GenerationModel,
 	}, report.Retrieval, report.Generation)
 	if err != nil {
 		return ProductionEvaluationReport{}, err
@@ -154,17 +162,17 @@ func RecordProductionEvaluation(ctx context.Context, pool *pgxpool.Pool, report 
 	const query = `
 INSERT INTO knowledge.evaluation_runs (
     id, tenant_id, dataset_revision, dataset_digest, application_commit,
-    embedding_revision, reranker_revision, generation_model, state,
+    embedding_revision, projection_revision, reranker_revision, generation_model, state,
     thresholds, metrics, failure_case_ids, started_at, completed_at
 ) VALUES (
-    $1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8, $9,
-    $10::jsonb, $11::jsonb, $12::text[], $13, $13
+    $1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8, $9, $10,
+    $11::jsonb, $12::jsonb, $13::text[], $14, $14
 ) ON CONFLICT (id) DO NOTHING`
 	tag, err := pool.Exec(ctx, query,
 		report.EvaluationRunID, report.TenantID, report.DatasetRevision,
 		report.DatasetDigest, report.ApplicationCommit, report.EmbeddingRevision,
-		report.RerankerRevision, report.GenerationModel, state, thresholds, metrics,
-		report.FailureCaseIDs, report.RecordedAt,
+		report.ProjectionRevision, report.RerankerRevision, report.GenerationModel,
+		state, thresholds, metrics, report.FailureCaseIDs, report.RecordedAt,
 	)
 	if err != nil {
 		return ProductionEvaluationReport{}, fmt.Errorf("record production evaluation: %w", err)
@@ -207,6 +215,7 @@ func normalizeProductionEvaluationConfig(config ProductionEvaluationConfig) Prod
 	config.DatasetDigest = strings.TrimSpace(config.DatasetDigest)
 	config.ApplicationCommit = strings.TrimSpace(config.ApplicationCommit)
 	config.EmbeddingRevision = strings.TrimSpace(config.EmbeddingRevision)
+	config.ProjectionRevision = strings.TrimSpace(config.ProjectionRevision)
 	config.RerankerRevision = strings.TrimSpace(config.RerankerRevision)
 	config.GenerationModel = strings.TrimSpace(config.GenerationModel)
 	return config
@@ -218,6 +227,7 @@ func validateProductionEvaluationConfig(config ProductionEvaluationConfig) error
 		!digestPattern.MatchString(config.DatasetDigest) ||
 		!commitPattern.MatchString(config.ApplicationCommit) ||
 		config.EmbeddingRevision == "" || len(config.EmbeddingRevision) > 256 ||
+		config.ProjectionRevision != knowledgeprojection.Revision ||
 		config.RerankerRevision != LockedRerankerRevision ||
 		config.GenerationModel != LockedGenerationModel {
 		return errors.New("production evaluation metadata violates the locked contract")

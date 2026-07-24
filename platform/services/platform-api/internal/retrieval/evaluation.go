@@ -31,6 +31,7 @@ type QACase struct {
 
 type EvaluationReport struct {
 	SchemaVersion         int                 `json:"schema_version"`
+	ProjectionRevision    string              `json:"projection_revision"`
 	Cases                 int                 `json:"cases"`
 	AnswerableCases       int                 `json:"answerable_cases"`
 	UnanswerableCases     int                 `json:"unanswerable_cases"`
@@ -108,7 +109,8 @@ func Evaluate(ctx context.Context, store *Store, cases []QACase, config Evaluati
 		return EvaluationReport{}, err
 	}
 	report := EvaluationReport{
-		SchemaVersion: 4, Cases: len(cases), ACLDeniedCases: len(cases),
+		SchemaVersion: 5, ProjectionRevision: store.config.ProjectionRevision,
+		Cases: len(cases), ACLDeniedCases: len(cases),
 		Failures: make([]EvaluationFailure, 0),
 	}
 	vectors := make([][]float32, len(cases))
@@ -169,7 +171,8 @@ func Evaluate(ctx context.Context, store *Store, cases []QACase, config Evaluati
 			if evidence.CitationID == fmt.Sprintf("C%d", index+1) &&
 				evidence.DocumentID != "" && evidence.VersionID != "" &&
 				evidence.ChunkID != "" && evidence.Checksum != "" &&
-				evidence.IndexRevision == store.config.ModelRevision {
+				evidence.IndexRevision == store.config.ModelRevision &&
+				evidence.ProjectionRevision == store.config.ProjectionRevision {
 				integrity++
 			}
 			checksum := sha256.Sum256([]byte(evidence.Content))

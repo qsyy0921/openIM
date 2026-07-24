@@ -292,7 +292,9 @@ SELECT version.ingestion_state,version.status,source.state,source.original_filen
             ON generation.id=search_index.generation_id
            AND generation.tenant_id=search_index.tenant_id
          WHERE chunk.version_id=version.id
-           AND generation.state='active')
+           AND generation.state='active'
+           AND generation.projection_revision='document-title-content-v1'
+           AND search_index.projection_revision=generation.projection_revision)
 FROM knowledge.document_versions version
 JOIN knowledge.document_source_objects source ON source.version_id=version.id
 JOIN knowledge.ingestion_jobs job ON job.version_id=version.id

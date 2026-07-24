@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/qsyy0921/openim/platform/services/platform-api/internal/knowledgeprojection"
 	"github.com/qsyy0921/openim/platform/services/platform-api/internal/retrieval"
 )
 
@@ -33,6 +34,11 @@ func run() error {
 	generationURL := flag.String("generation-url", env("PLATFORM_GENERATION_INTELLIGENCE_URL", ""), "Generation Worker URL; defaults to the configured Intelligence Worker URL")
 	model := flag.String("model", env("PLATFORM_RETRIEVAL_EMBEDDING_MODEL", "qwen3-embedding:4b"), "locked embedding model revision")
 	dimension := flag.Int("dimension", envInt("PLATFORM_RETRIEVAL_EMBEDDING_DIMENSION", 2560), "embedding dimension")
+	projectionRevision := flag.String(
+		"projection-revision",
+		env("PLATFORM_RETRIEVAL_PROJECTION_REVISION", ""),
+		"locked retrieval projection revision",
+	)
 	denseMinimum := flag.Float64("dense-minimum", envFloat("PLATFORM_RETRIEVAL_DENSE_MIN_SIMILARITY", 0.45), "dense similarity floor")
 	maxCandidates := flag.Int("max-candidates", envInt("PLATFORM_RETRIEVAL_MAX_CANDIDATES", 32), "maximum candidates per lexical and dense branch")
 	rerankerModel := flag.String("reranker-model", env("PLATFORM_RETRIEVAL_RERANKER_MODEL", retrieval.LockedRerankerModel), "locked reranker model")
@@ -49,7 +55,7 @@ func run() error {
 	generationSeed := flag.String("generation-seed", "enterprise-rag-generation-v1", "frozen generation sample seed")
 	generationAnswerable := flag.Int("generation-answerable", 60, "answerable generation cases")
 	generationUnanswerable := flag.Int("generation-unanswerable", 60, "unanswerable generation cases")
-	retrievalReportPath := flag.String("retrieval-report", "", "schema-v4 retrieval report for finalize")
+	retrievalReportPath := flag.String("retrieval-report", "", "schema-v5 retrieval report for finalize")
 	generationReportPath := flag.String("generation-report", "", "generation report for finalize")
 	datasetRevision := flag.String("dataset-revision", "enterprise-knowledge/v1", "immutable dataset revision")
 	applicationCommit := flag.String("application-commit", "", "evaluated application Git commit")
@@ -62,6 +68,9 @@ func run() error {
 	}
 	if *mode != "index" && *mode != "evaluate" && *mode != "evaluate-generation" && *mode != "finalize" {
 		return errors.New("-mode must be index, evaluate, evaluate-generation, or finalize")
+	}
+	if strings.TrimSpace(*projectionRevision) != knowledgeprojection.Revision {
+		return errors.New("-projection-revision violates the compiled retrieval projection contract")
 	}
 	if strings.TrimSpace(*databaseURL) == "" {
 		return errors.New("-database-url or PLATFORM_DATABASE_URL is required")
@@ -96,8 +105,10 @@ func run() error {
 		report, err := retrieval.BuildProductionEvaluationReport(retrieval.ProductionEvaluationConfig{
 			TenantID: strings.TrimSpace(*tenantID), DatasetRevision: strings.TrimSpace(*datasetRevision),
 			DatasetDigest: datasetDigest, ApplicationCommit: strings.TrimSpace(*applicationCommit),
-			EmbeddingRevision: strings.TrimSpace(*model), RerankerRevision: strings.TrimSpace(*rerankerRevision),
-			GenerationModel: strings.TrimSpace(*generationModel),
+			EmbeddingRevision:  strings.TrimSpace(*model),
+			ProjectionRevision: strings.TrimSpace(*projectionRevision),
+			RerankerRevision:   strings.TrimSpace(*rerankerRevision),
+			GenerationModel:    strings.TrimSpace(*generationModel),
 		}, retrievalReport, generationReport)
 		if err != nil {
 			return err
@@ -117,7 +128,8 @@ func run() error {
 		return err
 	}
 	store, err := retrieval.NewStore(pool, embedder, reranker, retrieval.Config{
-		ModelRevision: *model, Dimension: *dimension, DenseMinSimilarity: *denseMinimum, MaxCandidates: *maxCandidates,
+		ModelRevision: *model, ProjectionRevision: *projectionRevision,
+		Dimension: *dimension, DenseMinSimilarity: *denseMinimum, MaxCandidates: *maxCandidates,
 		RerankerModel: *rerankerModel, RerankerRevision: *rerankerRevision, HNSWEFSearch: *hnswEFSearch,
 	})
 	if err != nil {

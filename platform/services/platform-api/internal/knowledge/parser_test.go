@@ -214,9 +214,6 @@ func TestChunkSectionsIsDeterministicAndBounded(t *testing.T) {
 		if utf8.RuneCountInString(first[index].Content) > MaxChunkRunes || len(first[index].Content) > MaxChunkBytes {
 			t.Fatalf("chunk %d exceeds its budget", index)
 		}
-		if first[index].Lexemes == "" {
-			t.Fatalf("chunk %d has no lexical projection", index)
-		}
 	}
 }
 

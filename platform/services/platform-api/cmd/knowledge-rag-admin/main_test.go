@@ -23,14 +23,14 @@ func TestFileSHA256AndStrictReportDecode(t *testing.T) {
 	}
 
 	reportPath := filepath.Join(directory, "report.json")
-	if err := os.WriteFile(reportPath, []byte(`{"schema_version":4,"cases":1}`), 0o600); err != nil {
+	if err := os.WriteFile(reportPath, []byte(`{"schema_version":5,"cases":1}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	var report retrieval.EvaluationReport
-	if err := decodeReport(reportPath, &report); err != nil || report.SchemaVersion != 4 {
+	if err := decodeReport(reportPath, &report); err != nil || report.SchemaVersion != 5 {
 		t.Fatalf("decodeReport() = %#v, %v", report, err)
 	}
-	if err := os.WriteFile(reportPath, []byte(`{"schema_version":4} {}`), 0o600); err != nil {
+	if err := os.WriteFile(reportPath, []byte(`{"schema_version":5} {}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if err := decodeReport(reportPath, &report); err == nil {

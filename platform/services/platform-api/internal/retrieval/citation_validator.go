@@ -10,6 +10,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/qsyy0921/openim/platform/services/platform-api/internal/knowledgeprojection"
 )
 
 const (
@@ -54,11 +55,13 @@ func (s *Store) ValidateCitations(ctx context.Context, query Query, answer strin
 		err := tx.QueryRow(ctx, authorizedCitationSQL,
 			query.TenantID, query.MemberID, item.ChunkID, item.DocumentID,
 			item.VersionID, s.config.ModelRevision, s.config.Dimension,
+			s.config.ProjectionRevision,
 		).Scan(
 			&refreshed[index].DocumentID, &refreshed[index].VersionID,
 			&refreshed[index].ChunkID, &refreshed[index].Title,
 			&refreshed[index].SourceURI, &refreshed[index].Checksum,
 			&refreshed[index].Content, &refreshed[index].IndexRevision,
+			&refreshed[index].ProjectionRevision,
 		)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, errors.New("citation is no longer authorized or current")
@@ -89,7 +92,15 @@ func (s *Store) ValidateCitations(ctx context.Context, query Query, answer strin
 		if !hasCitationLexicalAnchor(supportQuery, item.Content) {
 			return nil, errors.New("candidate contains a citation without a deterministic lexical anchor")
 		}
-		input[index] = RerankCandidate{CandidateID: item.ChunkID, Content: item.Content}
+		content, err := knowledgeprojection.RerankerText(
+			item.Title,
+			item.Content,
+			maxRerankerTextBytes,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("build citation reranker projection: %w", err)
+		}
+		input[index] = RerankCandidate{CandidateID: item.ChunkID, Content: content}
 	}
 	response, err := s.reranker.Rerank(ctx, supportQuery, input)
 	if err != nil {
@@ -132,7 +143,7 @@ func hasCitationLexicalAnchor(answer, content string) bool {
 const authorizedCitationSQL = `
 SELECT document.id::text, version.id::text, chunk.id::text,
        document.title, document.source_uri, chunk.checksum, chunk.content,
-       generation.model_revision
+       generation.model_revision, generation.projection_revision
 FROM knowledge.documents AS document
 JOIN identity.members AS member
   ON member.tenant_id = document.tenant_id
@@ -156,11 +167,13 @@ JOIN knowledge.index_generations AS generation
  AND generation.state = 'active'
  AND generation.model_revision = $6
  AND generation.dimension = $7
+ AND generation.projection_revision = $8
 JOIN knowledge.chunk_search_indexes AS search
   ON search.tenant_id = chunk.tenant_id
  AND search.generation_id = generation.id
  AND search.chunk_id = chunk.id
  AND search.model_revision = generation.model_revision
+ AND search.projection_revision = generation.projection_revision
  AND search.dimension = generation.dimension
  AND search.content_checksum = chunk.checksum
 WHERE document.tenant_id = $1::uuid

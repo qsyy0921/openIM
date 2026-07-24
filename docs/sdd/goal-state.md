@@ -41,9 +41,10 @@ This unit records slice state, durable evidence, and the next idempotent action.
 | Enterprise RAG SDD and API contract | local_verified | SDD, ADR-0010, OpenAPI, research record and adoption matrix are synchronized to the implemented boundary | preserve until final evidence pass |
 | Source upload and ingestion | local_verified_node2_isolated | strict four-format parser tests and immutable leased job pass locally; exact-object cleanup lease/three-attempt terminal integration and isolated pinned-MinIO put/download/delete pass on Node2 | repeat four real uploads in the production release |
 | pgvector hybrid index | node2_eval_verified | Node2 isolated PostgreSQL 17/pgvector 0.8.5 reached migration 0032 twice; dataset counts are `520/624/3224/520/2`; locked generation `dc117419-fb2c-43db-b069-6c0c9f303ac6` activated with `2704/2704` current Chunk projections | preserve the index and consume it only through the active generation |
+| Versioned retrieval projection | node2_disposable_verified | ADR-0011 implementation uses one shared `document-title-content-v1` projection for embedding, FTS and reranking; migration 0033 passed a 0032 upgrade with four historical backfills, a fresh install, repeat application and real Knowledge/Retrieval integration tests against isolated PostgreSQL 17/pgvector 0.8.5 | build an isolated new generation and run the bounded 158-case regression before any full evaluation or production switch |
 | Fixed multilingual reranker | node2_eval_verified | retrieval-only service exposes no generation routes; real 32-passage locked rerank is `3.378s` warm and 8-way embedding benchmark is `6.034s/32` | preserve exact model/revision and complete full evaluation |
 | Trusted citations and Knowledge Web | local_verified | post-generation checksum/support reauthorization, atomic save-time grant lock, durable authorized excerpts, role-gated Web module and 128 Web tests pass | complete visual and real channel acceptance |
-| Enterprise RAG evaluation | node2_retrieval_running | full 1,120-case retrieval uses the exact release binary SHA-256 `430a3082...8818`; gated 120-case Terra generation is queued behind the retrieval service and cannot start unless every retrieval threshold passes | inspect the two user services and reports; never restart an active stage |
+| Enterprise RAG evaluation | node2_retrieval_gate_failed | full 1,120-case retrieval completed with Recall@5 `0.768269`, Recall@10 `0.848077`, MRR `0.480470`, 158 answerable failures, ACL/stale leakage `0`, and provenance/checksum `1.0`; the generation service correctly stopped at `retrieval gate failed: recall_at_5` and produced no report | run the bounded ADR-0011 failed-case regression, then repeat full evaluation only if that regression justifies it |
 | Node2 enterprise RAG E2E | local_harness_verified_remote_pending | four-format fixture generation, phase-separated Playwright, isolated A/B identity lifecycle, OpenIM/Telegram phase reconciliation, exact cleanup, and marker-scoped embedding/reranker/Terra failure harness are locally implemented; no Node2 RAG E2E has run | wait for the locked evaluation, deploy the immutable release, then execute the ordered three-channel matrix |
 | Enterprise RAG GitHub delivery | local_committed | implementation, offline Node2 deployment guard, and gated evaluation orchestration are committed on the feature branch; push and Draft PR remain gated on remote acceptance | preserve commits, then add measured evidence before push and Draft PR |
 | Migrations 0009-0031 | node2_verified | the Terra transition preserves canonical Luna history, and Node2 reports `31|sql/0031_telegram_identity_linking.sql` on release `akashic-node2-20260723-oidc-renew1` | preserve immutable-version and deployment guards |
@@ -114,6 +115,50 @@ The Codex task may use the 15-minute `OpenIM Akashic Goal 心跳` to re-enter th
 
 ## Latest local evidence
 
+- On 2026-07-25, a second Node2 database was cloned from the preserved failed
+  evaluation database, migrated to 0033, and verified to retain the historical
+  active `chunk-content-v1` generation at `2704/2704` before remediation. The
+  exact 158 `expected evidence not retrieved` QA cases were selected into an
+  immutable diagnostic subset with SHA-256
+  `fbfa6172cab1ad6b0dae4884072465328d002f2881ae10a3b81bb73c715236d0`.
+  A real-content embedding benchmark measured one warm four-text request at
+  `56.920s`, eight texts at `121.823s`, and sixteen texts failed at the fixed
+  `180s` Worker timeout. The resumable index therefore uses four-text batches
+  with two concurrent requests; its isolated systemd unit is enabled, while
+  production and the original evaluation database remain unchanged.
+- On 2026-07-25, final diff review found that the production deployment invoked
+  `knowledge-rag-admin -mode index` without the required tenant identity and
+  validated a nonexistent `indexed` JSON field. The deployment now enumerates
+  only tenants with a current published knowledge version from PostgreSQL,
+  supplies each exact tenant ID, and requires an active
+  `document-title-content-v1` generation whose positive
+  `indexed_chunks` count exactly equals `expected_chunks`. It does not hard-code
+  the isolated evaluation tenant or silently skip a malformed report.
+- On 2026-07-25, the ADR-0011 implementation added the shared
+  `document-title-content-v1` projection, explicit projection identity on jobs,
+  generations, search rows and EvaluationRuns, exact runtime configuration,
+  and fail-closed reuse rules. On Node2, migration 0033 passed an upgrade from
+  commit-matched migration 0032 with one historical row in each affected table,
+  backfilled all four rows to `chunk-content-v1`, enforced four NOT NULL
+  columns and the exact projection-generation foreign key, reached
+  `33|sql/0033_knowledge_projection_revision.sql`, and remained unchanged on a
+  second runner pass. A fresh database also reached the same state twice.
+  Knowledge and Retrieval integration tests then passed through an SSH tunnel
+  against a separate disposable PostgreSQL 17/pgvector 0.8.5 database,
+  including a title-only FTS assertion. Both temporary containers were removed.
+  No evaluation database, production migration, index generation, service, or
+  channel was changed.
+- On 2026-07-25, the locked Node2 retrieval evaluation completed all
+  `1120/1120` cases and exited successfully. The report records Recall@5
+  `0.768269`, Recall@10 `0.848077`, MRR `0.480470`, nDCG@10 `0.515241`,
+  158 answerable failures, ACL leakage `0`, stale-version leakage `0`, and
+  provenance/checksum integrity `1.0`. The gated generation service failed
+  closed with `retrieval gate failed: recall_at_5`; generation and final reports
+  are absent. A read-only lexical replay placed expected evidence inside Top-32
+  for 39 failures and below Top-32 for 119. ADR-0011 and the owning SDD now mark
+  a versioned title-plus-content retrieval projection as proposed. No
+  evaluation restart, production switch, migration, or channel message was
+  attempted.
 - On 2026-07-24 at 14:05 +08:00, the locked Node2 retrieval evaluation was
   still active and had completed `664/1120` rerank requests, with one additional
   32-candidate rerank request in flight. The retrieval Worker was consuming

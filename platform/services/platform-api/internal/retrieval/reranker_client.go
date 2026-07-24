@@ -66,7 +66,7 @@ func (c *HTTPReranker) Rerank(ctx context.Context, query string, candidates []Re
 	seen := make(map[string]struct{}, len(candidates))
 	for _, candidate := range candidates {
 		if candidate.CandidateID == "" || len(candidate.CandidateID) > 128 ||
-			candidate.Content == "" || len(candidate.Content) > 8000 {
+			candidate.Content == "" || len(candidate.Content) > maxRerankerTextBytes {
 			return RerankResponse{}, errors.New("reranker candidate is invalid")
 		}
 		if _, exists := seen[candidate.CandidateID]; exists {

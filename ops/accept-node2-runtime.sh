@@ -86,6 +86,7 @@ database_state="$(docker exec "$postgres_container" psql -At -F '|' -U platform 
           (SELECT count(*) FROM knowledge.index_generations
             WHERE state = 'active'
               AND model_revision = 'qwen3-embedding:4b'
+              AND projection_revision = 'document-title-content-v1'
               AND dimension = 2560),
           (SELECT count(*) FROM knowledge.chunk_search_indexes AS search
              JOIN knowledge.index_generations AS generation
@@ -105,10 +106,11 @@ database_state="$(docker exec "$postgres_container" psql -At -F '|' -U platform 
               AND document.status = 'active'
               AND version.status = 'published'
               AND search.model_revision = 'qwen3-embedding:4b'
+              AND search.projection_revision = 'document-title-content-v1'
               AND search.dimension = 2560
               AND search.normalized
               AND search.content_checksum = chunk.checksum);")"
-[[ "$database_state" == "32|sql/0032_enterprise_knowledge_rag.sql|0.8.5|520|624|3224|520|2704|1|2704" ]] || {
+[[ "$database_state" == "33|sql/0033_knowledge_projection_revision.sql|0.8.5|520|624|3224|520|2704|1|2704" ]] || {
   echo "unexpected Node2 database state: $database_state" >&2
   exit 1
 }
@@ -196,7 +198,7 @@ retrieval_candidate_status="$(
   exit 1
 }
 
-echo "node2_database=32|sql/0032_enterprise_knowledge_rag.sql|pgvector:0.8.5|520|624|3224|520|2704|active-generations:1|indexed:2704"
+echo "node2_database=33|sql/0033_knowledge_projection_revision.sql|pgvector:0.8.5|520|624|3224|520|2704|active-generations:1|indexed:2704"
 [[ "$release_version" =~ ^[A-Za-z0-9._-]+$ ]] || {
   echo "release version is malformed" >&2
   exit 1
