@@ -115,6 +115,19 @@ The Codex task may use the 15-minute `OpenIM Akashic Goal 心跳` to re-enter th
 
 ## Latest local evidence
 
+- On 2026-07-25, exact tooling commit
+  `ac8b94519c1ea04cfc2dbad2ad9e7cf55263703a` was exported directly with
+  `git archive` into the ignored 30,720-byte local bundle
+  `.runtime/evaluation-tools/openim-enterprise-rag-evaluation-tools-ac8b945.tar`.
+  Its SHA-256 is
+  `cadf7e89b44865647761f47e7ea04828ecbd0c51700532856661b912b4611cd1`.
+  A fresh local extraction matched the committed preparation tool SHA-256
+  `810af7689baa039bd1fd915fd2c037d2920cee45d99f6df787ad3ad343465ac0`
+  and runner SHA-256
+  `8d157408224331aa11faaece445301c05506cbc76277e3749eabc046bff92592`
+  byte-for-byte; Python compilation/help and runner shell syntax passed. The
+  bundle has not been transferred to Node2 and contains no credential, report,
+  dataset, model, application binary or release payload.
 - On 2026-07-25,
   `ops/prepare_node2_enterprise_rag_evaluation.py` added the gated handoff
   from the 158-case projection regression to a new full-evaluation root. It
