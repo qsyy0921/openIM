@@ -115,6 +115,15 @@ The Codex task may use the 15-minute `OpenIM Akashic Goal 心跳` to re-enter th
 
 ## Latest local evidence
 
+- On 2026-07-25, the Node2 evaluation runner was completed as one strict
+  three-stage workflow: it atomically creates the full retrieval report only
+  when absent, validates immutable existing evidence, and reaches Terra
+  generation and finalization only after the retrieval gate passes. A
+  deterministic POSIX harness passed both the ordered
+  `evaluate -> evaluate-generation -> finalize` path and the failed-report
+  no-overwrite path; the Windows ops suite passed `24` tests with the two
+  POSIX-only cases skipped. No Node2 evaluation was started by this local
+  orchestration check.
 - On 2026-07-25, the projection-remediation slice passed all-package Go tests
   and vet, strict SDD validation, shell syntax, repository validation and
   `git diff --check`, then was committed as `393cf18` and pushed by ordinary

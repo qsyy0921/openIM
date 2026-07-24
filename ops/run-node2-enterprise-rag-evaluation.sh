@@ -5,6 +5,7 @@ evaluation_root="${1:-/home/qsyy0921/MFL/eval/enterprise-rag}"
 application_commit="${2:-}"
 tenant_id="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
 member_id="bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+denied_member_id="cccccccc-cccc-4ccc-8ccc-cccccccccccc"
 retrieval_url="http://127.0.0.1:18083"
 generation_url="http://127.0.0.1:18082"
 embedding_model="qwen3-embedding:4b"
@@ -31,7 +32,7 @@ qa="$evaluation_root/qa.jsonl"
 retrieval_report="$evaluation_root/retrieval-report.json"
 generation_report="$evaluation_root/generation-report.json"
 final_report="$evaluation_root/final-report.json"
-for path in "$admin" "$database_runner" "$qa" "$retrieval_report"; do
+for path in "$admin" "$database_runner" "$qa"; do
   [[ -e "$path" ]] || {
     echo "required evaluation input is missing: $path" >&2
     exit 1
@@ -116,7 +117,31 @@ print("enterprise_rag_evaluation=passed")
 PY
 }
 
-validate_retrieval
+if [[ -f "$retrieval_report" ]]; then
+  validate_retrieval
+else
+  retrieval_tmp="$(mktemp "$evaluation_root/.retrieval-report.XXXXXXXX")"
+  trap 'rm -f -- "${retrieval_tmp:-}" "${generation_tmp:-}" "${final_tmp:-}"' EXIT
+  "$database_runner" "$admin" \
+    -mode evaluate \
+    -tenant-id "$tenant_id" \
+    -member-id "$member_id" \
+    -denied-member-id "$denied_member_id" \
+    -intelligence-url "$retrieval_url" \
+    -model "$embedding_model" \
+    -projection-revision "$projection_revision" \
+    -dimension 2560 \
+    -dense-minimum 0.45 \
+    -max-candidates 32 \
+    -qa "$qa" \
+    -limit 8 \
+    -timeout 300s \
+    -output "$retrieval_tmp" >/dev/null
+  mv -- "$retrieval_tmp" "$retrieval_report"
+  retrieval_tmp=""
+  validate_retrieval
+fi
+
 if [[ -f "$final_report" ]]; then
   validate_generation
   validate_final
@@ -127,7 +152,7 @@ if [[ -f "$generation_report" ]]; then
   validate_generation
 else
   generation_tmp="$(mktemp "$evaluation_root/.generation-report.XXXXXXXX")"
-  trap 'rm -f -- "${generation_tmp:-}" "${final_tmp:-}"' EXIT
+  trap 'rm -f -- "${retrieval_tmp:-}" "${generation_tmp:-}" "${final_tmp:-}"' EXIT
   "$database_runner" "$admin" \
     -mode evaluate-generation \
     -tenant-id "$tenant_id" \
@@ -149,7 +174,7 @@ else
 fi
 
 final_tmp="$(mktemp "$evaluation_root/.final-report.XXXXXXXX")"
-trap 'rm -f -- "${generation_tmp:-}" "${final_tmp:-}"' EXIT
+trap 'rm -f -- "${retrieval_tmp:-}" "${generation_tmp:-}" "${final_tmp:-}"' EXIT
 "$database_runner" "$admin" \
   -mode finalize \
   -tenant-id "$tenant_id" \

@@ -327,6 +327,12 @@ regression passes. Only then may the full 1,120-case evaluation be started
 again. Thresholds, candidate limits, models, ACL order, and no-fallback
 behavior remain unchanged.
 
+The Node2 evaluation runner owns all three ordered stages. It creates the full
+retrieval report atomically only when that report is absent; an existing report
+is immutable evidence and must pass the same schema, projection, security, and
+quality gates. Generation and finalization are unreachable until retrieval
+passes, so a failed report cannot be replaced by an automatic retry.
+
 ## Retrieval flow
 
 ```text
