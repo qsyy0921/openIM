@@ -410,6 +410,15 @@ Two independent clean Linux amd64 builds produced the same
 This is local implementation evidence only; a new immutable Node2 regression
 must still pass before the full evaluation is prepared.
 
+Node2 root `enterprise-rag-rankfusion-1eb7fd7` pins that application commit,
+binary digest, the unchanged 158-case QA digest, database wrapper, active-index
+report, regression runner, parent failure digest, and diagnostic digest. The
+distinct disabled oneshot service
+`openim-rag-rankfusion-regression-1eb7fd7.service` has `Restart=no` and was
+started exactly once at 2026-07-26 00:57:24 +08. Its report was absent at
+startup. While it runs, no retry, replacement root, full evaluation, production
+switch, generation request, or channel action is allowed.
+
 The Node2 evaluation runner owns all three ordered stages. It creates the full
 retrieval report atomically only when that report is absent; an existing report
 is immutable evidence and must pass the same schema, projection, security, and

@@ -44,7 +44,7 @@ This unit records slice state, durable evidence, and the next idempotent action.
 | Versioned retrieval projection | node2_regression_gate_failed | generation `da9e9c4f-8c70-4c4d-a797-efe11d06286e` is active at `2704/2704`; the immutable `71505d1` regression completed all 158 cases with Recall@5 `0.582278` and Recall@10 `0.797468`, while ACL/stale leakage stayed `0` and provenance/checksum integrity stayed `1.0`; the service and report SHA-256 `8c17ab20...17a29` remain preserved | diagnose the remaining ranking error without restarting or overwriting the failed regression; do not prepare the full evaluation |
 | Fixed multilingual reranker | node2_eval_verified | retrieval-only service exposes no generation routes; real 32-passage locked rerank is `3.378s` warm and 8-way embedding benchmark is `6.034s/32` | preserve exact model/revision and complete full evaluation |
 | Trusted citations and Knowledge Web | local_verified | post-generation checksum/support reauthorization, atomic save-time grant lock, durable authorized excerpts, role-gated Web module and 128 Web tests pass | complete visual and real channel acceptance |
-| Enterprise RAG evaluation | local_rank_fusion_verified_node2_regression_pending | the immutable sanitized report SHA-256 is `a7b33002...50e1d`; all 158 cases validate with no forbidden content fields; candidate-pool loss is 4, initial fusion Top-10 is 131, raw reranker Top-5/Top-10 is `92/126`, and the reranker demotes 18 initial Top-10 cases while rescuing 13; ADR-0012 implementation commit is `1eb7fd7`, and two clean Linux builds match SHA-256 `e84e09dd...54e0f4` | create one new immutable Node2 root/service and run the unchanged 158-case gate exactly once |
+| Enterprise RAG evaluation | node2_rank_fusion_regression_running | the immutable sanitized report SHA-256 is `a7b33002...50e1d`; ADR-0012 implementation commit is `1eb7fd7`, and two clean Linux builds match SHA-256 `e84e09dd...54e0f4`; independent root `enterprise-rag-rankfusion-1eb7fd7` and disabled `Restart=no` service pin all inputs and were started once at 00:57:24 +08 | only read service state and the immutable report path; do not restart or prepare full evaluation while running |
 | Node2 enterprise RAG E2E | local_harness_verified_remote_pending | four-format fixture generation, phase-separated Playwright, isolated A/B identity lifecycle, OpenIM/Telegram phase reconciliation, exact cleanup, and marker-scoped embedding/reranker/Terra failure harness are locally implemented; no Node2 RAG E2E has run | wait for the locked evaluation, deploy the immutable release, then execute the ordered three-channel matrix |
 | Enterprise RAG GitHub delivery | checkpoint_pushed | projection remediation is `393cf18`; bounded evaluation batching is `71505d1`; immutable regression failure evidence is `2ba9415`; the read-only ranking diagnostic is `3f18580`; all are pushed to `origin/codex/enterprise-rag-pipeline`; Draft PR remains gated on complete evaluation and Node2 acceptance | add measured diagnostic evidence and final commits before creating the Draft PR |
 | Migrations 0009-0031 | node2_verified | the Terra transition preserves canonical Luna history, and Node2 reports `31|sql/0031_telegram_identity_linking.sql` on release `akashic-node2-20260723-oidc-renew1` | preserve immutable-version and deployment guards |
@@ -128,8 +128,12 @@ The Codex task may use the 15-minute `OpenIM Akashic Goal 心跳` to re-enter th
   `1eb7fd7b9a1bbf2b4d6ed227d4ea756dcecbab7c` produced two independent clean
   Linux amd64 `knowledge-rag-admin` binaries with identical SHA-256
   `e84e09ddd430ce15b8f90826c577929afc0dbd042683bcc48d740c379454e0f4`.
-  No full evaluation, production switch, generation request, migration, or
-  channel action was started.
+  New owner-only Node2 root `enterprise-rag-rankfusion-1eb7fd7` and disabled
+  `Restart=no` service `openim-rag-rankfusion-regression-1eb7fd7.service`
+  validated those inputs and the preserved parent evidence, then started once
+  at 2026-07-26 00:57:24 +08 with no report present. No full evaluation,
+  production switch, generation request, migration, or channel action was
+  started.
 - On 2026-07-25, commit
   `71505d1b9eaf7b2ef064eb14955c28eb5e44f210` bounded evaluation QA
   embeddings to four texts per request and two requests in flight. Two
