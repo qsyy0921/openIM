@@ -41,10 +41,10 @@ This unit records slice state, durable evidence, and the next idempotent action.
 | Enterprise RAG SDD and API contract | local_verified | SDD, ADR-0010, OpenAPI, research record and adoption matrix are synchronized to the implemented boundary | preserve until final evidence pass |
 | Source upload and ingestion | local_verified_node2_isolated | strict four-format parser tests and immutable leased job pass locally; exact-object cleanup lease/three-attempt terminal integration and isolated pinned-MinIO put/download/delete pass on Node2 | repeat four real uploads in the production release |
 | pgvector hybrid index | node2_eval_verified | Node2 isolated PostgreSQL 17/pgvector 0.8.5 reached migration 0032 twice; dataset counts are `520/624/3224/520/2`; locked generation `dc117419-fb2c-43db-b069-6c0c9f303ac6` activated with `2704/2704` current Chunk projections | preserve the index and consume it only through the active generation |
-| Versioned retrieval projection | node2_disposable_verified | ADR-0011 implementation uses one shared `document-title-content-v1` projection for embedding, FTS and reranking; migration 0033 passed a 0032 upgrade with four historical backfills, a fresh install, repeat application and real Knowledge/Retrieval integration tests against isolated PostgreSQL 17/pgvector 0.8.5 | build an isolated new generation and run the bounded 158-case regression before any full evaluation or production switch |
+| Versioned retrieval projection | node2_index_verified_regression_runtime_failed | ADR-0011 implementation uses one shared `document-title-content-v1` projection; Node2 migration 0033 passed and generation `da9e9c4f-8c70-4c4d-a797-efe11d06286e` activated at `2704/2704`, but the first 158-case evaluation made a 128-question embedding request and failed closed at the fixed 180-second Worker timeout before writing a report | commit and clean-build the bounded four-text/two-worker evaluation fix, stage a new immutable regression root, and rerun only the missing regression phase |
 | Fixed multilingual reranker | node2_eval_verified | retrieval-only service exposes no generation routes; real 32-passage locked rerank is `3.378s` warm and 8-way embedding benchmark is `6.034s/32` | preserve exact model/revision and complete full evaluation |
 | Trusted citations and Knowledge Web | local_verified | post-generation checksum/support reauthorization, atomic save-time grant lock, durable authorized excerpts, role-gated Web module and 128 Web tests pass | complete visual and real channel acceptance |
-| Enterprise RAG evaluation | node2_retrieval_gate_failed | full 1,120-case retrieval completed with Recall@5 `0.768269`, Recall@10 `0.848077`, MRR `0.480470`, 158 answerable failures, ACL/stale leakage `0`, and provenance/checksum `1.0`; the generation service correctly stopped at `retrieval gate failed: recall_at_5` and produced no report | run the bounded ADR-0011 failed-case regression, then repeat full evaluation only if that regression justifies it |
+| Enterprise RAG evaluation | node2_retrieval_gate_failed_projection_regression_pending | the original full 1,120-case report remains failed at Recall@5 `0.768269`; the replacement projection index is active at `2704/2704`, while its first bounded regression ended on a preserved embedding timeout with no retrieval report and no inferred metric | rerun the bounded regression from a new immutable root after the exact batching fix passes local gates; start full evaluation only if its measured report passes |
 | Node2 enterprise RAG E2E | local_harness_verified_remote_pending | four-format fixture generation, phase-separated Playwright, isolated A/B identity lifecycle, OpenIM/Telegram phase reconciliation, exact cleanup, and marker-scoped embedding/reranker/Terra failure harness are locally implemented; no Node2 RAG E2E has run | wait for the locked evaluation, deploy the immutable release, then execute the ordered three-channel matrix |
 | Enterprise RAG GitHub delivery | checkpoint_pushed | projection remediation and its deployment guard are committed as `393cf18` and pushed to `origin/codex/enterprise-rag-pipeline`; Draft PR remains gated on the complete evaluation and Node2 acceptance | add measured evidence and final commits before creating the Draft PR |
 | Migrations 0009-0031 | node2_verified | the Terra transition preserves canonical Luna history, and Node2 reports `31|sql/0031_telegram_identity_linking.sql` on release `akashic-node2-20260723-oidc-renew1` | preserve immutable-version and deployment guards |
@@ -115,6 +115,19 @@ The Codex task may use the 15-minute `OpenIM Akashic Goal 心跳` to re-enter th
 
 ## Latest local evidence
 
+- On 2026-07-25, the Node2 projection service completed and activated
+  generation `da9e9c4f-8c70-4c4d-a797-efe11d06286e` with exactly
+  `2704/2704` `document-title-content-v1` search rows. It then failed before
+  creating `retrieval-regression-report.json`: the evaluator submitted 128 QA
+  questions in one embedding request, the locked Worker returned HTTP 502
+  after its 180-second Ollama read timeout, and systemd preserved exit status
+  `1`. Ollama remained active and showed the timed-out request being cancelled
+  at exactly three minutes. The source evaluator now uses four texts per
+  request with at most two requests in flight, preserves QA order, and fails
+  closed on any batch error. Focused retrieval tests pass; Windows could not
+  start `go test -race` because CGO is disabled. No service was retried, no
+  report was fabricated or overwritten, and no full evaluation, production
+  switch, migration, or channel message was started.
 - On 2026-07-25, a read-only Node2 storage audit confirmed that
   `/home/qsyy0921/MFL`, the evaluation PostgreSQL bind mount, local model
   directory and Docker root all resolve to ext4 `/dev/nvme0n1p3` on the

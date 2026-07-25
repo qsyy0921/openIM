@@ -9,6 +9,12 @@ import (
 	"fmt"
 	"math"
 	"os"
+	"sync"
+)
+
+const (
+	evaluationEmbeddingBatchSize = 4
+	evaluationEmbeddingWorkers   = 2
 )
 
 type QAEvidence struct {
@@ -100,6 +106,72 @@ type EvaluationConfig struct {
 	DeniedMemberID string
 }
 
+type evaluationEmbeddingResult struct {
+	start   int
+	vectors [][]float32
+	err     error
+}
+
+func (s *Store) embedEvaluationQuestions(ctx context.Context, cases []QACase) ([][]float32, error) {
+	if len(cases) == 0 {
+		return nil, errors.New("QA evaluation embedding input is empty")
+	}
+	vectors := make([][]float32, len(cases))
+	groupSize := evaluationEmbeddingBatchSize * evaluationEmbeddingWorkers
+	for groupStart := 0; groupStart < len(cases); groupStart += groupSize {
+		groupEnd := min(groupStart+groupSize, len(cases))
+		batchCount := (groupEnd - groupStart + evaluationEmbeddingBatchSize - 1) /
+			evaluationEmbeddingBatchSize
+		results := make([]evaluationEmbeddingResult, batchCount)
+		var wait sync.WaitGroup
+		for batchIndex, start := 0, groupStart; start < groupEnd; batchIndex, start =
+			batchIndex+1, start+evaluationEmbeddingBatchSize {
+			end := min(start+evaluationEmbeddingBatchSize, groupEnd)
+			texts := make([]string, end-start)
+			for index := start; index < end; index++ {
+				texts[index-start] = cases[index].Question
+			}
+			results[batchIndex].start = start
+			wait.Add(1)
+			go func(index int, batchTexts []string) {
+				defer wait.Done()
+				batch, err := s.embedder.Embed(ctx, batchTexts)
+				if err == nil {
+					err = s.validateEmbeddingBatch(batch, len(batchTexts))
+				}
+				if err != nil {
+					results[index].err = err
+					return
+				}
+				results[index].vectors = make([][]float32, len(batch.Vectors))
+				for vectorIndex := range batch.Vectors {
+					vector, normalizeErr := normalized(batch.Vectors[vectorIndex])
+					if normalizeErr != nil {
+						results[index].err = fmt.Errorf(
+							"normalize QA evaluation embedding: %w",
+							normalizeErr,
+						)
+						return
+					}
+					results[index].vectors[vectorIndex] = vector
+				}
+			}(batchIndex, texts)
+		}
+		wait.Wait()
+		for _, result := range results {
+			if result.err != nil {
+				return nil, fmt.Errorf(
+					"embed QA evaluation batch at case %d: %w",
+					result.start,
+					result.err,
+				)
+			}
+			copy(vectors[result.start:], result.vectors)
+		}
+	}
+	return vectors, nil
+}
+
 func Evaluate(ctx context.Context, store *Store, cases []QACase, config EvaluationConfig) (EvaluationReport, error) {
 	if store == nil || config.TenantID == "" || config.MemberID == "" ||
 		config.DeniedMemberID == "" || config.MemberID == config.DeniedMemberID || len(cases) == 0 {
@@ -113,30 +185,9 @@ func Evaluate(ctx context.Context, store *Store, cases []QACase, config Evaluati
 		Cases: len(cases), ACLDeniedCases: len(cases),
 		Failures: make([]EvaluationFailure, 0),
 	}
-	vectors := make([][]float32, len(cases))
-	for start := 0; start < len(cases); start += 128 {
-		end := start + 128
-		if end > len(cases) {
-			end = len(cases)
-		}
-		texts := make([]string, end-start)
-		for index := start; index < end; index++ {
-			texts[index-start] = cases[index].Question
-		}
-		batch, err := store.embedder.Embed(ctx, texts)
-		if err != nil {
-			return report, fmt.Errorf("embed QA evaluation batch: %w", err)
-		}
-		if err := store.validateEmbeddingBatch(batch, len(texts)); err != nil {
-			return report, err
-		}
-		for index := range batch.Vectors {
-			vector, err := normalized(batch.Vectors[index])
-			if err != nil {
-				return report, fmt.Errorf("normalize QA evaluation embedding: %w", err)
-			}
-			vectors[start+index] = vector
-		}
+	vectors, err := store.embedEvaluationQuestions(ctx, cases)
+	if err != nil {
+		return report, err
 	}
 	var recall5, recall10, reciprocalRanks, ndcg10, precision5, precision10 float64
 	var abstentions, integrity, checksumIntegrity, rankedItems, aclLeaks, staleLeaks float64

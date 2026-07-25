@@ -128,9 +128,15 @@ nDCG、Precision、不可回答检索率等必备指标存在且有限，核对�
   `document-title-content-v1` 标为 proposed；
 - ADR-0011 的代码和迁移 0033 已完成本地精确测试，并在 Node2 的隔离
   PostgreSQL 17/pgvector 0.8.5 中通过 0032 升级、四类历史行回填、全新
-  安装、重复执行和真实 Knowledge/Retrieval 集成测试。该证据不等于
-  评测数据库迁移或新索引激活；在 158 条失败集小规模回归通过前，不重跑
-  全量评测；
+  安装、重复执行和真实 Knowledge/Retrieval 集成测试。评测数据库随后
+  成功激活新的 `2704/2704` title-aware generation；
+- 第一次 158 条失败集回归没有产生质量报告。评测器将 128 个问题放入
+  单个 embedding 请求，固定 Worker 在 Ollama 顺序处理时于 180 秒超时，
+  返回 HTTP 502，服务以状态 1 失败。该失败被保留，不能解释为 Recall
+  失败或通过，也没有自动重试；
+- 评测器已在本地改为每请求 4 个问题、最多 2 个请求并发，并保持问题和
+  向量顺序。该修复通过精确测试，但尚未以 clean build 在新的不可变
+  Node2 回归根运行；在真实 158 条报告通过前仍不重跑全量评测；
 - Terra 120 条生成评测、生产发布和 Web/OpenIM/Telegram E2E 尚未
   完成。
 

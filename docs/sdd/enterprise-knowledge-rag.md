@@ -278,6 +278,12 @@ Bucket, URL, SQL identifier, log field, or authorization decision.
   batch exceeded the Worker's fixed `180s` dependency timeout. Higher
   concurrency remains an explicit operator override, not an automatic retry or
   fallback.
+- Retrieval evaluation embeds QA questions under the same measured Node2
+  envelope: four texts per request and at most two requests in flight. Results
+  are restored to QA order before retrieval begins. A failed, malformed,
+  mismatched, zero-norm, or timed-out batch fails the entire evaluation; it is
+  never retried with a larger timeout, alternate batch size, model, endpoint,
+  or provider.
 - Production deployment enumerates the PostgreSQL tenants that own a current
   published knowledge version and invokes the index builder once per tenant.
   It does not use the evaluation tenant as a production default. Every returned
@@ -326,6 +332,16 @@ Production activation remains **proposed** until a bounded failed-case
 regression passes. Only then may the full 1,120-case evaluation be started
 again. Thresholds, candidate limits, models, ACL order, and no-fallback
 behavior remain unchanged.
+
+The first Node2 projection regression activated and verified the complete
+`2704/2704` `document-title-content-v1` generation, but its evaluation phase
+failed before producing a retrieval report. The evaluator had grouped 128 QA
+questions into one embedding request; the fixed Worker timeout expired at
+180 seconds while Ollama was processing those inputs serially. The failure was
+preserved as an explicit HTTP 502 and no quality result was inferred. The
+evaluator now uses the measured four-by-two envelope above. This local fix must
+be committed, clean-built, staged in a new immutable regression root, and run
+against the already active generation before the regression can be claimed.
 
 The Node2 evaluation runner owns all three ordered stages. It creates the full
 retrieval report atomically only when that report is absent; an existing report
