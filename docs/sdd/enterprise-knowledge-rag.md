@@ -349,6 +349,26 @@ It is running once from the independent immutable root
 service remain preserved and disabled. No regression metric is claimed until
 the new service writes and validates its report.
 
+The immutable retry completed all 158 cases on 2026-07-25 and wrote
+`retrieval-regression-report.json` with SHA-256
+`8c17ab204b8d7714b0d26dab950f69dfba3133f2b73890b9ae75995340117a29`.
+The report satisfies schema, projection, ACL, stale-version, provenance, and
+checksum contracts, but fails the unchanged quality gate: Recall@5 is
+`0.582278`, below `0.60`; Recall@10 is `0.797468`, MRR is `0.393028`, and 32
+gold cases remain absent from Top-10. The service therefore terminated with
+`retrieval regression gate failed: recall_at_5`. No full evaluation,
+generation request, production switch, or channel action was started.
+
+A deterministic dataset-side diagnosis of those 32 Top-10 misses found 31
+`single_document` cases and one `numeric` case. Twenty-six are structurally
+similar runbook `触发条件` sections and five are SOP `办理步骤` sections; the
+questions and bodies share repeated templates while the topic identity is
+primarily carried by the title. This is evidence that title inclusion improved
+candidate identity but does not yet prove whether the remaining loss occurs in
+candidate fusion or final reranking. Any next change requires a new proposed
+ADR and bounded diagnostic evidence; the failed report and service must not be
+restarted or overwritten.
+
 The Node2 evaluation runner owns all three ordered stages. It creates the full
 retrieval report atomically only when that report is absent; an existing report
 is immutable evidence and must pass the same schema, projection, security, and
