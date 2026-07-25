@@ -453,16 +453,52 @@ func applyRerankerScores(items []candidate, response RerankResponse, config Conf
 		}
 		items[index].rerankScore = score
 	}
-	sort.Slice(items, func(i, j int) bool {
-		if items[i].rerankScore != items[j].rerankScore {
-			return items[i].rerankScore > items[j].rerankScore
+	fuseRetrievalAndRerankerRanks(items)
+	return nil
+}
+
+func fuseRetrievalAndRerankerRanks(items []candidate) {
+	fusionRanks := make(map[string]int, len(items))
+	for index := range items {
+		fusionRanks[items[index].evidence.ChunkID] = index + 1
+	}
+	rerankerOrder := make([]candidate, len(items))
+	copy(rerankerOrder, items)
+	sort.Slice(rerankerOrder, func(i, j int) bool {
+		if rerankerOrder[i].rerankScore != rerankerOrder[j].rerankScore {
+			return rerankerOrder[i].rerankScore > rerankerOrder[j].rerankScore
 		}
-		if items[i].fusionScore != items[j].fusionScore {
-			return items[i].fusionScore > items[j].fusionScore
+		if fusionRanks[rerankerOrder[i].evidence.ChunkID] != fusionRanks[rerankerOrder[j].evidence.ChunkID] {
+			return fusionRanks[rerankerOrder[i].evidence.ChunkID] < fusionRanks[rerankerOrder[j].evidence.ChunkID]
+		}
+		return rerankerOrder[i].evidence.ChunkID < rerankerOrder[j].evidence.ChunkID
+	})
+	rerankerRanks := make(map[string]int, len(items))
+	for index := range rerankerOrder {
+		rerankerRanks[rerankerOrder[index].evidence.ChunkID] = index + 1
+	}
+	rankScore := func(item candidate) float64 {
+		chunkID := item.evidence.ChunkID
+		return 1/float64(rrfK+fusionRanks[chunkID]) +
+			1/float64(rrfK+rerankerRanks[chunkID])
+	}
+	sort.Slice(items, func(i, j int) bool {
+		left, right := rankScore(items[i]), rankScore(items[j])
+		if left != right {
+			return left > right
+		}
+		leftFusion := fusionRanks[items[i].evidence.ChunkID]
+		rightFusion := fusionRanks[items[j].evidence.ChunkID]
+		if leftFusion != rightFusion {
+			return leftFusion < rightFusion
+		}
+		leftReranker := rerankerRanks[items[i].evidence.ChunkID]
+		rightReranker := rerankerRanks[items[j].evidence.ChunkID]
+		if leftReranker != rightReranker {
+			return leftReranker < rightReranker
 		}
 		return items[i].evidence.ChunkID < items[j].evidence.ChunkID
 	})
-	return nil
 }
 
 func selectEvidence(items []candidate, limit int) []Evidence {

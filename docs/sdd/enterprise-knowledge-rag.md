@@ -11,6 +11,7 @@ depends_on:
   - adr-0007
   - adr-0010
   - adr-0011
+  - adr-0012
 ---
 
 # Enterprise Knowledge RAG
@@ -389,6 +390,19 @@ oneshot service `openim-rag-ranking-diagnostic-3f18580.service` has no Restart
 policy and was started once. No diagnostic result is claimed until its
 owner-only report is complete and validated.
 
+The diagnostic completed successfully on 2026-07-25 without restart or database
+writes. Its sanitized report SHA-256 is
+`a7b330024e4522a45e4c4b99eefe2cf30a2f4fc08f6ae00904bb9ca1ca550e1d`.
+All 158 QA IDs are unique, every per-QA gold Chunk ID is unique, rank contracts
+hold, and recursive inspection found no question, answer, title, content,
+excerpt, or score field. Four cases lack gold evidence in the candidate pool.
+Initial RRF places gold evidence in Top-10 for 131 cases. The raw reranker
+rescues 13 cases that were outside fusion Top-10, but demotes 18 fusion Top-10
+cases below Top-10; its final distribution is 92 Top-5, 34 ranks 6-10, and 32
+Top-10 misses. ADR-0012 therefore proposes an equal-weight reciprocal-rank
+fusion of initial RRF rank and required reranker rank. It does not alter ACL,
+candidate bounds, models, thresholds, or fail-closed behavior.
+
 The Node2 evaluation runner owns all three ordered stages. It creates the full
 retrieval report atomically only when that report is absent; an existing report
 is immutable evidence and must pass the same schema, projection, security, and
@@ -423,7 +437,8 @@ OIDC principal
   -> lexical Top-32
   -> dense Top-32
   -> RRF Top-32
-  -> fixed local reranker Top-8
+  -> fixed local reranker rank
+  -> equal-weight retrieval/reranker reciprocal-rank fusion Top-8
   -> document diversity + evidence byte budget
   -> Citation envelope
 ```
@@ -447,7 +462,10 @@ request, cache, prompt, log, Trace, or evaluation report.
 - Lexical order: `ts_rank_cd DESC, chunk_id ASC`.
 - Dense order: cosine distance ASC, `chunk_id ASC`.
 - Fusion: RRF score DESC, best component rank ASC, `chunk_id ASC`.
-- Rerank: score DESC, RRF score DESC, `chunk_id ASC`.
+- Raw rerank: score DESC, initial fusion rank ASC, `chunk_id ASC`.
+- Final rank: equal-weight reciprocal-rank fusion of initial fusion rank and
+  raw reranker rank; ties use initial fusion rank, raw reranker rank, then
+  `chunk_id ASC`.
 - Citation IDs are reassigned `C1..Cn` only after final ordering.
 
 ## Reranker contract
