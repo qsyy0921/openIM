@@ -402,6 +402,13 @@ cases below Top-10; its final distribution is 92 Top-5, 34 ranks 6-10, and 32
 Top-10 misses. ADR-0012 therefore proposes an equal-weight reciprocal-rank
 fusion of initial RRF rank and required reranker rank. It does not alter ACL,
 candidate bounds, models, thresholds, or fail-closed behavior.
+Implementation commit `1eb7fd7b9a1bbf2b4d6ed227d4ea756dcecbab7c`
+passes all Platform API tests, vet, repository/SDD validation, and diff checks.
+Two independent clean Linux amd64 builds produced the same
+`knowledge-rag-admin` SHA-256
+`e84e09ddd430ce15b8f90826c577929afc0dbd042683bcc48d740c379454e0f4`.
+This is local implementation evidence only; a new immutable Node2 regression
+must still pass before the full evaluation is prepared.
 
 The Node2 evaluation runner owns all three ordered stages. It creates the full
 retrieval report atomically only when that report is absent; an existing report
