@@ -340,8 +340,14 @@ questions into one embedding request; the fixed Worker timeout expired at
 180 seconds while Ollama was processing those inputs serially. The failure was
 preserved as an explicit HTTP 502 and no quality result was inferred. The
 evaluator now uses the measured four-by-two envelope above. This local fix must
-be committed, clean-built, staged in a new immutable regression root, and run
-against the already active generation before the regression can be claimed.
+be clean-built and run against the already active generation before the
+regression can be claimed. Commit `71505d1` produced a deterministic Linux
+amd64 evaluator with SHA-256
+`a2ae60da2a96db87e54286212b9f01477d66686239d9cdbdc68e7d6f13b9476b`.
+It is running once from the independent immutable root
+`enterprise-rag-projection-0033-batchfix-71505d1`; the original failed root and
+service remain preserved and disabled. No regression metric is claimed until
+the new service writes and validates its report.
 
 The Node2 evaluation runner owns all three ordered stages. It creates the full
 retrieval report atomically only when that report is absent; an existing report

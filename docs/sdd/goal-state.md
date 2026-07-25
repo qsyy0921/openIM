@@ -41,12 +41,12 @@ This unit records slice state, durable evidence, and the next idempotent action.
 | Enterprise RAG SDD and API contract | local_verified | SDD, ADR-0010, OpenAPI, research record and adoption matrix are synchronized to the implemented boundary | preserve until final evidence pass |
 | Source upload and ingestion | local_verified_node2_isolated | strict four-format parser tests and immutable leased job pass locally; exact-object cleanup lease/three-attempt terminal integration and isolated pinned-MinIO put/download/delete pass on Node2 | repeat four real uploads in the production release |
 | pgvector hybrid index | node2_eval_verified | Node2 isolated PostgreSQL 17/pgvector 0.8.5 reached migration 0032 twice; dataset counts are `520/624/3224/520/2`; locked generation `dc117419-fb2c-43db-b069-6c0c9f303ac6` activated with `2704/2704` current Chunk projections | preserve the index and consume it only through the active generation |
-| Versioned retrieval projection | node2_index_verified_regression_runtime_failed | ADR-0011 implementation uses one shared `document-title-content-v1` projection; Node2 migration 0033 passed and generation `da9e9c4f-8c70-4c4d-a797-efe11d06286e` activated at `2704/2704`, but the first 158-case evaluation made a 128-question embedding request and failed closed at the fixed 180-second Worker timeout before writing a report | commit and clean-build the bounded four-text/two-worker evaluation fix, stage a new immutable regression root, and rerun only the missing regression phase |
+| Versioned retrieval projection | node2_regression_running | generation `da9e9c4f-8c70-4c4d-a797-efe11d06286e` is active at `2704/2704`; commit `71505d1` bounds QA embedding to four texts/two requests and its digest-pinned binary is running once from independent root `enterprise-rag-projection-0033-batchfix-71505d1`, while the original timeout failure remains preserved and disabled | wait for the new 158-case report without restarting or modifying either root |
 | Fixed multilingual reranker | node2_eval_verified | retrieval-only service exposes no generation routes; real 32-passage locked rerank is `3.378s` warm and 8-way embedding benchmark is `6.034s/32` | preserve exact model/revision and complete full evaluation |
 | Trusted citations and Knowledge Web | local_verified | post-generation checksum/support reauthorization, atomic save-time grant lock, durable authorized excerpts, role-gated Web module and 128 Web tests pass | complete visual and real channel acceptance |
-| Enterprise RAG evaluation | node2_retrieval_gate_failed_projection_regression_pending | the original full 1,120-case report remains failed at Recall@5 `0.768269`; the replacement projection index is active at `2704/2704`, while its first bounded regression ended on a preserved embedding timeout with no retrieval report and no inferred metric | rerun the bounded regression from a new immutable root after the exact batching fix passes local gates; start full evaluation only if its measured report passes |
+| Enterprise RAG evaluation | node2_retrieval_gate_failed_projection_regression_running | the original full 1,120-case report remains failed at Recall@5 `0.768269`; the title-aware index is active and the clean `71505d1` evaluator is currently running the isolated 158-case regression with no report yet | validate the immutable regression report when the service terminates; start full evaluation only if its measured gate passes |
 | Node2 enterprise RAG E2E | local_harness_verified_remote_pending | four-format fixture generation, phase-separated Playwright, isolated A/B identity lifecycle, OpenIM/Telegram phase reconciliation, exact cleanup, and marker-scoped embedding/reranker/Terra failure harness are locally implemented; no Node2 RAG E2E has run | wait for the locked evaluation, deploy the immutable release, then execute the ordered three-channel matrix |
-| Enterprise RAG GitHub delivery | checkpoint_pushed | projection remediation and its deployment guard are committed as `393cf18` and pushed to `origin/codex/enterprise-rag-pipeline`; Draft PR remains gated on the complete evaluation and Node2 acceptance | add measured evidence and final commits before creating the Draft PR |
+| Enterprise RAG GitHub delivery | checkpoint_pushed | projection remediation is `393cf18`; bounded evaluation batching and preserved failure evidence are committed as `71505d1` and pushed to `origin/codex/enterprise-rag-pipeline`; Draft PR remains gated on complete evaluation and Node2 acceptance | add measured evidence and final commits before creating the Draft PR |
 | Migrations 0009-0031 | node2_verified | the Terra transition preserves canonical Luna history, and Node2 reports `31|sql/0031_telegram_identity_linking.sql` on release `akashic-node2-20260723-oidc-renew1` | preserve immutable-version and deployment guards |
 | Fixed Responses generation | node2_verified | source and deployed catalog require `gpt-5.6-terra`, `reasoning.effort=high`, `POST /v1/responses`, `stream=false`, and no fallback; real Responses, OpenIM ACL-RAG, and cited Telegram delivery pass | preserve candidate-only, ACL, citation, and no-fallback boundaries |
 | Routing 36/190 | local_verified | fresh deterministic report is `190/190`, status accuracy `1.0`, Recall@1 `1.0` | preserve the regenerated report and rerun only if routing code changes |
@@ -115,6 +115,20 @@ The Codex task may use the 15-minute `OpenIM Akashic Goal 心跳` to re-enter th
 
 ## Latest local evidence
 
+- On 2026-07-25, commit
+  `71505d1b9eaf7b2ef064eb14955c28eb5e44f210` bounded evaluation QA
+  embeddings to four texts per request and two requests in flight. Two
+  deterministic clean Linux amd64 builds matched SHA-256
+  `a2ae60da2a96db87e54286212b9f01477d66686239d9cdbdc68e7d6f13b9476b`.
+  The old failed service is disabled but remains failed with status `1`; its
+  root and journal were not changed. A new owner-only root
+  `enterprise-rag-projection-0033-batchfix-71505d1` preserves the exact
+  failed-set, full QA, database wrapper, runner, active index report, and a new
+  clean-build manifest. Its distinct user service passed unit validation,
+  remains disabled with no Restart policy, and was started once at 14:26 +08.
+  It validated the existing index immediately and is now running only the
+  missing 158-case regression. No full evaluation or production action has
+  started.
 - On 2026-07-25, the Node2 projection service completed and activated
   generation `da9e9c4f-8c70-4c4d-a797-efe11d06286e` with exactly
   `2704/2704` `document-title-content-v1` search rows. It then failed before
