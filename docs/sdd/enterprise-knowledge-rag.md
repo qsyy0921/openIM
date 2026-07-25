@@ -378,6 +378,17 @@ credentials, or unauthorized candidates, and it performs no database write.
 This diagnostic must run from a new digest-pinned binary and independent
 owner-only root; it cannot reuse or alter either failed regression root.
 
+Commit `3f18580` implements that diagnostic and passes all Platform API Go
+tests, vet, repository validation, strict SDD validation, and diff checks. Two
+clean Linux amd64 builds matched SHA-256
+`fe54d49e85b1d8d752bb8f4fc8e5ea7df92795c5b24fe30c94c8eaef6067293f`.
+Node2 root `enterprise-rag-ranking-diagnostic-3f18580` locks that binary, the
+158-case input, evaluation database wrapper, parent failed-report digest,
+runner, service, projection, and no-write contract. Its distinct disabled
+oneshot service `openim-rag-ranking-diagnostic-3f18580.service` has no Restart
+policy and was started once. No diagnostic result is claimed until its
+owner-only report is complete and validated.
+
 The Node2 evaluation runner owns all three ordered stages. It creates the full
 retrieval report atomically only when that report is absent; an existing report
 is immutable evidence and must pass the same schema, projection, security, and
