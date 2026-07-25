@@ -198,6 +198,13 @@ func (s *Store) rerankedCandidatesWithVector(ctx context.Context, query Query, t
 	if len(candidates) == 0 {
 		return []candidate{}, nil
 	}
+	if err := s.rerankCandidates(ctx, query.Text, candidates); err != nil {
+		return nil, err
+	}
+	return candidates, nil
+}
+
+func (s *Store) rerankCandidates(ctx context.Context, queryText string, candidates []candidate) error {
 	rerankInput := make([]RerankCandidate, len(candidates))
 	for index := range candidates {
 		content, err := knowledgeprojection.RerankerText(
@@ -206,21 +213,21 @@ func (s *Store) rerankedCandidatesWithVector(ctx context.Context, query Query, t
 			maxRerankerTextBytes,
 		)
 		if err != nil {
-			return nil, fmt.Errorf("build knowledge reranker projection: %w", err)
+			return fmt.Errorf("build knowledge reranker projection: %w", err)
 		}
 		rerankInput[index] = RerankCandidate{
 			CandidateID: candidates[index].evidence.ChunkID,
 			Content:     content,
 		}
 	}
-	reranked, err := s.reranker.Rerank(ctx, query.Text, rerankInput)
+	reranked, err := s.reranker.Rerank(ctx, queryText, rerankInput)
 	if err != nil {
-		return nil, fmt.Errorf("rerank authorized knowledge evidence: %w", err)
+		return fmt.Errorf("rerank authorized knowledge evidence: %w", err)
 	}
 	if err := applyRerankerScores(candidates, reranked, s.config); err != nil {
-		return nil, err
+		return err
 	}
-	return candidates, nil
+	return nil
 }
 
 func (s *Store) authorizedCandidates(ctx context.Context, query Query, terms []string, queryVector []float32) ([]candidate, error) {

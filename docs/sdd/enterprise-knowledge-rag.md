@@ -369,6 +369,15 @@ candidate fusion or final reranking. Any next change requires a new proposed
 ADR and bounded diagnostic evidence; the failed report and service must not be
 restarted or overwritten.
 
+The next diagnostic is a read-only, fail-closed `diagnose-ranking` admin mode.
+It uses the same bounded QA embedding, authorized candidate SQL, RRF ordering,
+and locked reranker as production retrieval, but emits only QA IDs, expected
+Chunk IDs, candidate presence, and lexical, dense, fusion, and reranker ranks.
+It does not emit questions, answers, titles, Chunk content, excerpts, scores,
+credentials, or unauthorized candidates, and it performs no database write.
+This diagnostic must run from a new digest-pinned binary and independent
+owner-only root; it cannot reuse or alter either failed regression root.
+
 The Node2 evaluation runner owns all three ordered stages. It creates the full
 retrieval report atomically only when that report is absent; an existing report
 is immutable evidence and must pass the same schema, projection, security, and

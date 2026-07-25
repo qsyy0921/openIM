@@ -28,7 +28,7 @@ func main() {
 }
 
 func run() error {
-	mode := flag.String("mode", "", "index, evaluate, evaluate-generation, or finalize")
+	mode := flag.String("mode", "", "index, diagnose-ranking, evaluate, evaluate-generation, or finalize")
 	databaseURL := flag.String("database-url", env("PLATFORM_DATABASE_URL", ""), "PostgreSQL URL")
 	intelligenceURL := flag.String("intelligence-url", env("PLATFORM_RETRIEVAL_INTELLIGENCE_URL", "http://127.0.0.1:18083"), "Retrieval Worker URL")
 	generationURL := flag.String("generation-url", env("PLATFORM_GENERATION_INTELLIGENCE_URL", ""), "Generation Worker URL; defaults to the configured Intelligence Worker URL")
@@ -66,8 +66,9 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	if *mode != "index" && *mode != "evaluate" && *mode != "evaluate-generation" && *mode != "finalize" {
-		return errors.New("-mode must be index, evaluate, evaluate-generation, or finalize")
+	if *mode != "index" && *mode != "diagnose-ranking" && *mode != "evaluate" &&
+		*mode != "evaluate-generation" && *mode != "finalize" {
+		return errors.New("-mode must be index, diagnose-ranking, evaluate, evaluate-generation, or finalize")
 	}
 	if strings.TrimSpace(*projectionRevision) != knowledgeprojection.Revision {
 		return errors.New("-projection-revision violates the compiled retrieval projection contract")
@@ -145,6 +146,21 @@ func run() error {
 			strings.TrimSpace(*tenantID),
 			*batchSize,
 			*embeddingWorkers,
+		)
+	} else if *mode == "diagnose-ranking" {
+		if strings.TrimSpace(*tenantID) == "" || strings.TrimSpace(*memberID) == "" {
+			return errors.New("-tenant-id and -member-id are required for ranking diagnostics")
+		}
+		cases, loadErr := retrieval.LoadQACases(*qaPath)
+		if loadErr != nil {
+			return loadErr
+		}
+		result, err = retrieval.DiagnoseRanking(
+			ctx,
+			store,
+			cases,
+			strings.TrimSpace(*tenantID),
+			strings.TrimSpace(*memberID),
 		)
 	} else if *mode == "evaluate" {
 		if strings.TrimSpace(*tenantID) == "" || strings.TrimSpace(*memberID) == "" ||
