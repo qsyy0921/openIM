@@ -419,6 +419,25 @@ started exactly once at 2026-07-26 00:57:24 +08. Its report was absent at
 startup. While it runs, no retry, replacement root, full evaluation, production
 switch, generation request, or channel action is allowed.
 
+The rank-fusion regression completed normally at 05:05:43 +08. Immutable report
+SHA-256
+`9b8ba74789115780e81880677db42889f24e51d07284c7d158c96e6ec9e1d46f`
+passes the unchanged bounded gate: Recall@5 `0.664557`, Recall@10 `0.867089`,
+MRR `0.431846`, nDCG@10 `0.506764`, ACL and stale-version leakage `0`, and
+provenance/checksum integrity `1.0`.
+
+Exact tooling commit `ac8b945` then prepared independent immutable full root
+`enterprise-rag-full-rankfusion-1eb7fd7`. Its manifest SHA-256 is
+`2a12948aea5e2cd0897603183da711f976e37c305f94d4ad4fd49b98509df969`
+and pins the application, binary, full QA, database wrapper, projection
+generation, passed regression evidence, and evaluation runner. A second
+preparation call performed read-only validation and returned
+`already_prepared`. Disabled `Restart=no` service
+`openim-rag-full-rankfusion-1eb7fd7.service` started exactly once at
+2026-07-26 05:20:51 +08. It is currently running only the atomic 1,120-case
+retrieval stage. Generation, finalization, production, and channel E2E remain
+gated.
+
 The Node2 evaluation runner owns all three ordered stages. It creates the full
 retrieval report atomically only when that report is absent; an existing report
 is immutable evidence and must pass the same schema, projection, security, and
